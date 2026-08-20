@@ -1,9 +1,14 @@
 node_modules/
 dist/
 *.log
-config.json
-auth.json
-cache/
 reference/
 web/node_modules/
 web/dist/
+
+# Runtime state. auth.json holds an OAuth token with full access to the Twitch
+# account, and steam.json holds the Steam Web API key - never commit either.
+config.json
+auth.json
+steam.json
+cache/
+data/

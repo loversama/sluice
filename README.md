@@ -20,7 +20,31 @@ problem. This bot keeps that layer and throws the browser away.
 Practical effect: a few HTTPS requests per minute and some idle websockets. Runs comfortably
 on a Raspberry Pi.
 
-## Setup
+## Docker
+
+The image builds the daemon and the dashboard and serves both.
+
+```sh
+docker compose up -d --build
+docker compose logs -f          # the login code appears here on first run
+```
+
+Then open <http://127.0.0.1:4400>.
+
+Runtime state lives in `./data` (`config.json`, `auth.json`, `steam.json`), mounted as a
+volume so credentials survive rebuilds. That directory is git-ignored; **never commit it** -
+`auth.json` holds an OAuth token with full access to your Twitch account and `steam.json`
+holds your Steam Web API key.
+
+The port is published to `127.0.0.1` only. The container binds `0.0.0.0` because it must to
+be reachable at all, but what is actually exposed is the mapping in `docker-compose.yml`. To
+reach the dashboard from another machine, put it behind Tailscale or a reverse proxy rather
+than widening that line - the dashboard has no login of its own.
+
+If you have already logged in outside Docker, copy `auth.json` into `./data` and the
+container will start already authorized.
+
+## Setup (without Docker)
 
 Requires Node 20+.
 

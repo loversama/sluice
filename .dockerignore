@@ -1,0 +1,11 @@
+node_modules
+web/node_modules
+dist
+web/dist
+reference
+data
+.git
+*.log
+config.json
+auth.json
+steam.json

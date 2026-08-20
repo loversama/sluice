@@ -112,6 +112,8 @@ export class Miner extends EventEmitter {
     /** Channel login -> time it becomes eligible again after a failure. */
     private readonly channelCooldowns = new Map<string, number>();
     private readonly claimedDropIds = new Set<string>();
+    /** Drops Twitch refused to claim, so a doomed claim is not retried every refresh. */
+    private readonly failedClaimIds = new Set<string>();
 
     private pubsub: PubSubPool | null = null;
     private currentChannel: Channel | null = null;
@@ -752,7 +754,7 @@ export class Miner extends EventEmitter {
     }
 
     private async claim(drop: Drop, campaign: Campaign): Promise<void> {
-        if (this.claimedDropIds.has(drop.id)) {
+        if (this.claimedDropIds.has(drop.id) || this.failedClaimIds.has(drop.id)) {
             return;
         }
         // Twitch does not always hand back an instance ID, but it is composed of IDs we
@@ -783,7 +785,10 @@ export class Miner extends EventEmitter {
                 this.pushFeed("info", `Claimed ${drop.rewardNames} (${campaign.gameName})`);
                 this.emit("drop-claimed", { drop, campaign });
             } else {
-                logger.warn(`Twitch did not confirm the claim for ${drop.name}`);
+                // Almost always a drop Twitch considers ineligible rather than a transient
+                // failure, so stop asking rather than repeating it every refresh.
+                this.failedClaimIds.add(drop.id);
+                logger.debug(`Twitch did not confirm the claim for ${drop.name}`);
             }
         } catch (error) {
             logger.error(`Failed to claim ${drop.name}:`, error);

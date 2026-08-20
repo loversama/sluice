@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { EventEmitter } from "node:events";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 
@@ -123,11 +123,20 @@ export class ApiServer {
             this.server.listen(port, host, () => {
                 logger.info(`Dashboard listening on http://${host}:${port}`);
                 if (host !== "127.0.0.1" && host !== "localhost") {
-                    // The process holds an OAuth token; exposing it is opt-in and worth saying.
-                    logger.warn(
-                        "The dashboard is bound to a non-local address. Anyone who can reach " +
-                            "it can read your Twitch campaign data and change settings.",
-                    );
+                    // In a container, binding wide is required for the port to work at all -
+                    // exposure is decided by the port mapping, so the blunt warning would be
+                    // misleading. Outside one, it means what it says.
+                    if (existsSync("/.dockerenv")) {
+                        logger.info(
+                            "Bound to all interfaces inside the container. What is actually " +
+                                "reachable is set by the port mapping in docker-compose.yml.",
+                        );
+                    } else {
+                        logger.warn(
+                            "The dashboard is bound to a non-local address. Anyone who can " +
+                                "reach it can read your Twitch campaign data and change settings.",
+                        );
+                    }
                 }
                 resolvePromise();
             });

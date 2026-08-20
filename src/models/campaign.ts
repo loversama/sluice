@@ -58,7 +58,11 @@ export class Drop {
      * to leave a finished drop uncollected.
      */
     get isClaimable(): boolean {
-        return !this.isClaimed && this.currentMinutes >= this.requiredMinutes;
+        // requiredMinutes of 0 means this is not a watch-time drop at all - an event or
+        // gift drop that Twitch grants by other means. Without this guard `0 >= 0` makes
+        // every such drop look permanently ready, and each refresh retries a claim that
+        // Twitch will never accept.
+        return this.requiredMinutes > 0 && !this.isClaimed && this.currentMinutes >= this.requiredMinutes;
     }
 
     get isActive(): boolean {

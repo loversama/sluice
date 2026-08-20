@@ -1,0 +1,19 @@
+services:
+    twitch-drops-bot:
+        build: .
+        image: twitch-drops-bot
+        container_name: twitch-drops-bot
+        restart: unless-stopped
+        ports:
+            # Published to loopback only. The dashboard has no login of its own and the
+            # process holds an OAuth token for your Twitch account, so reaching it from
+            # elsewhere should go through Tailscale or a reverse proxy, not this line.
+            # Change to "4400:4400" only if you understand that.
+            - "127.0.0.1:4400:4400"
+        volumes:
+            # config.json, auth.json and steam.json live here and survive rebuilds.
+            - ./data:/data
+        environment:
+            - TZ=${TZ:-Europe/London}
+        # The device-code login prints to the log on first run; the dashboard shows it too.
+        stop_grace_period: 10s
