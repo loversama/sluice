@@ -25,6 +25,8 @@ export interface PubSubEvents {
     "stream-down": [{ channelId: string }];
     viewcount: [{ channelId: string; viewers: number }];
     "points-claim-available": [{ channelId: string; claimId: string }];
+    /** A drop reward landed; the inventory is now stale. */
+    "reward-notification": [{ notificationId: string }];
 }
 
 /**
@@ -220,6 +222,23 @@ class PubSubSocket extends EventEmitter {
                 }
                 return;
 
+            case "onsite-notifications":
+                if (type === "create-notification") {
+                    const notification = (data["notification"] ?? {}) as Record<string, unknown>;
+                    const kind = String(notification["type"] ?? "");
+                    // Twitch announces a granted reward here, which is a second, faster
+                    // signal that the inventory has changed.
+                    if (
+                        kind === "user_drop_reward_reminder_notification" ||
+                        kind === "quests_viewer_reward_campaign_earned_emote"
+                    ) {
+                        this.emit("reward-notification", {
+                            notificationId: String(notification["id"] ?? ""),
+                        });
+                    }
+                }
+                return;
+
             case "community-points-user-v1":
                 if (type === "claim-available") {
                     const claim = (data["claim"] ?? {}) as Record<string, unknown>;
@@ -301,6 +320,7 @@ export class PubSubPool extends EventEmitter {
             "stream-down",
             "viewcount",
             "points-claim-available",
+            "reward-notification",
         ] as const) {
             socket.on(event, (payload) => this.emit(event, payload));
         }

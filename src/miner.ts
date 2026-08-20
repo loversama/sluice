@@ -12,8 +12,12 @@ import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Give up on a channel that produces no progress within this window and try another. */
-const NO_PROGRESS_TIMEOUT_MS = 8 * 60_000;
+/**
+ * Beats sent without Twitch confirming any progress before we conclude the channel is not
+ * actually earning. Counted in beats rather than wall-clock time so a stalled or failing
+ * connection does not masquerade as a stalled campaign.
+ */
+const MAX_UNCONFIRMED_BEATS = 15;
 /** How long a channel that failed stays out of the rotation. */
 const CHANNEL_COOLDOWN_MS = 30 * 60_000;
 /** How many campaigns to try per cycle before giving the loop a rest. */
@@ -24,6 +28,21 @@ const MAX_CAMPAIGNS_PER_CYCLE = 12;
  * https://help.twitch.tv/s/article/mission-based-drops#claiming
  */
 const CLAIM_GRACE_MS = 24 * 60 * 60_000;
+/** Eligibility checks cost a request each, so cap them per search tier. */
+const MAX_ELIGIBILITY_CHECKS = 8;
+
+/**
+ * Channels to keep PubSub subscriptions for. Each costs one topic, and the pool allows
+ * several hundred, so this is a comfort limit rather than a hard one.
+ */
+const MAX_TRACKED_CHANNELS = 150;
+
+/** Streamers running an untagged campaign almost always say so in the title. */
+const DROPS_IN_TITLE = /\bdrops?\b/i;
+
+function mentionsDrops(channel: Channel): boolean {
+    return DROPS_IN_TITLE.test(channel.stream?.title ?? "");
+}
 
 export interface MinerEvents {
     "campaigns-updated": [Campaign[]];
@@ -115,6 +134,21 @@ export class Miner extends EventEmitter {
     private randomKeys = new Map<string, number>();
     private steam: SteamLibrary | null = null;
     private boundaryTimer: NodeJS.Timeout | null = null;
+    /** Watch beats accepted since Twitch last confirmed progress. */
+    private unconfirmedBeats = 0;
+    /**
+     * Channels we hold a live status subscription for, whether or not they are streaming.
+     *
+     * Tracking allow-list streamers while they are offline is the point: a campaign
+     * restricted to a handful of channels is otherwise only minable if one happens to be
+     * live at the moment we look, and we would miss the rest of their stream.
+     */
+    private readonly watchlist = new Map<
+        string,
+        { id: string; login: string; displayName: string; online: boolean; campaignIds: Set<string> }
+    >();
+    /** Channel login -> ID, so preferred channels are only resolved once. */
+    private readonly channelIdCache = new Map<string, string>();
 
     constructor(
         private readonly auth: AuthState,
@@ -283,6 +317,8 @@ export class Miner extends EventEmitter {
         this.attachPubSubHandlers(this.pubsub);
         // Drop events are account-wide, so this one subscription covers every campaign.
         this.pubsub.listen(`user-drop-events.${this.auth.userId}`);
+        // Reward notifications are a faster signal that the inventory changed than polling.
+        this.pubsub.listen(`onsite-notifications.${this.auth.userId}`);
 
         await this.refreshCampaigns();
         this.scheduleCampaignRefresh();
@@ -415,19 +451,61 @@ export class Miner extends EventEmitter {
     }
 
     /**
-     * Find a channel that will actually earn progress for this campaign: preferred channels
-     * first, then the game directory filtered to drops-enabled streams.
+     * Find a channel that will actually earn progress for this campaign.
+     *
+     * Searched in widening tiers, stopping as soon as a tier yields a channel that Twitch
+     * confirms grants the campaign:
+     *   1. the campaign's allow-list, or the user's preferred channels
+     *   2. the game directory filtered to drops-enabled streams
+     *   3. untagged streams whose title mentions drops
+     *
+     * Tier 3 exists because the drops-enabled filter is not reliable: streamers running a
+     * campaign sometimes go untagged, and they usually say so in the title instead. The
+     * eligibility check below is what actually decides, so the title is only a cheap way to
+     * pick which untagged streams are worth a lookup.
      */
     private async findChannel(campaign: Campaign): Promise<Channel | null> {
         const allowed = campaign.allowedChannelIds;
-        const candidates: Channel[] = [];
 
         // A campaign restricted to specific channels must be mined on one of them.
         const preferred = campaign.allowedChannelLogins.length
             ? campaign.allowedChannelLogins
             : this.config.preferredChannels;
 
-        for (const login of preferred) {
+        const tiers: (() => Promise<Channel[]>)[] = [
+            // Channels PubSub already told us are live, so a failover costs no directory
+            // lookups and no waiting.
+            () => this.channelsFromLogins(this.onlineTrackedLogins(campaign), campaign),
+            () => this.channelsFromLogins(preferred, campaign),
+            () => this.channelsFromDirectory(campaign, allowed, { dropsOnly: true }),
+            () => this.channelsFromDirectory(campaign, allowed, { dropsOnly: false }),
+        ];
+
+        for (const tier of tiers) {
+            const candidates = await tier().catch(() => []);
+            const found = await this.firstEligible(candidates, campaign);
+            if (found) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /** Tracked channels currently known to be live and relevant to this campaign. */
+    private onlineTrackedLogins(campaign: Campaign): string[] {
+        return [...this.watchlist.values()]
+            .filter(
+                (entry) =>
+                    entry.online &&
+                    (entry.campaignIds.has(campaign.id) || entry.campaignIds.has("preferred")),
+            )
+            .map((entry) => entry.login);
+    }
+
+    /** Resolve explicit channel logins, keeping only those live with the campaign's game. */
+    private async channelsFromLogins(logins: string[], campaign: Campaign): Promise<Channel[]> {
+        const channels: Channel[] = [];
+        for (const login of logins) {
             if (this.isOnCooldown(login)) {
                 continue;
             }
@@ -439,41 +517,61 @@ export class Miner extends EventEmitter {
             if (info.broadcastSettings?.game?.id !== campaign.gameId) {
                 continue;
             }
-            const channel = new Channel(
-                info.id,
-                login.toLowerCase(),
-                login,
-                this.auth,
-                this.gql,
-            );
+            const channel = new Channel(info.id, login.toLowerCase(), login, this.auth, this.gql);
             await channel.refresh();
-            candidates.push(channel);
+            channels.push(channel);
         }
+        return channels;
+    }
 
-        if (candidates.length === 0) {
-            const slug = await this.resolveSlug(campaign);
-            if (slug) {
-                const nodes = await this.gql
-                    .getGameChannels(slug, { dropsOnly: true })
-                    .catch(() => []);
-                for (const node of nodes) {
-                    const channel = Channel.fromDirectory(node, this.auth, this.gql);
-                    if (!channel || this.isOnCooldown(channel.login)) {
-                        continue;
-                    }
-                    if (allowed && !allowed.has(channel.id)) {
-                        continue;
-                    }
-                    candidates.push(channel);
-                }
+    /** Live channels for the campaign's game, best candidates first. */
+    private async channelsFromDirectory(
+        campaign: Campaign,
+        allowed: Set<string> | null,
+        options: { dropsOnly: boolean },
+    ): Promise<Channel[]> {
+        const slug = await this.resolveSlug(campaign);
+        if (!slug) {
+            return [];
+        }
+        const nodes = await this.gql
+            .getGameChannels(slug, { dropsOnly: options.dropsOnly, limit: 30 })
+            .catch(() => []);
+
+        const channels: Channel[] = [];
+        for (const node of nodes) {
+            const channel = Channel.fromDirectory(node, this.auth, this.gql);
+            if (!channel || this.isOnCooldown(channel.login)) {
+                continue;
             }
+            if (allowed && !allowed.has(channel.id)) {
+                continue;
+            }
+            channels.push(channel);
         }
 
-        // Confirm Twitch really will credit this campaign here. A drops-enabled tag is not
-        // enough - the channel may be running a different campaign for the same game.
-        for (const channel of candidates) {
+        if (!options.dropsOnly) {
+            // Only streams that actually say "drops" in the title. Checking every untagged
+            // stream in the directory would cost a request each for a poor hit rate; a
+            // streamer running an untagged campaign almost always advertises it.
+            return channels.filter(mentionsDrops);
+        }
+        return channels;
+    }
+
+    /** First channel Twitch confirms is currently granting this campaign. */
+    private async firstEligible(
+        candidates: Channel[],
+        campaign: Campaign,
+    ): Promise<Channel | null> {
+        // Bound the lookups: an unfiltered directory page is 30 streams and each check is a
+        // request, so a game with no live drops would otherwise cost 30 calls per attempt.
+        for (const channel of candidates.slice(0, MAX_ELIGIBILITY_CHECKS)) {
+
             try {
                 const available = await this.gql.getAvailableDrops(channel.id);
+                // A drops-enabled tag is not enough: the channel may be running a different
+                // campaign for the same game.
                 const grantsCampaign = available.some(
                     (entry) =>
                         entry.id === campaign.id ||
@@ -522,6 +620,7 @@ export class Miner extends EventEmitter {
         this.miningSince = Date.now();
         this.lastProgressAt = Date.now();
         this.lastBeatAt = null;
+        this.unconfirmedBeats = 0;
         this.switchRequested = false;
 
         const streamTopic = `video-playback-by-id.${channel.id}`;
@@ -567,24 +666,27 @@ export class Miner extends EventEmitter {
                     return;
                 }
                 this.lastBeatAt = Date.now();
+                this.unconfirmedBeats++;
                 this.emit("beat", { at: this.lastBeatAt });
 
                 if (drop.isClaimed) {
                     return;
                 }
 
-                // PubSub is the fast path for progress, but it can go quiet. If it does,
-                // fall back to polling the inventory before writing the channel off.
-                if (Date.now() - this.lastProgressAt > NO_PROGRESS_TIMEOUT_MS) {
+                // PubSub is the fast path for progress, but it can go quiet. Once enough
+                // beats have gone unconfirmed, check the inventory before writing the
+                // channel off - Twitch being silent is not the same as earning nothing.
+                if (this.unconfirmedBeats >= MAX_UNCONFIRMED_BEATS) {
                     const advanced = await this.reconcileProgress(drop);
+                    this.unconfirmedBeats = 0;
                     if (!advanced) {
                         logger.warn(
-                            `No progress from ${channel.displayName} in ` +
-                                `${NO_PROGRESS_TIMEOUT_MS / 60_000} minutes; trying another channel.`,
+                            `${MAX_UNCONFIRMED_BEATS} minutes watched on ` +
+                                `${channel.displayName} with no progress; trying another channel.`,
                         );
                         this.pushFeed(
                             "warn",
-                            `${channel.displayName} benched for 30m - no progress`,
+                            `${channel.displayName} benched for 30m - watched without earning`,
                         );
                         this.penalise(channel);
                         return;
@@ -631,6 +733,7 @@ export class Miner extends EventEmitter {
                     drop.update(entry.self);
                     if (advanced) {
                         this.lastProgressAt = Date.now();
+                        this.unconfirmedBeats = 0;
                         logger.debug(
                             `Inventory reports ${drop.currentMinutes}/${drop.requiredMinutes} min`,
                         );
@@ -697,6 +800,7 @@ export class Miner extends EventEmitter {
             drop.update({ currentMinutesWatched: message.current_progress_min });
             if (advanced) {
                 this.lastProgressAt = Date.now();
+                this.unconfirmedBeats = 0;
             }
             // Progress can land against a drop other than the one we targeted when a game
             // runs several campaigns at once; that still counts as the bot working.
@@ -724,7 +828,15 @@ export class Miner extends EventEmitter {
             }
         });
 
+        pubsub.on("stream-up", ({ channelId }) => {
+            this.onTrackedChannelUp(channelId);
+        });
+
         pubsub.on("stream-down", ({ channelId }) => {
+            const tracked = this.watchlist.get(channelId);
+            if (tracked) {
+                tracked.online = false;
+            }
             const channel = this.currentChannel;
             if (channel !== null && channel.id === channelId) {
                 logger.info(`${channel.displayName} ended their stream.`);
@@ -737,6 +849,13 @@ export class Miner extends EventEmitter {
             if (channel !== null && channel.id === channelId && channel.stream) {
                 channel.stream.viewers = viewers;
             }
+        });
+
+        pubsub.on("reward-notification", () => {
+            logger.debug("Twitch reported a reward; refreshing campaigns.");
+            void this.refreshCampaigns().catch((error) => {
+                logger.debug("Refresh after reward notification failed:", error);
+            });
         });
 
         pubsub.on("points-claim-available", async ({ channelId, claimId }) => {
@@ -787,6 +906,105 @@ export class Miner extends EventEmitter {
             }
         };
         setTimeout(tick, interval).unref();
+    }
+
+    /**
+     * Keep PubSub subscriptions in step with the channels worth knowing about: every
+     * allow-list channel of a mineable campaign, plus the user's preferred channels.
+     *
+     * This is what makes restricted campaigns workable. Their eligible channels are often
+     * offline, and without a subscription we would only discover one went live at the next
+     * poll - by which point a short stream may already be over.
+     */
+    private async syncWatchlist(): Promise<void> {
+        const desired = new Map<string, { login: string; displayName: string; campaignIds: Set<string> }>();
+
+        const add = (id: string, login: string, displayName: string, campaignId: string) => {
+            if (!id || !login) {
+                return;
+            }
+            const existing = desired.get(id);
+            if (existing) {
+                existing.campaignIds.add(campaignId);
+                return;
+            }
+            if (desired.size >= MAX_TRACKED_CHANNELS) {
+                return;
+            }
+            desired.set(id, { login, displayName, campaignIds: new Set([campaignId]) });
+        };
+
+        for (const campaign of this.getMineableCampaigns()) {
+            for (const channel of campaign.data.allow?.channels ?? []) {
+                const login = (channel.name ?? channel.displayName ?? "").toLowerCase();
+                add(channel.id, login, channel.displayName ?? login, campaign.id);
+            }
+        }
+
+        // Preferred channels are configured by login, so their IDs need resolving once each.
+        for (const login of this.config.preferredChannels) {
+            const key = login.toLowerCase();
+            let id = this.channelIdCache.get(key);
+            if (!id) {
+                const info = await this.gql.getStreamInfo(key).catch(() => null);
+                if (!info?.id) {
+                    continue;
+                }
+                id = info.id;
+                this.channelIdCache.set(key, id);
+            }
+            add(id, key, login, "preferred");
+        }
+
+        for (const [id, entry] of this.watchlist) {
+            if (!desired.has(id)) {
+                this.pubsub?.unlisten(`video-playback-by-id.${id}`);
+                this.watchlist.delete(id);
+            } else {
+                entry.campaignIds = desired.get(id)!.campaignIds;
+            }
+        }
+
+        for (const [id, entry] of desired) {
+            if (this.watchlist.has(id)) {
+                continue;
+            }
+            this.watchlist.set(id, { id, ...entry, online: false });
+            this.pubsub?.listen(`video-playback-by-id.${id}`);
+        }
+
+        if (this.watchlist.size > 0) {
+            logger.debug(`Tracking ${this.watchlist.size} channels for status changes`);
+        }
+    }
+
+    /**
+     * A tracked channel came online. Switch to it if it serves a campaign that outranks
+     * whatever we are mining now.
+     */
+    private onTrackedChannelUp(channelId: string): void {
+        const entry = this.watchlist.get(channelId);
+        if (!entry) {
+            return;
+        }
+        entry.online = true;
+
+        const current = this.currentCampaign;
+        if (!current) {
+            // Idle: the main loop will pick this up on its next pass.
+            return;
+        }
+
+        const ranked = this.getMineableCampaigns();
+        const currentRank = ranked.findIndex((campaign) => campaign.id === current.id);
+        const betterRank = ranked.findIndex(
+            (campaign) => entry.campaignIds.has(campaign.id) || entry.campaignIds.has("preferred"),
+        );
+        if (betterRank !== -1 && currentRank !== -1 && betterRank < currentRank) {
+            logger.info(`${entry.displayName} came online for a higher-priority campaign.`);
+            this.pushFeed("info", `${entry.displayName} came online - switching`);
+            this.switchRequested = true;
+        }
     }
 
     /**
@@ -1050,6 +1268,7 @@ export class Miner extends EventEmitter {
 
         this.campaigns = next;
         this.scheduleBoundaryRefresh();
+        await this.syncWatchlist();
         const mineable = [...next.values()].filter(
             (campaign) => campaign.isActive && !campaign.isCompleted,
         );
