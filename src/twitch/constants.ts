@@ -39,13 +39,38 @@ export const WEB_CLIENT: ClientInfo = {
  * client for it to help: presenting a web-issued token with this Client-Id still fails, so
  * the device-code login and every GQL request have to use it consistently.
  */
+/**
+ * Real device strings the Twitch Android app ships with. One is chosen per install so that
+ * every copy of this bot does not present an identical fingerprint.
+ */
+const ANDROID_USER_AGENTS = [
+    "Dalvik/2.1.0 (Linux; U; Android 16; SM-S911B Build/TP1A.220624.014) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+    "Dalvik/2.1.0 (Linux; U; Android 16; SM-S938B Build/BP2A.250605.031) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+    "Dalvik/2.1.0 (Linux; Android 16; SM-X716N Build/UP1A.231005.007) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+    "Dalvik/2.1.0 (Linux; U; Android 15; SM-G990B Build/AP3A.240905.015.A2) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+    "Dalvik/2.1.0 (Linux; U; Android 15; SM-G970F Build/AP3A.241105.008) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+    "Dalvik/2.1.0 (Linux; U; Android 15; SM-A566E Build/AP3A.240905.015.A2) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+    "Dalvik/2.1.0 (Linux; U; Android 14; SM-X306B Build/UP1A.231005.007) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+] as const;
+
 export const ANDROID_CLIENT: ClientInfo = {
     clientUrl: "https://www.twitch.tv",
     clientId: "kd1unb4b3q4t58fwlpcbzcbnm76a8fp",
-    userAgent:
-        "Dalvik/2.1.0 (Linux; U; Android 16; SM-S911B Build/TP1A.220624.014) " +
-        "tv.twitch.android.app/25.3.0/2503006",
+    userAgent: ANDROID_USER_AGENTS[0],
 };
+
+/** Pick a device string at random, for a first run with no stored identity. */
+export function randomAndroidUserAgent(): string {
+    const index = Math.floor(Math.random() * ANDROID_USER_AGENTS.length);
+    return ANDROID_USER_AGENTS[index] ?? ANDROID_USER_AGENTS[0];
+}
 
 /** The client identity used for all authenticated work. */
 export const DEFAULT_CLIENT = ANDROID_CLIENT;

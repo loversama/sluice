@@ -10,6 +10,7 @@ import {
     OAUTH_DEVICE_URL,
     OAUTH_TOKEN_URL,
     OAUTH_VALIDATE_URL,
+    randomAndroidUserAgent,
     type ClientInfo,
 } from "./constants.js";
 import type { DeviceCodeResponse, TokenResponse, ValidateResponse } from "./types.js";
@@ -24,6 +25,8 @@ export interface StoredAuth {
     deviceId: string;
     /** Which client issued this token. A token is only usable by its issuing client. */
     clientId?: string;
+    /** Pinned alongside the device ID: a real phone does not change model between runs. */
+    userAgent?: string;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -44,7 +47,7 @@ function randomHex(length: number): string {
  * and 2FA changes that break browser-driven bots.
  */
 export class AuthState {
-    readonly client: ClientInfo;
+    client: ClientInfo;
     /** Stable per-install ID. Twitch treats a changing device ID as suspicious. */
     deviceId: string;
     /** Rotates per process run, mirroring a fresh browser tab. */
@@ -56,7 +59,8 @@ export class AuthState {
     login = "";
 
     constructor(client: ClientInfo = DEFAULT_CLIENT) {
-        this.client = client;
+        // A fresh install picks one device string; load() replaces it with the stored one.
+        this.client = { ...client, userAgent: randomAndroidUserAgent() };
         this.deviceId = randomHex(32);
         this.sessionId = randomHex(16);
     }
@@ -98,6 +102,7 @@ export class AuthState {
             login: this.login,
             deviceId: this.deviceId,
             clientId: this.client.clientId,
+            userAgent: this.client.userAgent,
         };
     }
 
@@ -124,6 +129,9 @@ export class AuthState {
             this.login = stored.login;
             if (stored.deviceId) {
                 this.deviceId = stored.deviceId;
+            }
+            if (stored.userAgent) {
+                this.client = { ...this.client, userAgent: stored.userAgent };
             }
             return true;
         } catch {

@@ -134,6 +134,9 @@ async function main(): Promise<void> {
         await auth.save(authPath);
     } else {
         logger.info(`Logged in as ${auth.login}`);
+        // Re-save so an older credential file picks up newer fields (such as the pinned
+        // device string), keeping the identity stable from here on.
+        await auth.save(authPath);
     }
 
     authStatus = "ok";

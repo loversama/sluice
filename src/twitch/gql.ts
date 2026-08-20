@@ -74,7 +74,10 @@ export class TwitchGql {
         for (let attempt = 0; attempt <= retries; attempt++) {
             if (attempt > 0) {
                 // Exponential backoff, capped - Twitch rate-limits aggressive clients.
-                await sleep(Math.min(1000 * 2 ** attempt, 15_000));
+                // The +/-10% variance stops repeated failures from re-syncing into a
+                // regular pattern of retries.
+                const backoff = Math.min(1000 * 2 ** attempt, 15_000);
+                await sleep(backoff * (0.9 + Math.random() * 0.2));
             }
             try {
                 const response = await request(GQL_URL, {

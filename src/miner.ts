@@ -438,6 +438,7 @@ export class Miner extends EventEmitter {
             }
 
             while (!this.stopping) {
+                const beatStart = Date.now();
                 if (!channel.isOnline) {
                     logger.info(`${channel.displayName} went offline.`);
                     return;
@@ -490,7 +491,12 @@ export class Miner extends EventEmitter {
                     return;
                 }
 
-                await sleep(WATCH_INTERVAL_MS);
+                // Sleep the remainder of the interval rather than a flat 59s, so the work
+                // above does not push successive beats past the minute Twitch credits.
+                // Deliberately NOT jittered: the official player beats on a precise cadence,
+                // so randomising here would make us less like it, not more.
+                const elapsed = Date.now() - beatStart;
+                await sleep(Math.max(0, WATCH_INTERVAL_MS - elapsed));
             }
         } finally {
             this.pubsub?.unlisten(streamTopic);
