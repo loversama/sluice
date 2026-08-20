@@ -3,6 +3,13 @@ import { request } from "undici";
 import logger from "../logger.js";
 import type { AuthState } from "./auth.js";
 import { GQL_URL, QUERIES, type PersistedQuery, type QueryName } from "./constants.js";
+
+/**
+ * Channels fetched per directory query. The request cost is the same at any size, so this is
+ * set well above the number we will actually check - a wider pool gives the drops-title
+ * filter more to find.
+ */
+const DIRECTORY_PAGE_SIZE = 50;
 import type {
     DropCampaign,
     Inventory,
@@ -180,7 +187,12 @@ export class TwitchGql {
         return data.game?.slug ?? null;
     }
 
-    /** Live channels for a game. Returns at most `limit` (Twitch caps this near 30). */
+    /**
+     * Live channels for a game, viewer count descending.
+     *
+     * One request regardless of `limit`, so a larger page costs only bandwidth and gives
+     * client-side filters a bigger pool to work with. Verified up to 100.
+     */
     async getGameChannels(
         slug: string,
         options: { limit?: number; dropsOnly?: boolean } = {},
@@ -189,7 +201,7 @@ export class TwitchGql {
             game: { streams: { edges: { node: StreamNode }[] } | null } | null;
         }>("gameDirectory", {
             slug,
-            limit: options.limit ?? 30,
+            limit: options.limit ?? DIRECTORY_PAGE_SIZE,
             imageWidth: 50,
             includeCostreaming: false,
             sortTypeIsRecency: false,

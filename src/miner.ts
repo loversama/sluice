@@ -535,7 +535,7 @@ export class Miner extends EventEmitter {
             return [];
         }
         const nodes = await this.gql
-            .getGameChannels(slug, { dropsOnly: options.dropsOnly, limit: 30 })
+            .getGameChannels(slug, { dropsOnly: options.dropsOnly })
             .catch(() => []);
 
         const channels: Channel[] = [];

@@ -138,7 +138,10 @@ export const QUERIES = {
         operationName: "DropsPage_ClaimDropRewards",
         sha256: "a455deea71bdc9015b78eb49f4acfbce8baa7ccbedd28e549bb025bd0f751930",
     },
-    /** Live channels for a game. Requires the game *slug*, not its display name. */
+    /**
+     * Live channels for a game. Requires the game *slug*, not its display name.
+     * Results come back viewer-descending; the page is one request whatever the limit.
+     */
     gameDirectory: {
         operationName: "DirectoryPage_Game",
         sha256: "86bcceb4e8b1a51256ff8eed8bd8aae4acacf80d737efe904f84f3aeadf8cafd",
