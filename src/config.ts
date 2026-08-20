@@ -77,3 +77,8 @@ export async function loadConfig(path: string): Promise<Config> {
     }
     return config;
 }
+
+/** Persist config back to disk after an API edit. */
+export async function saveConfig(path: string, config: Config): Promise<void> {
+    await writeFile(path, `${JSON.stringify(config, null, 4)}\n`);
+}

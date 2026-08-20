@@ -1,0 +1,319 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { EventEmitter } from "node:events";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { extname, join, normalize, resolve } from "node:path";
+
+import logger from "../logger.js";
+import type { Config } from "../config.js";
+import type { Miner } from "../miner.js";
+import type { AuthState } from "../twitch/auth.js";
+import type { NotifierGroup } from "../notifiers/index.js";
+import { isMasked, maskConfig, serializeCampaign } from "./serialize.js";
+
+export interface DeviceCodeInfo {
+    code: string;
+    url: string;
+    expiresAt: number;
+}
+
+/**
+ * Everything the API needs from the running application. Passed as accessors rather than
+ * values because the server starts before login finishes and before the miner exists.
+ */
+export interface ServerContext {
+    auth: AuthState;
+    version: string;
+    startedAt: number;
+    /** Event bus carrying miner events; the server relays these to SSE clients. */
+    bus: EventEmitter;
+    getAuthStatus(): "pending" | "ok";
+    getDeviceCode(): DeviceCodeInfo | null;
+    getMiner(): Miner | null;
+    getConfig(): Config;
+    setConfig(config: Config): Promise<void>;
+    getNotifier(): NotifierGroup;
+}
+
+const MIME: Record<string, string> = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+};
+
+/** Events relayed from the miner to the browser, verbatim by name. */
+const RELAYED_EVENTS = [
+    "watching",
+    "progress",
+    "drop-claimed",
+    "campaign-completed",
+    "campaigns",
+    "beat",
+    "feed",
+    "problem",
+    "auth",
+] as const;
+
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
+    const payload = JSON.stringify(body);
+    response.writeHead(status, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+    });
+    response.end(payload);
+}
+
+async function readBody(request: IncomingMessage): Promise<unknown> {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of request) {
+        size += chunk.length;
+        // The largest legitimate body is a config object; anything bigger is a mistake.
+        if (size > 256 * 1024) {
+            throw new Error("Request body too large");
+        }
+        chunks.push(chunk as Buffer);
+    }
+    if (chunks.length === 0) {
+        return {};
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export class ApiServer {
+    private readonly server = createServer((request, response) => {
+        this.handle(request, response).catch((error) => {
+            logger.debug("API request failed:", error);
+            if (!response.headersSent) {
+                sendJson(response, 500, { error: String((error as Error).message) });
+            }
+        });
+    });
+
+    /** Connected SSE clients. */
+    private readonly clients = new Set<ServerResponse>();
+    private eventId = 0;
+
+    constructor(
+        private readonly context: ServerContext,
+        private readonly staticDir: string,
+    ) {
+        for (const event of RELAYED_EVENTS) {
+            this.context.bus.on(event, (payload: unknown) => this.broadcast(event, payload));
+        }
+    }
+
+    listen(host: string, port: number): Promise<void> {
+        return new Promise((resolvePromise, rejectPromise) => {
+            this.server.once("error", rejectPromise);
+            this.server.listen(port, host, () => {
+                logger.info(`Dashboard listening on http://${host}:${port}`);
+                if (host !== "127.0.0.1" && host !== "localhost") {
+                    // The process holds an OAuth token; exposing it is opt-in and worth saying.
+                    logger.warn(
+                        "The dashboard is bound to a non-local address. Anyone who can reach " +
+                            "it can read your Twitch campaign data and change settings.",
+                    );
+                }
+                resolvePromise();
+            });
+        });
+    }
+
+    close(): void {
+        for (const client of this.clients) {
+            client.end();
+        }
+        this.clients.clear();
+        this.server.close();
+    }
+
+    private broadcast(event: string, payload: unknown): void {
+        if (this.clients.size === 0) {
+            return;
+        }
+        const id = ++this.eventId;
+        const frame = `id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(payload ?? {})}\n\n`;
+        for (const client of this.clients) {
+            client.write(frame);
+        }
+    }
+
+    private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+        const url = new URL(request.url ?? "/", "http://localhost");
+        const path = url.pathname;
+
+        if (path === "/api/stream") {
+            return this.handleStream(request, response);
+        }
+        if (path.startsWith("/api/")) {
+            return this.handleApi(request, response, path, url);
+        }
+        return this.handleStatic(path, response);
+    }
+
+    private handleStream(request: IncomingMessage, response: ServerResponse): void {
+        response.writeHead(200, {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+            // Without this, nginx and friends buffer the stream into uselessness.
+            "X-Accel-Buffering": "no",
+        });
+        response.write(`retry: 3000\n\n`);
+        this.clients.add(response);
+
+        // Comment frames keep intermediaries from timing the connection out.
+        const keepAlive = setInterval(() => response.write(": ping\n\n"), 25_000);
+        const cleanup = () => {
+            clearInterval(keepAlive);
+            this.clients.delete(response);
+        };
+        request.on("close", cleanup);
+        response.on("error", cleanup);
+    }
+
+    private async handleApi(
+        request: IncomingMessage,
+        response: ServerResponse,
+        path: string,
+        url: URL,
+    ): Promise<void> {
+        const method = request.method ?? "GET";
+
+        if (path === "/api/state" && method === "GET") {
+            return sendJson(response, 200, this.buildSnapshot());
+        }
+
+        if (path === "/api/config") {
+            if (method === "GET") {
+                return sendJson(response, 200, maskConfig(this.context.getConfig()));
+            }
+            if (method === "PUT") {
+                const patch = (await readBody(request)) as Partial<Config>;
+                const merged = this.mergeConfig(patch);
+                await this.context.setConfig(merged);
+                return sendJson(response, 200, maskConfig(merged));
+            }
+        }
+
+        if (path === "/api/events" && method === "GET") {
+            const limit = Number(url.searchParams.get("limit") ?? 50);
+            const miner = this.context.getMiner();
+            return sendJson(response, 200, {
+                events: miner?.getFeed(Number.isFinite(limit) ? limit : 50) ?? [],
+                claims: miner?.getRecentClaims() ?? [],
+            });
+        }
+
+        if (path === "/api/notify/test" && method === "POST") {
+            const notifier = this.context.getNotifier();
+            if (notifier.isEmpty) {
+                return sendJson(response, 400, { error: "No notifiers are configured." });
+            }
+            await notifier.send("Test notification from Twitch Drops Bot.");
+            return sendJson(response, 200, { ok: true });
+        }
+
+        return sendJson(response, 404, { error: "Not found" });
+    }
+
+    /** Merge an incoming config patch, preserving secrets the client sent back masked. */
+    private mergeConfig(patch: Partial<Config>): Config {
+        const current = this.context.getConfig();
+        const merged: Config = {
+            ...current,
+            ...patch,
+            notifications: { ...current.notifications, ...(patch.notifications ?? {}) },
+        };
+        const telegram = merged.notifications.telegram;
+        if (telegram && isMasked(telegram.botToken)) {
+            telegram.botToken = current.notifications.telegram?.botToken ?? "";
+        }
+        const discord = merged.notifications.discord;
+        if (discord && isMasked(discord.webhookUrl)) {
+            discord.webhookUrl = current.notifications.discord?.webhookUrl ?? "";
+        }
+        if (merged.campaignRefreshMinutes < 5) {
+            merged.campaignRefreshMinutes = 5;
+        }
+        return merged;
+    }
+
+    private buildSnapshot() {
+        const miner = this.context.getMiner();
+        const config = this.context.getConfig();
+        const device = this.context.getDeviceCode();
+
+        return {
+            daemon: {
+                version: this.context.version,
+                startedAt: new Date(this.context.startedAt).toISOString(),
+                dryRun: miner?.dryRun ?? false,
+            },
+            auth: {
+                status: this.context.getAuthStatus(),
+                user: this.context.auth.isAuthenticated
+                    ? { id: this.context.auth.userId, displayName: this.context.auth.login }
+                    : null,
+                device: device
+                    ? {
+                          code: device.code,
+                          url: device.url,
+                          expiresAt: new Date(device.expiresAt).toISOString(),
+                      }
+                    : null,
+            },
+            mining: miner?.getMiningState() ?? null,
+            queue: miner?.getMineableCampaigns().map((campaign) => campaign.id) ?? [],
+            nextRefreshAt: miner?.getNextRefreshAt()
+                ? new Date(miner.getNextRefreshAt()!).toISOString()
+                : null,
+            campaigns:
+                miner?.getCampaigns().map((campaign) => serializeCampaign(campaign, config)) ?? [],
+            claims: miner?.getRecentClaims() ?? [],
+            feed: miner?.getFeed() ?? [],
+        };
+    }
+
+    /** Serve the built dashboard, falling back to index.html so client routing works. */
+    private async handleStatic(path: string, response: ServerResponse): Promise<void> {
+        const root = resolve(this.staticDir);
+        // normalize() collapses "..", so a crafted path cannot escape the static root.
+        const requested = normalize(path === "/" ? "/index.html" : path);
+        let filePath = join(root, requested);
+        if (!filePath.startsWith(root)) {
+            return sendJson(response, 403, { error: "Forbidden" });
+        }
+
+        let info = await stat(filePath).catch(() => null);
+        if (!info?.isFile()) {
+            filePath = join(root, "index.html");
+            info = await stat(filePath).catch(() => null);
+        }
+        if (!info?.isFile()) {
+            response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            response.end(
+                "<!doctype html><meta charset=utf-8><title>Twitch Drops Bot</title>" +
+                    "<body style=\"font-family:system-ui;padding:2rem;background:#0e0e12;color:#efeff4\">" +
+                    "<h1>Dashboard not built</h1>" +
+                    "<p>Run <code>npm run build:web</code> to build the dashboard. " +
+                    "The API is available under <code>/api</code>.</p>",
+            );
+            return;
+        }
+
+        response.writeHead(200, {
+            "Content-Type": MIME[extname(filePath)] ?? "application/octet-stream",
+            "Cache-Control": requested === "/index.html" ? "no-store" : "public, max-age=3600",
+        });
+        createReadStream(filePath).pipe(response);
+    }
+}

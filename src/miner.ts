@@ -22,7 +22,38 @@ export interface MinerEvents {
     "progress": [{ drop: Drop; minutes: number; required: number }];
     "drop-claimed": [{ drop: Drop; campaign: Campaign }];
     "campaign-completed": [Campaign];
+    /** Emitted after each accepted watch beat; drives the dashboard heartbeat. */
+    beat: [{ at: number }];
+    /** Human-readable activity line for the dashboard feed. */
+    feed: [FeedEntry];
     error: [Error];
+}
+
+export type FeedLevel = "info" | "warn" | "error";
+
+export interface FeedEntry {
+    at: number;
+    level: FeedLevel;
+    message: string;
+}
+
+export interface ClaimRecord {
+    at: number;
+    dropId: string;
+    campaignId: string;
+    dropName: string;
+    gameName: string;
+    rewardImageURL: string | null;
+}
+
+/** What the miner is doing right now, or null when idle. */
+export interface MiningState {
+    channel: { login: string; displayName: string; url: string };
+    campaignId: string;
+    dropId: string;
+    since: number;
+    lastBeatAt: number | null;
+    lastProgressAt: number | null;
 }
 
 /**
@@ -46,12 +77,78 @@ export class Miner extends EventEmitter {
     /** When true, the miner reads and reports but never sends watch beats or claims. */
     dryRun = false;
 
+    private currentCampaign: Campaign | null = null;
+    private miningSince: number | null = null;
+    private lastBeatAt: number | null = null;
+    private nextRefreshAt: number | null = null;
+    /** Ring buffers so a dashboard that connects late still has recent history. */
+    private readonly recentClaims: ClaimRecord[] = [];
+    private readonly feedEntries: FeedEntry[] = [];
+
     constructor(
         private readonly auth: AuthState,
         private readonly gql: TwitchGql,
-        private readonly config: Config,
+        private config: Config,
     ) {
         super();
+    }
+
+    /** Record a human-readable activity line and emit it to listeners. */
+    private pushFeed(level: FeedLevel, message: string): void {
+        const entry: FeedEntry = { at: Date.now(), level, message };
+        this.feedEntries.push(entry);
+        // Keep the buffer bounded; this is a status feed, not a log file.
+        if (this.feedEntries.length > 200) {
+            this.feedEntries.splice(0, this.feedEntries.length - 200);
+        }
+        this.emit("feed", entry);
+    }
+
+    getFeed(limit = 50): FeedEntry[] {
+        return this.feedEntries.slice(-limit).reverse();
+    }
+
+    getRecentClaims(limit = 20): ClaimRecord[] {
+        return this.recentClaims.slice(-limit).reverse();
+    }
+
+    /** What is being mined right now, or null when idle. */
+    getMiningState(): MiningState | null {
+        const channel = this.currentChannel;
+        const drop = this.currentDrop;
+        const campaign = this.currentCampaign;
+        if (!channel || !drop || !campaign || this.miningSince === null) {
+            return null;
+        }
+        return {
+            channel: {
+                login: channel.login,
+                displayName: channel.displayName,
+                url: channel.url,
+            },
+            campaignId: campaign.id,
+            dropId: drop.id,
+            since: this.miningSince,
+            lastBeatAt: this.lastBeatAt,
+            lastProgressAt: this.lastProgressAt || null,
+        };
+    }
+
+    getNextRefreshAt(): number | null {
+        return this.nextRefreshAt;
+    }
+
+    getConfig(): Config {
+        return this.config;
+    }
+
+    /**
+     * Apply a config change at runtime. Ranking is recomputed on the next selection, so
+     * priority edits take effect without a restart.
+     */
+    applyConfig(config: Config): void {
+        this.config = config;
+        this.pushFeed("info", "Configuration updated");
     }
 
     /** Every campaign currently known, active and upcoming alike. */
@@ -280,7 +377,10 @@ export class Miner extends EventEmitter {
     private async watch(channel: Channel, campaign: Campaign, drop: Drop): Promise<void> {
         this.currentChannel = channel;
         this.currentDrop = drop;
+        this.currentCampaign = campaign;
+        this.miningSince = Date.now();
         this.lastProgressAt = Date.now();
+        this.lastBeatAt = null;
         this.switchRequested = false;
 
         const streamTopic = `video-playback-by-id.${channel.id}`;
@@ -295,6 +395,10 @@ export class Miner extends EventEmitter {
                 `(${drop.currentMinutes}/${drop.requiredMinutes} min)`,
         );
         this.emit("watching", { channel, campaign, drop });
+        this.pushFeed(
+            "info",
+            `Watching ${channel.displayName} for ${campaign.gameName} - ${drop.name}`,
+        );
 
         try {
             // A stream that just came up will not credit watch time yet.
@@ -316,9 +420,12 @@ export class Miner extends EventEmitter {
                 const accepted = await channel.sendWatch();
                 if (!accepted) {
                     logger.warn(`${channel.displayName} rejected the watch beat.`);
+                    this.pushFeed("warn", `${channel.displayName} rejected the watch beat`);
                     this.penalise(channel);
                     return;
                 }
+                this.lastBeatAt = Date.now();
+                this.emit("beat", { at: this.lastBeatAt });
 
                 if (drop.isClaimed) {
                     return;
@@ -332,6 +439,10 @@ export class Miner extends EventEmitter {
                         logger.warn(
                             `No progress from ${channel.displayName} in ` +
                                 `${NO_PROGRESS_TIMEOUT_MS / 60_000} minutes; trying another channel.`,
+                        );
+                        this.pushFeed(
+                            "warn",
+                            `${channel.displayName} benched for 30m - no progress`,
                         );
                         this.penalise(channel);
                         return;
@@ -355,6 +466,8 @@ export class Miner extends EventEmitter {
             this.pubsub?.unlisten(streamTopic);
             this.currentChannel = null;
             this.currentDrop = null;
+            this.currentCampaign = null;
+            this.miningSince = null;
         }
     }
 
@@ -402,6 +515,18 @@ export class Miner extends EventEmitter {
                 drop.isClaimed = true;
                 this.claimedDropIds.add(drop.id);
                 logger.info(`Claimed: ${drop.rewardNames} (${campaign.gameName})`);
+                this.recentClaims.push({
+                    at: Date.now(),
+                    dropId: drop.id,
+                    campaignId: campaign.id,
+                    dropName: drop.rewardNames || drop.name,
+                    gameName: campaign.gameName,
+                    rewardImageURL: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
+                });
+                if (this.recentClaims.length > 100) {
+                    this.recentClaims.shift();
+                }
+                this.pushFeed("info", `Claimed ${drop.rewardNames} (${campaign.gameName})`);
                 this.emit("drop-claimed", { drop, campaign });
             } else {
                 logger.warn(`Twitch did not confirm the claim for ${drop.name}`);
@@ -490,6 +615,7 @@ export class Miner extends EventEmitter {
 
     private scheduleCampaignRefresh(): void {
         const interval = this.config.campaignRefreshMinutes * 60_000;
+        this.nextRefreshAt = Date.now() + interval;
         const tick = async () => {
             if (this.stopping) {
                 return;
@@ -505,6 +631,7 @@ export class Miner extends EventEmitter {
             } catch (error) {
                 logger.error("Campaign refresh failed:", error);
             } finally {
+                this.nextRefreshAt = Date.now() + interval;
                 setTimeout(tick, interval).unref();
             }
         };
@@ -680,6 +807,10 @@ export class Miner extends EventEmitter {
             (campaign) => campaign.isActive && !campaign.isCompleted,
         );
         logger.info(`${next.size} campaigns known, ${mineable.length} with work remaining.`);
+        this.pushFeed(
+            "info",
+            `Refreshed campaigns: ${next.size} known, ${mineable.length} with work remaining`,
+        );
         this.emit("campaigns-updated", [...next.values()]);
 
         // Claim anything that finished while we were not looking.
