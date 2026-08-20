@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 import type { LogLevel } from "./logger.js";
+import type { PriorityMode } from "./models/campaign.js";
 
 export interface Config {
     /**
@@ -8,10 +9,17 @@ export interface Config {
      * An empty list means "any game with an active campaign".
      */
     priorityGames: string[];
-    /** Games to never mine, even when `mineUnlistedGames` is true. */
+    /** Games to never mine, whatever the priority mode says. */
     excludedGames: string[];
-    /** Mine campaigns for games outside `priorityGames`. */
-    mineUnlistedGames: boolean;
+    /**
+     * How campaigns outside `priorityGames` are ordered against each other.
+     * "priority_only" mines nothing outside the list.
+     */
+    priorityMode: PriorityMode;
+    /**
+     * @deprecated Superseded by `priorityMode`. A stored `false` migrates to "priority_only".
+     */
+    mineUnlistedGames?: boolean;
     /** Preferred channels, tried before searching the game directory. */
     preferredChannels: string[];
     /** Minutes between full campaign refreshes. */
@@ -37,7 +45,7 @@ export interface Config {
 export const DEFAULT_CONFIG: Config = {
     priorityGames: [],
     excludedGames: [],
-    mineUnlistedGames: true,
+    priorityMode: "ending_soonest",
     preferredChannels: [],
     campaignRefreshMinutes: 20,
     attemptImpossibleCampaigns: true,
@@ -70,6 +78,12 @@ export async function loadConfig(path: string): Promise<Config> {
         ...parsed,
         notifications: { ...DEFAULT_CONFIG.notifications, ...(parsed.notifications ?? {}) },
     };
+
+    // Older configs expressed this as a boolean; carry the intent across.
+    if (parsed.priorityMode === undefined && parsed.mineUnlistedGames === false) {
+        config.priorityMode = "priority_only";
+    }
+    delete config.mineUnlistedGames;
 
     if (config.campaignRefreshMinutes < 5) {
         // Polling harder than this risks rate limiting without finding campaigns any sooner.

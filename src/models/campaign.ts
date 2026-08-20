@@ -69,6 +69,19 @@ export class Drop {
         return minutesLeft >= this.remainingMinutes;
     }
 
+    /**
+     * Time slack: minutes left before this drop expires, divided by minutes still needed.
+     * 1.0 means exactly enough time; below 1.0 it cannot be finished. Infinite when there is
+     * nothing left to earn.
+     */
+    get slack(): number {
+        const minutesLeft = (this.endAt.getTime() - Date.now()) / 60_000;
+        if (this.remainingMinutes <= 0 || minutesLeft <= 0) {
+            return Number.POSITIVE_INFINITY;
+        }
+        return minutesLeft / this.remainingMinutes;
+    }
+
     /** IDs of drops that must be claimed before this one earns progress (tiered campaigns). */
     get preconditionIds(): string[] {
         return (this.data.preconditionDrops ?? []).map((drop) => drop.id);
@@ -160,6 +173,15 @@ export class Campaign {
         return this.drops.every((drop) => drop.isClaimed || !drop.isActive);
     }
 
+    /** The tightest slack across this campaign's unfinished drops. */
+    get slack(): number {
+        const pending = this.drops.filter((drop) => !drop.isClaimed && drop.isActive);
+        if (pending.length === 0) {
+            return Number.POSITIVE_INFINITY;
+        }
+        return Math.min(...pending.map((drop) => drop.slack));
+    }
+
     get claimableDrops(): Drop[] {
         return this.drops.filter((drop) => drop.isClaimable);
     }
@@ -212,25 +234,77 @@ export class Campaign {
 }
 
 /**
- * Order campaigns by how much we want them:
- *   1. position of the game in the user's priority list
- *   2. soonest to end (finish what is about to expire)
- *   3. fewest remaining minutes
+ * How campaigns outside the explicit priority list are ordered against each other.
+ * The priority list always wins; this only decides what happens below it.
  */
-export function compareCampaigns(a: Campaign, b: Campaign, priorityGames: string[]): number {
-    const rank = (campaign: Campaign): number => {
-        const index = priorityGames.findIndex(
-            (game) =>
-                game.toLowerCase() === campaign.gameName.toLowerCase() || game === campaign.gameId,
-        );
-        return index === -1 ? Number.MAX_SAFE_INTEGER : index;
-    };
+export type PriorityMode =
+    /** Mine nothing outside the priority list. */
+    | "priority_only"
+    /** Whatever expires first. */
+    | "ending_soonest"
+    /** Whatever is closest to running out of time for the work still needed. */
+    | "tightest_deadline"
+    /** Shuffled, so the same campaigns are not always favoured. */
+    | "random"
+    /** Stay on the current game until its campaigns are done, then move on. */
+    | "one_game_at_a_time";
 
-    const rankDelta = rank(a) - rank(b);
+export interface RankingOptions {
+    priorityGames: string[];
+    mode?: PriorityMode;
+    /**
+     * Stable random keys by campaign ID, for "random" mode. Regenerated each refresh so the
+     * order varies between cycles but stays consistent within one - a comparator that called
+     * Math.random() directly would violate sort's ordering contract.
+     */
+    randomKeys?: Map<string, number>;
+    /** Game currently being mined, used by "one_game_at_a_time". */
+    focusGameId?: string | null;
+}
+
+function priorityRank(campaign: Campaign, priorityGames: string[]): number {
+    const index = priorityGames.findIndex(
+        (game) =>
+            game.toLowerCase() === campaign.gameName.toLowerCase() || game === campaign.gameId,
+    );
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+/**
+ * Order campaigns by how much we want them. The explicit priority list is always the first
+ * criterion; {@link RankingOptions.mode} decides how everything below it is ordered.
+ */
+export function compareCampaigns(a: Campaign, b: Campaign, options: RankingOptions): number {
+    const { priorityGames, mode = "ending_soonest" } = options;
+
+    const rankDelta = priorityRank(a, priorityGames) - priorityRank(b, priorityGames);
     if (rankDelta !== 0) {
         return rankDelta;
     }
 
+    // Keep working the game already in progress before starting another one.
+    if (mode === "one_game_at_a_time" && options.focusGameId) {
+        const focus = (campaign: Campaign) => (campaign.gameId === options.focusGameId ? 0 : 1);
+        const focusDelta = focus(a) - focus(b);
+        if (focusDelta !== 0) {
+            return focusDelta;
+        }
+    }
+
+    if (mode === "random") {
+        const keyA = options.randomKeys?.get(a.id) ?? 0;
+        const keyB = options.randomKeys?.get(b.id) ?? 0;
+        if (keyA !== keyB) {
+            return keyA - keyB;
+        }
+    } else if (mode === "tightest_deadline") {
+        const slackDelta = a.slack - b.slack;
+        if (Number.isFinite(slackDelta) && slackDelta !== 0) {
+            return slackDelta;
+        }
+    }
+
+    // Every mode falls back to expiry, then to the quickest win.
     const endDelta = a.endAt.getTime() - b.endAt.getTime();
     if (endDelta !== 0) {
         return endDelta;

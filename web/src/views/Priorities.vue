@@ -9,7 +9,20 @@ const store = useMinerStore();
 
 const priorities = ref([]);
 const excluded = ref([]);
-const mineUnlisted = ref(true);
+const priorityMode = ref("ending_soonest");
+
+/** Wording is deliberately about outcomes, not algorithm names. */
+const PRIORITY_MODES = [
+    { value: "ending_soonest", label: "Whatever ends soonest", hint: "Finish what expires first." },
+    {
+        value: "tightest_deadline",
+        label: "Most at risk of being missed",
+        hint: "Weighs time left against the minutes still needed, so near-misses come first.",
+    },
+    { value: "one_game_at_a_time", label: "One game at a time", hint: "Finish a game's campaigns before starting another." },
+    { value: "random", label: "Random order", hint: "Reshuffled on every refresh." },
+    { value: "priority_only", label: "Nothing else", hint: "Mine only the games listed above." },
+];
 const newPriority = ref("");
 const newExcluded = ref("");
 const saving = ref(false);
@@ -28,7 +41,7 @@ watch(
         if (!config) return;
         priorities.value = [...config.priorityGames];
         excluded.value = [...config.excludedGames];
-        mineUnlisted.value = config.mineUnlistedGames;
+        priorityMode.value = config.priorityMode ?? "ending_soonest";
     },
     { immediate: true },
 );
@@ -76,7 +89,7 @@ async function persist() {
         await store.saveConfig({
             priorityGames: priorities.value,
             excludedGames: excluded.value,
-            mineUnlistedGames: mineUnlisted.value,
+            priorityMode: priorityMode.value,
         });
     } catch (error) {
         ElMessage.error(error.message);
@@ -214,26 +227,39 @@ function move(index, delta) {
                 into a spatial fact: everything above the line is ranked, this is the rest.
             -->
             <div
-                class="flex items-center gap-3 p-2.5 rounded-[10px]"
+                class="rounded-[10px] p-2.5"
                 :style="{
                     border: '1px dashed var(--border)',
-                    opacity: mineUnlisted ? 1 : 0.55,
+                    opacity: priorityMode === 'priority_only' ? 0.55 : 1,
                 }"
             >
-                <span class="w-5" />
-                <span
-                    class="w-5 h-5 rounded-full grid place-items-center text-[11px] shrink-0"
-                    :style="{ border: '1px solid var(--border)', color: 'var(--text-2)' }"
-                >
-                    ∞
-                </span>
-                <span class="text-[13px] flex-1">
-                    Everything else
-                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        &mdash; {{ mineUnlisted ? "mine any other game's campaigns" : "ignored" }}
+                <div class="flex items-center gap-3">
+                    <span class="w-5" />
+                    <span
+                        class="w-5 h-5 rounded-full grid place-items-center text-[11px] shrink-0"
+                        :style="{ border: '1px solid var(--border)', color: 'var(--text-2)' }"
+                    >
+                        ∞
                     </span>
-                </span>
-                <el-switch v-model="mineUnlisted" @change="scheduleSave" />
+                    <span class="text-[13px] flex-1">Everything else, ordered by</span>
+                    <select
+                        v-model="priorityMode"
+                        class="px-2 py-1.5 rounded-lg text-[12px] outline-none max-w-[220px]"
+                        :style="{
+                            background: 'var(--surface-2)',
+                            border: '1px solid var(--border)',
+                            color: 'var(--text)',
+                        }"
+                        @change="scheduleSave"
+                    >
+                        <option v-for="mode in PRIORITY_MODES" :key="mode.value" :value="mode.value">
+                            {{ mode.label }}
+                        </option>
+                    </select>
+                </div>
+                <p class="text-[11px] mt-1.5 pl-[52px]" :style="{ color: 'var(--text-2)' }">
+                    {{ PRIORITY_MODES.find((mode) => mode.value === priorityMode)?.hint }}
+                </p>
             </div>
         </section>
 
@@ -241,7 +267,7 @@ function move(index, delta) {
             <div>
                 <h2 class="text-[15px] font-semibold">Excluded games</h2>
                 <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
-                    Never mined, even when &ldquo;everything else&rdquo; is on.
+                    Never mined, whatever the ordering above says.
                 </p>
             </div>
 

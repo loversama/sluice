@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 
 import logger from "./logger.js";
 import type { Config } from "./config.js";
-import { Campaign, compareCampaigns, type Drop } from "./models/campaign.js";
+import { Campaign, compareCampaigns, type Drop, type RankingOptions } from "./models/campaign.js";
 import { Channel } from "./models/channel.js";
 import type { AuthState } from "./twitch/auth.js";
 import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
@@ -86,6 +86,8 @@ export class Miner extends EventEmitter {
     /** Ring buffers so a dashboard that connects late still has recent history. */
     private readonly recentClaims: ClaimRecord[] = [];
     private readonly feedEntries: FeedEntry[] = [];
+    /** Regenerated each refresh so "random" mode varies between cycles but not within one. */
+    private randomKeys = new Map<string, number>();
 
     constructor(
         private readonly auth: AuthState,
@@ -93,6 +95,16 @@ export class Miner extends EventEmitter {
         private config: Config,
     ) {
         super();
+    }
+
+    /** The ranking rules in force right now, including live focus and shuffle state. */
+    private rankingOptions(): RankingOptions {
+        return {
+            priorityGames: this.config.priorityGames,
+            mode: this.config.priorityMode,
+            randomKeys: this.randomKeys,
+            focusGameId: this.currentCampaign?.gameId ?? null,
+        };
     }
 
     /** Record a human-readable activity line and emit it to listeners. */
@@ -169,7 +181,7 @@ export class Miner extends EventEmitter {
     getMineableCampaigns(): Campaign[] {
         return this.getCampaigns()
             .filter((campaign) => campaign.isActive && !campaign.isCompleted)
-            .sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
+            .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
     }
 
     async start(): Promise<void> {
@@ -282,7 +294,7 @@ export class Miner extends EventEmitter {
                 return false;
             }
             if (
-                !this.config.mineUnlistedGames &&
+                this.config.priorityMode === "priority_only" &&
                 !this.config.priorityGames.some((game) => this.matchesGame(game, campaign))
             ) {
                 return false;
@@ -293,7 +305,8 @@ export class Miner extends EventEmitter {
             );
         });
 
-        candidates.sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
+        const options = this.rankingOptions();
+        candidates.sort((a, b) => compareCampaigns(a, b, options));
         return candidates;
     }
 
@@ -701,7 +714,7 @@ export class Miner extends EventEmitter {
 
         const mineable = active
             .filter((campaign) => !campaign.isCompleted)
-            .sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
+            .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
 
         if (mineable.length === 0) {
             console.log("No campaigns with work remaining. Nothing to mine right now.");
@@ -817,12 +830,16 @@ export class Miner extends EventEmitter {
             this.gql.getInventory().catch(() => null),
         ]);
 
+        // New shuffle each cycle, so "random" mode does not settle on a fixed order.
+        this.randomKeys = new Map();
+
         const next = new Map<string, Campaign>();
         for (const data of listed) {
             if (data.status === "EXPIRED") {
                 continue;
             }
             next.set(data.id, new Campaign(data));
+            this.randomKeys.set(data.id, Math.random());
         }
 
         // The campaign list omits drop details, so fetch them for anything we might mine.
@@ -837,10 +854,10 @@ export class Miner extends EventEmitter {
             )
             .filter(
                 (campaign) =>
-                    this.config.mineUnlistedGames ||
+                    this.config.priorityMode !== "priority_only" ||
                     this.config.priorityGames.some((game) => this.matchesGame(game, campaign)),
             )
-            .sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
+            .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
 
         for (const campaign of interesting) {
             try {
