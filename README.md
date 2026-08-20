@@ -89,6 +89,38 @@ Notifications:
 -h, --help
 ```
 
+## Dashboard
+
+A local web dashboard is included. Build it once, then start the daemon with `--web`:
+
+```sh
+npm run build:all      # builds the daemon and the dashboard
+npm run start:web      # or: node dist/index.js --web
+```
+
+Then open <http://127.0.0.1:4400>.
+
+Four screens:
+
+- **Dashboard** - what is being mined right now (reward, progress, wall-clock ETA, watch-beat
+  heartbeat), the queue of what comes next and why, recent claims, and an activity feed.
+- **Campaigns** - active, upcoming and completed, grouped by game, with per-drop progress and
+  a detail drawer showing the tier chain and eligible channels.
+- **Priorities** - the ordered game list (drag or arrow keys), the exclusion list, and the
+  "everything else" catch-all toggle.
+- **Settings** - mining behaviour, notifications, account and daemon info.
+
+If you are not logged in, the dashboard shows the device code so you can authorize from the
+browser instead of the terminal.
+
+It binds to `127.0.0.1` by default. `--web-addr 0.0.0.0:4400` exposes it to your network,
+which the daemon warns about: this process holds an OAuth token for your Twitch account, and
+the dashboard has no login of its own. Put it behind Tailscale or a reverse proxy rather than
+opening it up.
+
+To work on the dashboard itself, run the daemon with `--web` and then `npm run dev:web`, which
+starts Vite on port 5173 and proxies `/api` to the daemon.
+
 ## Testing it
 
 ```sh

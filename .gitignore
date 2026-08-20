@@ -5,3 +5,5 @@ config.json
 auth.json
 cache/
 reference/
+web/node_modules/
+web/dist/

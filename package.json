@@ -12,7 +12,11 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "check-hashes": "node dist/tools/check-hashes.js"
+    "check-hashes": "node dist/tools/check-hashes.js",
+    "build:web": "npm --prefix web install && npm --prefix web run build",
+    "build:all": "npm run build && npm run build:web",
+    "dev:web": "npm --prefix web run dev",
+    "start:web": "node dist/index.js --web"
   },
   "dependencies": {
     "undici": "^7.10.0",

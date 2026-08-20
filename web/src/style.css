@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Light is defined on bare :root so it is the fallback everywhere; dark overrides only the
+ * tokens, keeping every component free of theme conditionals.
+ */
+:root {
+    --bg: #f7f7fa;
+    --surface: #ffffff;
+    --surface-2: #f0f0f5;
+    --border: #e2e2ea;
+    --text: #1a1a22;
+    --text-2: #6b6b7a;
+    --accent: #7c3aed;
+    --success: #16a34a;
+    --info: #0284c7;
+    --warn: #d97706;
+    --danger: #dc2626;
+    --muted: #9a9aa8;
+}
+
+.dark {
+    --bg: #0e0e12;
+    --surface: #17171d;
+    --surface-2: #1f1f28;
+    --border: #2a2a35;
+    --text: #efeff4;
+    --text-2: #9a9aa8;
+    --accent: #a970ff;
+    --success: #3ddc84;
+    --info: #4cc2ff;
+    --warn: #ffb454;
+    --danger: #ff5c5c;
+    --muted: #6b6b7a;
+}
+
+html,
+body,
+#app {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Dense tool, not a marketing page. */
+    font-size: 13px;
+}
+
+/* Countdowns and progress figures must not jitter as digits change. */
+.tabular {
+    font-variant-numeric: tabular-nums;
+}
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+/* Bridge our tokens into Element Plus so its components inherit the theme. */
+:root {
+    --el-color-primary: var(--accent);
+    --el-bg-color: var(--surface);
+    --el-bg-color-overlay: var(--surface);
+    --el-text-color-primary: var(--text);
+    --el-text-color-regular: var(--text-2);
+    --el-border-color: var(--border);
+    --el-border-color-light: var(--border);
+    --el-fill-color-blank: var(--surface);
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+.pulse {
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes claim-glow {
+    from { background-color: color-mix(in srgb, var(--success) 22%, transparent); }
+    to { background-color: transparent; }
+}
+.claim-enter {
+    animation: claim-glow 1.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+    }
+}
