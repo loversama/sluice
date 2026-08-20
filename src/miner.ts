@@ -15,6 +15,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const NO_PROGRESS_TIMEOUT_MS = 8 * 60_000;
 /** How long a channel that failed stays out of the rotation. */
 const CHANNEL_COOLDOWN_MS = 30 * 60_000;
+/** How many campaigns to try per cycle before giving the loop a rest. */
+const MAX_CAMPAIGNS_PER_CYCLE = 12;
 
 export interface MinerEvents {
     "campaigns-updated": [Campaign[]];
@@ -205,40 +207,68 @@ export class Miner extends EventEmitter {
         this.pubsub = null;
     }
 
-    /** Pick the best campaign and mine it. Returns false when there is nothing to do. */
+    /**
+     * Work down the ranked campaigns until one has a channel we can actually watch.
+     *
+     * Falling through matters: a campaign nobody is streaming right now is common, and
+     * stopping at the first such campaign would idle the miner for a full refresh interval
+     * while dozens of viable campaigns sat untouched.
+     */
     private async runOnce(): Promise<boolean> {
-        const campaign = this.selectCampaign();
-        if (!campaign) {
-            return false;
-        }
-        const drop = campaign.nextDrop({
-            attemptImpossible: this.config.attemptImpossibleCampaigns,
-        });
-        if (!drop) {
+        const candidates = this.selectCampaigns();
+        if (candidates.length === 0) {
             return false;
         }
 
-        if (this.config.warnUnlinkedAccounts && !campaign.isAccountLinked) {
-            logger.warn(
-                `${campaign.gameName} - "${campaign.name}" is not linked to your Twitch account. ` +
-                    "Progress will be tracked, but rewards will not reach the game until you link it.",
-            );
+        let examined = 0;
+        for (const campaign of candidates) {
+            // Each attempt costs several API calls, so cap the search per cycle rather than
+            // walking a hundred campaigns every time.
+            if (examined >= MAX_CAMPAIGNS_PER_CYCLE) {
+                logger.info(
+                    `Checked ${examined} campaigns without finding a live channel; ` +
+                        `${candidates.length - examined} not tried this cycle.`,
+                );
+                break;
+            }
+
+            const drop = campaign.nextDrop({
+                attemptImpossible: this.config.attemptImpossibleCampaigns,
+            });
+            if (!drop) {
+                continue;
+            }
+            examined++;
+
+            if (this.config.warnUnlinkedAccounts && !campaign.isAccountLinked) {
+                logger.warn(
+                    `${campaign.gameName} - "${campaign.name}" is not linked to your Twitch ` +
+                        "account. Progress is tracked, but rewards will not reach the game.",
+                );
+            }
+
+            const channel = await this.findChannel(campaign);
+            if (!channel) {
+                logger.debug(`No eligible channel online for ${campaign.gameName}.`);
+                // Bench this campaign briefly so the next cycle starts further down the list.
+                this.channelCooldowns.set(`campaign:${campaign.id}`, Date.now() + 5 * 60_000);
+                continue;
+            }
+
+            await this.watch(channel, campaign, drop);
+            return true;
         }
 
-        const channel = await this.findChannel(campaign);
-        if (!channel) {
-            logger.info(`No eligible channel online for ${campaign.gameName}.`);
-            // Back off this campaign briefly so the loop moves on to another one.
-            this.channelCooldowns.set(`campaign:${campaign.id}`, Date.now() + 5 * 60_000);
-            return false;
-        }
-
-        await this.watch(channel, campaign, drop);
-        return true;
+        return false;
     }
 
     /** Highest-priority campaign that is active and has work left. */
     private selectCampaign(): Campaign | null {
+        return this.selectCampaigns()[0] ?? null;
+    }
+
+    /** Every campaign worth trying, best first. */
+    private selectCampaigns(): Campaign[] {
         const now = Date.now();
         const candidates = [...this.campaigns.values()].filter((campaign) => {
             if (!campaign.isActive || campaign.isCompleted) {
@@ -264,7 +294,7 @@ export class Miner extends EventEmitter {
         });
 
         candidates.sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
-        return candidates[0] ?? null;
+        return candidates;
     }
 
     private matchesGame(game: string, campaign: Campaign): boolean {
@@ -705,28 +735,60 @@ export class Miner extends EventEmitter {
             console.log("");
         }
 
-        const target = this.selectCampaign();
-        if (!target) {
+        const candidates = this.selectCampaigns();
+        if (candidates.length === 0) {
             console.log("Nothing selected to mine. Dry run complete.\n");
             return;
         }
-        const drop = target.nextDrop({
-            attemptImpossible: this.config.attemptImpossibleCampaigns,
-        });
-        console.log(`Would mine: ${target.gameName} - ${target.name}`);
+
+        // Mirror the real loop: walk down the ranking until a campaign has a live channel.
+        console.log("Looking for a campaign with a live, eligible channel...\n");
+        let channel = null;
+        let target = null;
+        let drop = null;
+        let examined = 0;
+
+        for (const campaign of candidates) {
+            if (examined >= MAX_CAMPAIGNS_PER_CYCLE) {
+                break;
+            }
+            const next = campaign.nextDrop({
+                attemptImpossible: this.config.attemptImpossibleCampaigns,
+            });
+            if (!next) {
+                continue;
+            }
+            examined++;
+            process.stdout.write(`  ${examined}. ${campaign.gameName} - ${campaign.name} ... `);
+            const found = await this.findChannel(campaign);
+            if (!found) {
+                console.log("no live channel");
+                continue;
+            }
+            console.log(`${found.displayName} (${found.stream?.viewers ?? 0} viewers)`);
+            channel = found;
+            target = campaign;
+            drop = next;
+            break;
+        }
+
+        if (!channel || !target) {
+            console.log(
+                `\n  Checked ${examined} campaigns; none had a live, eligible channel right now.`,
+            );
+            console.log("  Channel selection ran correctly - this is simply what is online.\n");
+            return;
+        }
+
+        console.log(`\nWould mine: ${target.gameName} - ${target.name}`);
         if (drop) {
             console.log(`Target drop: ${drop.rewardNames} (${drop.remainingMinutes} min remaining)`);
         }
-
-        console.log("\nLooking for an eligible channel...");
-        const channel = await this.findChannel(target);
-        if (!channel) {
-            console.log("  No eligible channel online right now.");
-            console.log("  (Channel selection ran correctly; nobody is streaming it.)\n");
-            return;
+        if (!target.isAccountLinked) {
+            console.log("NOTE: this campaign is not linked to your Twitch account -");
+            console.log("      progress is tracked but the reward will not reach the game.");
         }
-        console.log(`  Selected: ${channel.displayName} (${channel.stream?.viewers ?? 0} viewers)`);
-        console.log(`  Verified this channel grants the campaign.`);
+        console.log(`Channel: ${channel.displayName} - verified it grants this campaign.`);
 
         // Resolving the Spade URL is the one piece most likely to rot, so prove it here.
         console.log("\nResolving the Spade watch endpoint...");

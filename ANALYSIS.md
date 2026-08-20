@@ -69,15 +69,28 @@ GraphQL layer was fine; the automation surface was the liability.
 process, and there is no DOM to scrape — this immunises the bot against login page redesigns
 and 2FA changes, killing three of the original's top issues outright.
 
-**2. No integrity token, anywhere.**
-The current source contains zero integrity handling. Verified independently against live
-Twitch (2026-08): the `IntegrityCheckFailed` challenge fires on *unauthenticated* GQL
-requests, and a valid `Authorization: OAuth <token>` header satisfies it. Adding
-`X-Device-Id` and `Client-Session-Id` alone does **not** help.
+**2. It authenticates as the Android app, which sidesteps integrity entirely.**
+`twitch.py` sets `ClientType.ANDROID_APP` - client ID `kd1unb4b3q4t58fwlpcbzcbnm76a8fp`,
+with a Dalvik user-agent. This is the single most important detail in the whole project.
 
-Corroboration: DevilXD's issue tracker has only two matches for "integrity" ever, the last
-closed in 2022, across thousands of users. The original bot's problem was that it *asked for*
-an integrity token from an automated browser and got flagged. The fix is to not ask.
+Twitch gates the drops operations behind an `IntegrityCheckFailed` challenge for the **web**
+client ID. Verified against live Twitch (2026-08) with a real account:
+
+| Request | Result |
+| --- | --- |
+| Web client ID, no auth | `IntegrityCheckFailed` |
+| Web client ID + valid OAuth token | `IntegrityCheckFailed` |
+| Android client ID + *web-issued* token | `IntegrityCheckFailed` |
+| Android client ID + Android-issued token | works |
+
+Two things follow. An OAuth token does **not** satisfy the integrity challenge - an earlier
+assumption here that it did was wrong. And swapping only the `Client-Id` header is not
+enough: the token must be *issued by* that client, so the device-code login and every
+subsequent GQL request have to use the Android identity consistently.
+
+The original bot's failure now makes sense: it authenticated as the web client, then asked
+`gql.twitch.tv/integrity` for a token and got flagged `is_bad_bot`. The fix is not to solve
+the challenge but to be a client that is not challenged.
 
 **3. Watching is a single analytics POST.**
 Twitch's player reports viewing by POSTing a base64'd `minute-watched` event to a per-channel
@@ -97,6 +110,10 @@ fallback (`GET` playlist, `HEAD` the last segment) alongside it.
 - PING every 3 minutes with a PONG timeout that forces reconnect — a silently dead socket
   costs drop progress.
 - The game *directory* query needs a URL **slug**, not the display name.
+- HTTP redirects must be followed. Presenting the Android user-agent to `twitch.tv/<channel>`
+  earns a 302 to `m.twitch.tv`; aiohttp follows it silently, which is what their "for mobile
+  view" note refers to. Any client that does not follow redirects sees an empty body and
+  fails to find the Spade URL.
 
 ## Verified live (2026-08-20)
 

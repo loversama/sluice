@@ -6,10 +6,10 @@ import { request } from "undici";
 
 import logger from "../logger.js";
 import {
+    DEFAULT_CLIENT,
     OAUTH_DEVICE_URL,
     OAUTH_TOKEN_URL,
     OAUTH_VALIDATE_URL,
-    WEB_CLIENT,
     type ClientInfo,
 } from "./constants.js";
 import type { DeviceCodeResponse, TokenResponse, ValidateResponse } from "./types.js";
@@ -22,6 +22,8 @@ export interface StoredAuth {
     userId: string;
     login: string;
     deviceId: string;
+    /** Which client issued this token. A token is only usable by its issuing client. */
+    clientId?: string;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,7 +55,7 @@ export class AuthState {
     userId = "";
     login = "";
 
-    constructor(client: ClientInfo = WEB_CLIENT) {
+    constructor(client: ClientInfo = DEFAULT_CLIENT) {
         this.client = client;
         this.deviceId = randomHex(32);
         this.sessionId = randomHex(16);
@@ -95,6 +97,7 @@ export class AuthState {
             userId: this.userId,
             login: this.login,
             deviceId: this.deviceId,
+            clientId: this.client.clientId,
         };
     }
 
@@ -108,6 +111,13 @@ export class AuthState {
     async load(path: string): Promise<boolean> {
         try {
             const stored = JSON.parse(await readFile(path, "utf8")) as StoredAuth;
+            // A token issued by a different client will fail the integrity check rather than
+            // erroring cleanly, so discard it and force a fresh login instead.
+            // Missing clientId means it predates this field, so it cannot be trusted either.
+            if (stored.clientId !== this.client.clientId) {
+                logger.info("Stored credentials were issued by a different client; re-authorizing.");
+                return false;
+            }
             this.accessToken = stored.accessToken;
             this.refreshToken = stored.refreshToken;
             this.userId = stored.userId;

@@ -16,8 +16,12 @@ export interface ClientInfo {
 }
 
 /**
- * The public web client ID. This is not a secret - it is embedded in twitch.tv and is the
- * same for every visitor.
+ * The public web client ID, embedded in twitch.tv and identical for every visitor.
+ *
+ * Do NOT use this for the drops flow. Twitch gates the drops operations behind a proof-of-work
+ * "integrity" challenge for this client, and an OAuth token alone does not satisfy it -
+ * authenticated requests still fail with IntegrityCheckFailed. It remains here only for
+ * unauthenticated public queries and for the hash health check.
  */
 export const WEB_CLIENT: ClientInfo = {
     clientUrl: "https://www.twitch.tv",
@@ -26,6 +30,25 @@ export const WEB_CLIENT: ClientInfo = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
 };
+
+/**
+ * The Twitch Android app's client ID - what this bot actually authenticates as.
+ *
+ * The Android client is not subject to the integrity challenge that blocks the web client,
+ * which is what makes headless drop mining work at all. The token must be *issued* by this
+ * client for it to help: presenting a web-issued token with this Client-Id still fails, so
+ * the device-code login and every GQL request have to use it consistently.
+ */
+export const ANDROID_CLIENT: ClientInfo = {
+    clientUrl: "https://www.twitch.tv",
+    clientId: "kd1unb4b3q4t58fwlpcbzcbnm76a8fp",
+    userAgent:
+        "Dalvik/2.1.0 (Linux; U; Android 16; SM-S911B Build/TP1A.220624.014) " +
+        "tv.twitch.android.app/25.3.0/2503006",
+};
+
+/** The client identity used for all authenticated work. */
+export const DEFAULT_CLIENT = ANDROID_CLIENT;
 
 export const GQL_URL = "https://gql.twitch.tv/gql";
 export const PUBSUB_URL = "wss://pubsub-edge.twitch.tv/v1";

@@ -206,13 +206,17 @@ export class Channel {
     /**
      * The Spade URL is not exposed by any API. It lives in the channel page, or - more often
      * now - in the settings JavaScript bundle the page loads.
+     *
+     * Redirects must be followed: twitch.tv answers the Android user-agent we identify as
+     * with a 302 to m.twitch.tv, and undici does not follow redirects unless asked. The
+     * mobile page carries the same settings bundle, so the rest of the walk is unchanged.
      */
     private async resolveSpadeUrl(): Promise<string> {
-        const pageResponse = await request(this.url, {
-            method: "GET",
-            headers: { ...this.auth.headers(), Accept: "text/html" },
-        });
-        const html = await pageResponse.body.text();
+        const pageHeaders = { ...this.auth.headers(), Accept: "*/*" };
+
+        // fetch() follows redirects by default; undici's request() does not.
+        const pageResponse = await fetch(this.url, { headers: pageHeaders });
+        const html = await pageResponse.text();
 
         const direct = SPADE_PATTERN.exec(html);
         if (direct?.[1]) {
@@ -223,11 +227,8 @@ export class Channel {
         if (!settings?.[1]) {
             throw new WatchError(`Could not locate the settings bundle for ${this.login}`);
         }
-        const settingsResponse = await request(settings[1], {
-            method: "GET",
-            headers: this.auth.headers(),
-        });
-        const js = await settingsResponse.body.text();
+        const settingsResponse = await fetch(settings[1], { headers: pageHeaders });
+        const js = await settingsResponse.text();
         const nested = SPADE_PATTERN.exec(js);
         if (!nested?.[1]) {
             throw new WatchError(`Could not locate the Spade URL for ${this.login}`);
