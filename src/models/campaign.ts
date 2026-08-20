@@ -50,9 +50,15 @@ export class Drop {
         return this.requiredMinutes === 0 ? 1 : this.currentMinutes / this.requiredMinutes;
     }
 
-    /** Ready to claim: watched enough, not yet claimed, and Twitch issued an instance ID. */
+    /**
+     * Ready to claim: watched long enough and not yet claimed.
+     *
+     * Deliberately does not require `dropInstanceId`. Twitch sometimes never sends one, but
+     * the ID is derivable from IDs we already hold, so a missing instance ID is not a reason
+     * to leave a finished drop uncollected.
+     */
     get isClaimable(): boolean {
-        return !this.isClaimed && this.dropInstanceId !== null && this.currentMinutes >= this.requiredMinutes;
+        return !this.isClaimed && this.currentMinutes >= this.requiredMinutes;
     }
 
     get isActive(): boolean {

@@ -18,6 +18,12 @@ const NO_PROGRESS_TIMEOUT_MS = 8 * 60_000;
 const CHANNEL_COOLDOWN_MS = 30 * 60_000;
 /** How many campaigns to try per cycle before giving the loop a rest. */
 const MAX_CAMPAIGNS_PER_CYCLE = 12;
+/**
+ * Twitch keeps a finished drop claimable from the inventory page for 24 hours after its
+ * campaign ends, so an expired campaign is not necessarily a lost one.
+ * https://help.twitch.tv/s/article/mission-based-drops#claiming
+ */
+const CLAIM_GRACE_MS = 24 * 60 * 60_000;
 
 export interface MinerEvents {
     "campaigns-updated": [Campaign[]];
@@ -108,6 +114,7 @@ export class Miner extends EventEmitter {
     /** Regenerated each refresh so "random" mode varies between cycles but not within one. */
     private randomKeys = new Map<string, number>();
     private steam: SteamLibrary | null = null;
+    private boundaryTimer: NodeJS.Timeout | null = null;
 
     constructor(
         private readonly auth: AuthState,
@@ -302,6 +309,10 @@ export class Miner extends EventEmitter {
 
     stop(): void {
         this.stopping = true;
+        if (this.boundaryTimer) {
+            clearTimeout(this.boundaryTimer);
+            this.boundaryTimer = null;
+        }
         this.pubsub?.close();
         this.pubsub = null;
     }
@@ -638,15 +649,19 @@ export class Miner extends EventEmitter {
     }
 
     private async claim(drop: Drop, campaign: Campaign): Promise<void> {
-        if (!drop.dropInstanceId || this.claimedDropIds.has(drop.id)) {
+        if (this.claimedDropIds.has(drop.id)) {
             return;
         }
+        // Twitch does not always hand back an instance ID, but it is composed of IDs we
+        // already have, so derive it rather than abandoning a finished drop.
+        const instanceId =
+            drop.dropInstanceId ?? `${this.auth.userId}#${campaign.id}#${drop.id}`;
         if (this.dryRun) {
             logger.info(`[dry run] Would claim: ${drop.rewardNames} (${campaign.gameName})`);
             return;
         }
         try {
-            const claimed = await this.gql.claimDrop(drop.dropInstanceId);
+            const claimed = await this.gql.claimDrop(instanceId);
             if (claimed) {
                 drop.isClaimed = true;
                 this.claimedDropIds.add(drop.id);
@@ -772,6 +787,59 @@ export class Miner extends EventEmitter {
             }
         };
         setTimeout(tick, interval).unref();
+    }
+
+    /**
+     * Refresh the moment a campaign or drop becomes available, rather than up to a full poll
+     * interval later. Short campaigns - 15-minute drops are common - can otherwise be half
+     * over before the regular refresh notices them.
+     */
+    private scheduleBoundaryRefresh(): void {
+        if (this.boundaryTimer) {
+            clearTimeout(this.boundaryTimer);
+            this.boundaryTimer = null;
+        }
+
+        const now = Date.now();
+        let soonest = Number.POSITIVE_INFINITY;
+        for (const campaign of this.campaigns.values()) {
+            for (const moment of [campaign.startAt.getTime(), campaign.endAt.getTime()]) {
+                if (moment > now && moment < soonest) {
+                    soonest = moment;
+                }
+            }
+            // Tiered drops unlock on their own schedule, independent of the campaign's.
+            for (const drop of campaign.drops) {
+                const start = drop.startAt.getTime();
+                if (start > now && start < soonest) {
+                    soonest = start;
+                }
+            }
+        }
+        if (!Number.isFinite(soonest)) {
+            return;
+        }
+
+        // A few seconds past the boundary, so Twitch has flipped the status before we ask.
+        const delay = soonest - now + 5_000;
+        const regularInterval = this.config.campaignRefreshMinutes * 60_000;
+        if (delay >= regularInterval) {
+            // The scheduled refresh already covers it.
+            return;
+        }
+
+        this.boundaryTimer = setTimeout(
+            () => {
+                if (this.stopping) {
+                    return;
+                }
+                logger.debug("Campaign boundary reached, refreshing early");
+                void this.refreshCampaigns().catch((error) => {
+                    logger.debug("Boundary refresh failed:", error);
+                });
+            },
+            Math.max(60_000, delay),
+        ).unref();
     }
 
     private currentBestCampaignId(): string | undefined {
@@ -923,7 +991,13 @@ export class Miner extends EventEmitter {
         const next = new Map<string, Campaign>();
         for (const data of listed) {
             if (data.status === "EXPIRED") {
-                continue;
+                // Keep recently-ended campaigns so anything finished but unclaimed can still
+                // be collected within the grace window. They cannot be mined - every drop is
+                // inactive, so the campaign never becomes selectable.
+                const endedAgo = Date.now() - new Date(data.endAt).getTime();
+                if (endedAgo > CLAIM_GRACE_MS) {
+                    continue;
+                }
             }
             next.set(data.id, new Campaign(data));
             this.randomKeys.set(data.id, Math.random());
@@ -975,6 +1049,7 @@ export class Miner extends EventEmitter {
         }
 
         this.campaigns = next;
+        this.scheduleBoundaryRefresh();
         const mineable = [...next.values()].filter(
             (campaign) => campaign.isActive && !campaign.isCompleted,
         );
