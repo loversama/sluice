@@ -54,6 +54,25 @@ export class Miner extends EventEmitter {
         super();
     }
 
+    /** Every campaign currently known, active and upcoming alike. */
+    getCampaigns(): Campaign[] {
+        return [...this.campaigns.values()];
+    }
+
+    /** Campaigns that have not started yet, soonest first. */
+    getUpcomingCampaigns(): Campaign[] {
+        return this.getCampaigns()
+            .filter((campaign) => campaign.isUpcoming)
+            .sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+    }
+
+    /** Active campaigns with work left, in the order they would be mined. */
+    getMineableCampaigns(): Campaign[] {
+        return this.getCampaigns()
+            .filter((campaign) => campaign.isActive && !campaign.isCompleted)
+            .sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
+    }
+
     async start(): Promise<void> {
         this.pubsub = new PubSubPool(this.auth.accessToken);
         this.attachPubSubHandlers(this.pubsub);
@@ -538,6 +557,27 @@ export class Miner extends EventEmitter {
             console.log("");
         }
 
+        const upcoming = this.getUpcomingCampaigns();
+        if (upcoming.length > 0) {
+            console.log(`Upcoming campaigns (${upcoming.length}), soonest first:`);
+            for (const campaign of upcoming.slice(0, 8)) {
+                const days = (campaign.startAt.getTime() - Date.now()) / 86_400_000;
+                const when =
+                    days < 1
+                        ? `in ${Math.max(1, Math.round(days * 24))}h`
+                        : `in ${Math.round(days)}d`;
+                const rewards = campaign.drops
+                    .map((drop) => drop.rewardNames)
+                    .filter(Boolean)
+                    .join(", ");
+                console.log(`  ${campaign.gameName} - ${campaign.name}  (starts ${when})`);
+                if (rewards) {
+                    console.log(`      ${rewards}`);
+                }
+            }
+            console.log("");
+        }
+
         const target = this.selectCampaign();
         if (!target) {
             console.log("Nothing selected to mine. Dry run complete.\n");
@@ -593,7 +633,9 @@ export class Miner extends EventEmitter {
         // The campaign list omits drop details, so fetch them for anything we might mine.
         // Restricting this to interesting campaigns keeps the request count sane.
         const interesting = [...next.values()]
-            .filter((campaign) => campaign.isActive)
+            // Upcoming campaigns are included so we can show what is coming and what it
+            // rewards, even though they cannot be mined yet.
+            .filter((campaign) => campaign.isActive || campaign.isUpcoming)
             .filter(
                 (campaign) =>
                     !this.config.excludedGames.some((game) => this.matchesGame(game, campaign)),
