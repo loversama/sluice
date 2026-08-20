@@ -247,7 +247,11 @@ export type PriorityMode =
     /** Shuffled, so the same campaigns are not always favoured. */
     | "random"
     /** Stay on the current game until its campaigns are done, then move on. */
-    | "one_game_at_a_time";
+    | "one_game_at_a_time"
+    /** Games owned on Steam first, most-played first. */
+    | "steam_playtime"
+    /** Games owned on Steam first, most recently played first. */
+    | "steam_recent";
 
 export interface RankingOptions {
     priorityGames: string[];
@@ -260,6 +264,11 @@ export interface RankingOptions {
     randomKeys?: Map<string, number>;
     /** Game currently being mined, used by "one_game_at_a_time". */
     focusGameId?: string | null;
+    /**
+     * Ranking weight from the user's Steam library, higher being more wanted and 0 meaning
+     * not owned. Supplied by the caller so this module stays free of Steam concerns.
+     */
+    steamScore?: (campaign: Campaign) => number;
 }
 
 function priorityRank(campaign: Campaign, priorityGames: string[]): number {
@@ -291,7 +300,14 @@ export function compareCampaigns(a: Campaign, b: Campaign, options: RankingOptio
         }
     }
 
-    if (mode === "random") {
+    if (mode === "steam_playtime" || mode === "steam_recent") {
+        const scoreA = options.steamScore?.(a) ?? 0;
+        const scoreB = options.steamScore?.(b) ?? 0;
+        if (scoreA !== scoreB) {
+            // Descending: more playtime, or more recently played, comes first.
+            return scoreB - scoreA;
+        }
+    } else if (mode === "random") {
         const keyA = options.randomKeys?.get(a.id) ?? 0;
         const keyB = options.randomKeys?.get(b.id) ?? 0;
         if (keyA !== keyB) {

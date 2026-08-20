@@ -3,6 +3,7 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import Dashboard from "./views/Dashboard.vue";
 import Campaigns from "./views/Campaigns.vue";
 import Priorities from "./views/Priorities.vue";
+import Links from "./views/Links.vue";
 import Settings from "./views/Settings.vue";
 
 /*
@@ -16,6 +17,7 @@ export default createRouter({
         { path: "/campaigns", name: "campaigns", component: Campaigns },
         { path: "/campaigns/:id", name: "campaign", component: Campaigns },
         { path: "/priorities", name: "priorities", component: Priorities },
+        { path: "/links", name: "links", component: Links },
         { path: "/settings", name: "settings", component: Settings },
         { path: "/:pathMatch(.*)*", redirect: "/" },
     ],

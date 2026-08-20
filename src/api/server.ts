@@ -9,6 +9,8 @@ import type { Config } from "../config.js";
 import type { Miner } from "../miner.js";
 import type { AuthState } from "../twitch/auth.js";
 import type { NotifierGroup } from "../notifiers/index.js";
+import type { SteamLibrary } from "../steam/library.js";
+import { buildLoginUrl, verifyCallback } from "../steam/openid.js";
 import { isMasked, maskConfig, serializeCampaign } from "./serialize.js";
 
 export interface DeviceCodeInfo {
@@ -33,6 +35,11 @@ export interface ServerContext {
     getConfig(): Config;
     setConfig(config: Config): Promise<void>;
     getNotifier(): NotifierGroup;
+    getSteamLibrary(): SteamLibrary | null;
+    /** Store credentials and pull the library. Returns the number of games found. */
+    connectSteam(input: { apiKey?: string; steamId?: string }): Promise<number>;
+    refreshSteam(): Promise<number>;
+    disconnectSteam(): Promise<void>;
 }
 
 const MIME: Record<string, string> = {
@@ -213,6 +220,71 @@ export class ApiServer {
             });
         }
 
+        if (path === "/api/steam" && method === "GET") {
+            const library = this.context.getSteamLibrary();
+            const config = this.context.getConfig();
+            return sendJson(response, 200, {
+                connected: Boolean(config.steam.steamId && config.steam.apiKey),
+                hasApiKey: Boolean(config.steam.apiKey),
+                steamId: config.steam.steamId ?? null,
+                personaName: library?.personaName ?? null,
+                gameCount: library?.size ?? 0,
+                fetchedAt: library?.fetchedAt ? new Date(library.fetchedAt).toISOString() : null,
+            });
+        }
+
+        if (path === "/api/steam/connect" && method === "POST") {
+            const body = (await readBody(request)) as { apiKey?: string; steamId?: string };
+            // A masked key means "keep the stored one".
+            const apiKey = isMasked(body.apiKey) ? undefined : body.apiKey;
+            const count = await this.context.connectSteam({ apiKey, steamId: body.steamId });
+            return sendJson(response, 200, { ok: true, gameCount: count });
+        }
+
+        if (path === "/api/steam/refresh" && method === "POST") {
+            const count = await this.context.refreshSteam();
+            return sendJson(response, 200, { ok: true, gameCount: count });
+        }
+
+        if (path === "/api/steam/disconnect" && method === "POST") {
+            await this.context.disconnectSteam();
+            return sendJson(response, 200, { ok: true });
+        }
+
+        // Steam sign-in, so the user does not have to find their 64-bit ID by hand.
+        if (path === "/api/steam/login" && method === "GET") {
+            const origin = this.originFor(request);
+            const target = buildLoginUrl(`${origin}/api/steam/callback`, `${origin}/`);
+            response.writeHead(302, { Location: target });
+            response.end();
+            return;
+        }
+
+        if (path === "/api/steam/callback" && method === "GET") {
+            const steamId = await verifyCallback(url.searchParams);
+            if (!steamId) {
+                response.writeHead(302, { Location: "/#/settings?steam=failed" });
+                response.end();
+                return;
+            }
+            try {
+                await this.context.connectSteam({ steamId });
+                response.writeHead(302, { Location: "/#/settings?steam=connected" });
+            } catch (error) {
+                logger.warn(`Steam sign-in succeeded but the library could not be read: ${error}`);
+                // Identity is established even if the library read failed - usually a
+                // missing API key, which the settings page will prompt for.
+                response.writeHead(302, { Location: "/#/settings?steam=needs-key" });
+            }
+            response.end();
+            return;
+        }
+
+        if (path === "/api/links" && method === "GET") {
+            const miner = this.context.getMiner();
+            return sendJson(response, 200, { suggestions: miner?.getLinkSuggestions() ?? [] });
+        }
+
         if (path === "/api/notify/test" && method === "POST") {
             const notifier = this.context.getNotifier();
             if (notifier.isEmpty) {
@@ -223,6 +295,13 @@ export class ApiServer {
         }
 
         return sendJson(response, 404, { error: "Not found" });
+    }
+
+    /** Best-effort origin for OpenID return URLs, from the Host header the browser used. */
+    private originFor(request: IncomingMessage): string {
+        const host = request.headers.host ?? "127.0.0.1:4400";
+        const proto = (request.headers["x-forwarded-proto"] as string | undefined) ?? "http";
+        return `${proto}://${host}`;
     }
 
     /** Merge an incoming config patch, preserving secrets the client sent back masked. */
@@ -240,6 +319,9 @@ export class ApiServer {
         const discord = merged.notifications.discord;
         if (discord && isMasked(discord.webhookUrl)) {
             discord.webhookUrl = current.notifications.discord?.webhookUrl ?? "";
+        }
+        if (merged.steam && isMasked(merged.steam.apiKey)) {
+            merged.steam.apiKey = current.steam.apiKey;
         }
         if (merged.campaignRefreshMinutes < 5) {
             merged.campaignRefreshMinutes = 5;

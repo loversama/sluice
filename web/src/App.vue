@@ -12,6 +12,7 @@ const NAV = [
     { to: "/", label: "Dashboard", icon: "◧" },
     { to: "/campaigns", label: "Campaigns", icon: "▤" },
     { to: "/priorities", label: "Priorities", icon: "☰" },
+    { to: "/links", label: "Links", icon: "⚿" },
     { to: "/settings", label: "Settings", icon: "⚙" },
 ];
 

@@ -12,6 +12,8 @@ import { AuthState } from "./twitch/auth.js";
 import { StaleQueryHashError, TwitchGql } from "./twitch/gql.js";
 import { ApiServer, type DeviceCodeInfo, type ServerContext } from "./api/server.js";
 import { serializeCampaign } from "./api/serialize.js";
+import { SteamClient, resolveSteamId } from "./steam/client.js";
+import { SteamLibrary } from "./steam/library.js";
 
 const VERSION = "0.3.0";
 
@@ -23,6 +25,7 @@ Usage: twitch-drops-bot [options]
 Options:
   -c, --config <path>   Config file (default: ./config.json)
   -a, --auth <path>     Credential store (default: ./auth.json)
+      --steam <path>    Steam library cache (default: ./steam.json)
   -l, --log <level>     error | warn | info | debug
       --web             Serve the dashboard and HTTP API
       --web-addr <addr> Address for the dashboard (default: 127.0.0.1:4400)
@@ -44,6 +47,7 @@ async function main(): Promise<void> {
         options: {
             config: { type: "string", short: "c", default: "config.json" },
             auth: { type: "string", short: "a", default: "auth.json" },
+            steam: { type: "string", default: "steam.json" },
             log: { type: "string", short: "l" },
             web: { type: "boolean", default: false },
             "web-addr": { type: "string", default: "127.0.0.1:4400" },
@@ -75,6 +79,24 @@ async function main(): Promise<void> {
     let authStatus: "pending" | "ok" = "pending";
     let deviceCode: DeviceCodeInfo | null = null;
 
+    const steamPath = resolve(values.steam!);
+    const steamLibrary = new SteamLibrary();
+    await steamLibrary.load(steamPath);
+
+    /** Pull the library from Steam, using whatever credentials the config holds. */
+    const refreshSteam = async (): Promise<number> => {
+        const { apiKey, steamId } = config.steam;
+        if (!apiKey) {
+            throw new Error("No Steam API key configured.");
+        }
+        if (!steamId) {
+            throw new Error("No Steam account connected.");
+        }
+        const count = await steamLibrary.refresh(new SteamClient(apiKey), steamId);
+        await steamLibrary.save(steamPath);
+        return count;
+    };
+
     const context: ServerContext = {
         auth,
         version: VERSION,
@@ -97,6 +119,32 @@ async function main(): Promise<void> {
             }
         },
         getNotifier: () => notifier,
+        getSteamLibrary: () => (steamLibrary.isLoaded ? steamLibrary : null),
+        connectSteam: async (input) => {
+            const apiKey = input.apiKey ?? config.steam.apiKey;
+            if (!apiKey) {
+                throw new Error("A Steam Web API key is required to read your library.");
+            }
+            const client = new SteamClient(apiKey);
+            const steamId = input.steamId
+                ? await resolveSteamId(input.steamId, client)
+                : config.steam.steamId;
+            if (!steamId) {
+                throw new Error("No Steam account given.");
+            }
+            await context.setConfig({
+                ...config,
+                steam: { ...config.steam, apiKey, steamId },
+            });
+            return refreshSteam();
+        },
+        refreshSteam,
+        disconnectSteam: async () => {
+            await context.setConfig({
+                ...config,
+                steam: { ...config.steam, apiKey: undefined, steamId: undefined },
+            });
+        },
     };
 
     let server: ApiServer | null = null;
@@ -145,6 +193,21 @@ async function main(): Promise<void> {
 
     const gql = new TwitchGql(auth);
     miner = new Miner(auth, gql, config);
+    miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
+
+    // Refresh the Steam library if it is configured and the cache has gone stale.
+    if (config.steam.apiKey && config.steam.steamId) {
+        const ageHours = (Date.now() - steamLibrary.fetchedAt) / 3_600_000;
+        if (!steamLibrary.isLoaded || ageHours >= config.steam.refreshHours) {
+            try {
+                await refreshSteam();
+                miner.setSteamLibrary(steamLibrary);
+            } catch (error) {
+                // A stale library still ranks better than none, so keep going.
+                logger.warn(`Could not refresh the Steam library: ${(error as Error).message}`);
+            }
+        }
+    }
 
     // Translate miner events into the JSON shapes the dashboard consumes.
     miner.on("watching", ({ channel, campaign, drop }) => {

@@ -7,6 +7,7 @@ import { Channel } from "./models/channel.js";
 import type { AuthState } from "./twitch/auth.js";
 import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
 import { PubSubPool, type DropProgressMessage } from "./twitch/websocket.js";
+import type { SteamLibrary } from "./steam/library.js";
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,6 +38,24 @@ export interface FeedEntry {
     at: number;
     level: FeedLevel;
     message: string;
+}
+
+/**
+ * A game whose campaigns are earning progress that will never reach the game, because the
+ * Twitch account is not linked to the publisher.
+ */
+export interface LinkSuggestion {
+    gameId: string;
+    gameName: string;
+    /** Unlinked campaigns currently running for this game. */
+    campaignCount: number;
+    ownedOnSteam: boolean;
+    /** Total minutes played on Steam, or null when the library is unavailable. */
+    playtimeMinutes: number | null;
+    /** Minutes already watched toward these campaigns - progress that is currently wasted. */
+    wastedMinutes: number;
+    /** Rewards at stake, for showing the user what they are missing. */
+    rewards: string[];
 }
 
 export interface ClaimRecord {
@@ -88,6 +107,7 @@ export class Miner extends EventEmitter {
     private readonly feedEntries: FeedEntry[] = [];
     /** Regenerated each refresh so "random" mode varies between cycles but not within one. */
     private randomKeys = new Map<string, number>();
+    private steam: SteamLibrary | null = null;
 
     constructor(
         private readonly auth: AuthState,
@@ -97,14 +117,81 @@ export class Miner extends EventEmitter {
         super();
     }
 
+    /** Attach a Steam library so ownership and playtime can influence ranking. */
+    setSteamLibrary(library: SteamLibrary | null): void {
+        this.steam = library;
+    }
+
     /** The ranking rules in force right now, including live focus and shuffle state. */
     private rankingOptions(): RankingOptions {
+        const steam = this.steam;
+        const mode = this.config.priorityMode;
         return {
             priorityGames: this.config.priorityGames,
-            mode: this.config.priorityMode,
+            mode,
             randomKeys: this.randomKeys,
             focusGameId: this.currentCampaign?.gameId ?? null,
+            steamScore:
+                steam && (mode === "steam_playtime" || mode === "steam_recent")
+                    ? (campaign) =>
+                          steam.score(
+                              campaign.gameName,
+                              mode === "steam_recent" ? "recent" : "playtime",
+                          )
+                    : undefined,
         };
+    }
+
+    /**
+     * Games where linking the Twitch account would convert wasted watch time into rewards.
+     *
+     * Ranked by how much the user probably cares: games they own on Steam first, then by how
+     * much progress is already being thrown away.
+     */
+    getLinkSuggestions(): LinkSuggestion[] {
+        const byGame = new Map<string, LinkSuggestion>();
+
+        for (const campaign of this.campaigns.values()) {
+            if (!campaign.isActive || campaign.isAccountLinked || campaign.isCompleted) {
+                continue;
+            }
+            const existing = byGame.get(campaign.gameId) ?? {
+                gameId: campaign.gameId,
+                gameName: campaign.gameName,
+                campaignCount: 0,
+                ownedOnSteam: false,
+                playtimeMinutes: null,
+                wastedMinutes: 0,
+                rewards: [],
+            };
+            existing.campaignCount++;
+            for (const drop of campaign.drops) {
+                if (!drop.isClaimed) {
+                    existing.wastedMinutes += drop.currentMinutes;
+                    if (drop.rewardNames && existing.rewards.length < 4) {
+                        existing.rewards.push(drop.rewardNames);
+                    }
+                }
+            }
+            byGame.set(campaign.gameId, existing);
+        }
+
+        for (const suggestion of byGame.values()) {
+            const owned = this.steam?.match(suggestion.gameName) ?? null;
+            suggestion.ownedOnSteam = owned !== null;
+            suggestion.playtimeMinutes = owned ? owned.playtimeForever : null;
+        }
+
+        return [...byGame.values()].sort((a, b) => {
+            if (a.ownedOnSteam !== b.ownedOnSteam) {
+                return a.ownedOnSteam ? -1 : 1;
+            }
+            const playtimeDelta = (b.playtimeMinutes ?? 0) - (a.playtimeMinutes ?? 0);
+            if (playtimeDelta !== 0) {
+                return playtimeDelta;
+            }
+            return b.wastedMinutes - a.wastedMinutes;
+        });
     }
 
     /** Record a human-readable activity line and emit it to listeners. */

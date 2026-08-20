@@ -21,12 +21,79 @@ const form = reactive({
 });
 
 const newChannel = ref("");
+const steam = ref(null);
+const steamApiKey = ref("");
+const steamAccount = ref("");
+const steamBusy = ref(false);
 const saved = ref(false);
 const testing = ref(false);
 
 onMounted(async () => {
     if (!store.config) await store.loadConfig();
+    await loadSteam();
+
+    // The Steam sign-in round-trip comes back with a hint in the query string.
+    const outcome = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("steam");
+    if (outcome === "connected") ElMessage.success("Steam account connected.");
+    if (outcome === "failed") ElMessage.error("Steam sign-in could not be verified.");
+    if (outcome === "needs-key") {
+        ElMessage.warning("Signed in to Steam. Add your Web API key to read your library.");
+    }
 });
+
+async function loadSteam() {
+    steam.value = await fetch("/api/steam")
+        .then((response) => response.json())
+        .catch(() => null);
+    if (steam.value?.hasApiKey) {
+        steamApiKey.value = "********";
+    }
+}
+
+async function steamPost(path, body) {
+    steamBusy.value = true;
+    try {
+        const response = await fetch(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body ?? {}),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`);
+        await loadSteam();
+        return data;
+    } finally {
+        steamBusy.value = false;
+    }
+}
+
+async function connectSteam() {
+    try {
+        const data = await steamPost("/api/steam/connect", {
+            apiKey: steamApiKey.value,
+            steamId: steamAccount.value || undefined,
+        });
+        ElMessage.success(`Connected - ${data.gameCount} games found.`);
+    } catch (error) {
+        ElMessage.error(error.message);
+    }
+}
+
+async function refreshSteam() {
+    try {
+        const data = await steamPost("/api/steam/refresh");
+        ElMessage.success(`Refreshed - ${data.gameCount} games.`);
+    } catch (error) {
+        ElMessage.error(error.message);
+    }
+}
+
+async function disconnectSteam() {
+    await steamPost("/api/steam/disconnect");
+    steamApiKey.value = "";
+    steamAccount.value = "";
+    ElMessage.info("Steam disconnected.");
+}
 
 watch(
     () => store.config,
@@ -166,6 +233,97 @@ function addChannel() {
                     @keyup.enter="addChannel"
                 />
             </div>
+        </section>
+
+        <section class="card p-4 space-y-3">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Steam library
+            </h2>
+            <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
+                Connecting Steam lets the miner rank campaigns by the games you actually own and
+                play, and shows which Twitch accounts are worth linking.
+            </p>
+
+            <div
+                v-if="steam?.connected"
+                class="rounded-lg p-3 flex items-center gap-3"
+                :style="{ background: 'var(--surface-2)' }"
+            >
+                <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium">
+                        {{ steam.personaName || steam.steamId }}
+                    </p>
+                    <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        {{ steam.gameCount }} games
+                        <template v-if="steam.fetchedAt">
+                            &middot; synced {{ formatRelative(steam.fetchedAt) }}
+                        </template>
+                    </p>
+                </div>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px]"
+                    :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                    :disabled="steamBusy"
+                    @click="refreshSteam"
+                >
+                    {{ steamBusy ? "Syncing..." : "Sync now" }}
+                </button>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px]"
+                    :style="{ color: 'var(--danger)' }"
+                    @click="disconnectSteam"
+                >
+                    Disconnect
+                </button>
+            </div>
+
+            <template v-else>
+                <a
+                    href="/api/steam/login"
+                    class="inline-block px-3 py-2 rounded-lg text-[13px] font-medium text-white"
+                    :style="{ background: '#1b2838' }"
+                >
+                    Sign in through Steam
+                </a>
+                <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                    Or enter your profile URL or Steam ID below.
+                </p>
+                <input
+                    v-model="steamAccount"
+                    placeholder="steamcommunity.com/id/yourname, or a 17-digit Steam ID"
+                    class="w-full px-3 py-2 rounded-lg text-[12px] outline-none"
+                    :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                />
+            </template>
+
+            <label class="block">
+                <span class="text-[12px]">Steam Web API key</span>
+                <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
+                    Required to read your library &mdash; signing in proves who you are but grants
+                    no access. Get one at
+                    <a
+                        href="https://steamcommunity.com/dev/apikey"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="underline"
+                        >steamcommunity.com/dev/apikey</a
+                    >. Your Steam profile's &ldquo;Game details&rdquo; must be public.
+                </span>
+                <input
+                    v-model="steamApiKey"
+                    type="password"
+                    class="w-full px-3 py-2 rounded-lg text-[12px] outline-none"
+                    :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                />
+            </label>
+            <button
+                class="px-3 py-1.5 rounded-lg text-[12px] text-white"
+                :style="{ background: 'var(--accent)' }"
+                :disabled="steamBusy"
+                @click="connectSteam"
+            >
+                {{ steam?.connected ? "Update key" : "Connect Steam" }}
+            </button>
         </section>
 
         <section class="card p-4 space-y-3">

@@ -36,6 +36,17 @@ export interface Config {
     /** Warn when a campaign's rewards will not reach the game because accounts are unlinked. */
     warnUnlinkedAccounts: boolean;
     logLevel: LogLevel;
+    steam: {
+        /**
+         * Steam Web API key from https://steamcommunity.com/dev/apikey. Required to read the
+         * library - signing in through Steam establishes identity only.
+         */
+        apiKey?: string;
+        /** 64-bit Steam ID, filled in by signing in through Steam or entered by hand. */
+        steamId?: string;
+        /** Hours between library refreshes. Libraries change rarely. */
+        refreshHours: number;
+    };
     notifications: {
         telegram?: { botToken: string; chatId: string };
         discord?: { webhookUrl: string };
@@ -53,6 +64,7 @@ export const DEFAULT_CONFIG: Config = {
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,
     logLevel: "info",
+    steam: { refreshHours: 24 },
     notifications: {},
 };
 
@@ -76,6 +88,7 @@ export async function loadConfig(path: string): Promise<Config> {
     const config: Config = {
         ...DEFAULT_CONFIG,
         ...parsed,
+        steam: { ...DEFAULT_CONFIG.steam, ...(parsed.steam ?? {}) },
         notifications: { ...DEFAULT_CONFIG.notifications, ...(parsed.notifications ?? {}) },
     };
 

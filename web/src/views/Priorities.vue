@@ -20,10 +20,30 @@ const PRIORITY_MODES = [
         hint: "Weighs time left against the minutes still needed, so near-misses come first.",
     },
     { value: "one_game_at_a_time", label: "One game at a time", hint: "Finish a game's campaigns before starting another." },
+    {
+        value: "steam_playtime",
+        label: "My Steam games, most played",
+        hint: "Games you own on Steam first, ordered by total playtime. Needs Steam connected.",
+        steam: true,
+    },
+    {
+        value: "steam_recent",
+        label: "My Steam games, recently played",
+        hint: "Games you own on Steam first, most recently played first. Needs Steam connected.",
+        steam: true,
+    },
     { value: "random", label: "Random order", hint: "Reshuffled on every refresh." },
     { value: "priority_only", label: "Nothing else", hint: "Mine only the games listed above." },
 ];
 const newPriority = ref("");
+const steamStatus = ref(null);
+
+/** A Steam-driven mode is meaningless until a library has actually been fetched. */
+const needsSteam = computed(
+    () =>
+        PRIORITY_MODES.find((mode) => mode.value === priorityMode.value)?.steam &&
+        !steamStatus.value?.connected,
+);
 const newExcluded = ref("");
 const saving = ref(false);
 
@@ -33,6 +53,9 @@ onMounted(async () => {
     if (!store.config) {
         await store.loadConfig();
     }
+    steamStatus.value = await fetch("/api/steam")
+        .then((response) => response.json())
+        .catch(() => null);
 });
 
 watch(
@@ -259,6 +282,14 @@ function move(index, delta) {
                 </div>
                 <p class="text-[11px] mt-1.5 pl-[52px]" :style="{ color: 'var(--text-2)' }">
                     {{ PRIORITY_MODES.find((mode) => mode.value === priorityMode)?.hint }}
+                </p>
+                <p
+                    v-if="needsSteam"
+                    class="text-[11px] mt-1 pl-[52px]"
+                    :style="{ color: 'var(--warn)' }"
+                >
+                    Steam is not connected, so this falls back to whatever ends soonest.
+                    <RouterLink to="/settings" class="underline">Connect Steam</RouterLink>
                 </p>
             </div>
         </section>

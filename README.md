@@ -57,7 +57,7 @@ there is no 2FA prompt to scrape. To sign out, run with `--logout`.
 | --- | --- | --- |
 | `priorityGames` | `[]` | Games to mine, most wanted first. Display names or game IDs. Empty means any. |
 | `excludedGames` | `[]` | Never mine these. |
-| `mineUnlistedGames` | `true` | Mine games outside `priorityGames`. |
+| `priorityMode` | `"ending_soonest"` | How games outside `priorityGames` are ordered. See below. |
 | `preferredChannels` | `[]` | Try these channels before searching the directory. |
 | `campaignRefreshMinutes` | `20` | Minutes between campaign refreshes (minimum 5). |
 | `attemptImpossibleCampaigns` | `true` | Work on campaigns that look too short to finish — they often get extended. |
@@ -65,7 +65,52 @@ there is no 2FA prompt to scrape. To sign out, run with `--logout`.
 | `autoClaimPoints` | `true` | Claim channel points bonuses while watching. |
 | `warnUnlinkedAccounts` | `true` | Warn when rewards will not reach the game because accounts are not linked. |
 | `logLevel` | `"info"` | `error`, `warn`, `info`, or `debug`. |
+| `steam` | `{}` | Steam library integration. See below. |
 | `notifications` | `{}` | Optional Telegram / Discord webhooks. |
+
+### Priority modes
+
+Your `priorityGames` list always wins. `priorityMode` decides the order of everything below it:
+
+| Mode | Orders remaining campaigns by |
+| --- | --- |
+| `ending_soonest` | Expiry date. The default. |
+| `tightest_deadline` | Time left divided by minutes still needed, so near-misses come first. |
+| `one_game_at_a_time` | Sticks with the current game until its campaigns are done. |
+| `steam_playtime` | Games you own on Steam, most played first. |
+| `steam_recent` | Games you own on Steam, most recently played first. |
+| `random` | Reshuffled every refresh. |
+| `priority_only` | Nothing outside the list is mined at all. |
+
+### Steam library
+
+Connecting Steam lets the bot rank campaigns by the games you actually own and play, and
+shows which Twitch accounts are worth linking.
+
+Two things are needed, both on the Settings page:
+
+1. **Your Steam account** - either "Sign in through Steam" (OpenID), or paste a profile URL
+   or 17-digit Steam ID.
+2. **A Steam Web API key**, from <https://steamcommunity.com/dev/apikey>. This is
+   unavoidable: signing in proves who you are but grants no access to the library. Your
+   profile's "Game details" must also be set to Public, or Steam returns an empty list.
+
+The library is cached in `steam.json` and refreshed every `steam.refreshHours` (default 24),
+since libraries change rarely.
+
+**A limitation worth knowing:** Steam exposes no purchase or "date added to library" field -
+`GetOwnedGames` returns playtime and last-played only. `steam_recent` therefore ranks by when
+you last *played* a game, which is the closest signal Valve makes available.
+
+Game titles are matched between Steam and Twitch by normalising both (stripping trademark
+symbols, edition suffixes and punctuation) and comparing word sets. Sequel numbering is
+treated as decisive, so "Counter-Strike" will not match "Counter-Strike 2".
+
+### Accounts worth linking
+
+The **Links** page lists campaigns that are accruing progress your account can never collect,
+because it is not linked to the publisher. Games you own on Steam are listed first, with the
+watch time already at risk. Linking happens on Twitch; the bot cannot do it for you.
 
 Notifications:
 
