@@ -84,9 +84,70 @@ Notifications:
 -c, --config <path>   Config file (default: ./config.json)
 -a, --auth <path>     Credential store (default: ./auth.json)
 -l, --log <level>     error | warn | info | debug
+    --dry-run         Report what would be mined, then exit. Sends nothing.
     --logout          Discard stored credentials and log in again
 -h, --help
 ```
+
+## Testing it
+
+```sh
+npm start -- --dry-run
+```
+
+A dry run logs in, reads your campaigns and progress, ranks them, picks a channel, and
+resolves that channel's Spade endpoint — then stops. It sends no watch events and claims
+nothing, so it is safe to run at any time. It exercises every moving part except the watch
+beat itself.
+
+Two smaller checks that need no account at all:
+
+```sh
+npm run check-hashes    # are the GraphQL query hashes still current?
+```
+
+Verified working as of 2026-08-20: all 12 query hashes, game slug resolution, the
+drops-enabled channel directory, live stream lookup, `viewerDropCampaigns`, Spade URL
+resolution (`https://spade.twitch.tv/track`, via the settings-bundle fallback), and the
+device-code login handshake.
+
+## Risk
+
+**Short version: low, but not zero, and the risk is account suspension rather than anything
+happening to your machine.**
+
+Using any unofficial client is contrary to Twitch's Terms of Service, so a suspension is
+always theoretically possible. What the evidence actually shows:
+
+- [DevilXD/TwitchDropsMiner][devilxd] has run for ~4 years with 700+ downloads per release
+  and has **three** suspension reports total ([#647][i647], [#730][i730], [#870][i870]).
+- In the one report with a visible reason, Twitch cited *"sending large amounts of unwanted
+  ads, malicious links, or spam"* with the violation located in **Chat**. No miner of this
+  design touches chat, so that account was almost certainly compromised and spamming.
+- The other reporter was running a modified multi-user build and experimenting with the API
+  directly.
+- The maintainer's assessment: the chance for a normal user is *"zero, or at least very close
+  to it"*.
+
+[i647]: https://github.com/DevilXD/TwitchDropsMiner/issues/647
+[i730]: https://github.com/DevilXD/TwitchDropsMiner/issues/730
+[i870]: https://github.com/DevilXD/TwitchDropsMiner/issues/870
+
+Things that genuinely do raise your risk:
+
+- **`auth.json` is your account.** It holds an OAuth token with full access. Do not share it,
+  commit it, or sync it anywhere public. It is git-ignored and written mode 0600.
+- **Do not make it more aggressive.** The design deliberately sends the minimum traffic
+  needed: one watch beat per minute, campaign refresh every 20 minutes. Shortening those
+  intervals is exactly the kind of change that turns a quiet client into a noticeable one.
+- **Do not run several instances on one account**, and avoid watching Twitch in a browser on
+  the same account while it runs — that corrupts progress tracking and doubles your traffic.
+- **This implementation is newer than the one it learned from.** DevilXD's has years of real
+  use behind it; ours has been verified against live Twitch but has not accumulated that
+  track record. If you want the most conservative option, use theirs.
+
+If mining on your main account bothers you, use a throwaway Twitch account — though note that
+drops only reach a game through the account actually linked to the publisher.
 
 ## How it works
 

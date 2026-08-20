@@ -17,6 +17,8 @@ Options:
   -c, --config <path>   Config file (default: ./config.json)
   -a, --auth <path>     Credential store (default: ./auth.json)
   -l, --log <level>     error | warn | info | debug
+      --dry-run         Log in and report what would be mined, then exit.
+                        Sends no watch events and claims nothing.
       --logout          Discard stored credentials and log in again
   -h, --help            Show this message
 `.trim();
@@ -27,6 +29,7 @@ async function main(): Promise<void> {
             config: { type: "string", short: "c", default: "config.json" },
             auth: { type: "string", short: "a", default: "auth.json" },
             log: { type: "string", short: "l" },
+            "dry-run": { type: "boolean", default: false },
             logout: { type: "boolean", default: false },
             help: { type: "boolean", short: "h", default: false },
         },
@@ -75,6 +78,11 @@ async function main(): Promise<void> {
     miner.on("campaign-completed", (campaign) => {
         void notifier.send(`Finished <b>${campaign.gameName}</b> - ${campaign.name}`);
     });
+
+    if (values["dry-run"]) {
+        await miner.runDryRun();
+        return;
+    }
 
     const shutdown = (signal: string) => {
         logger.info(`Received ${signal}, shutting down.`);

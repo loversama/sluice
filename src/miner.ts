@@ -43,6 +43,8 @@ export class Miner extends EventEmitter {
     /** Set when a better campaign appears, so the watch loop yields at its next beat. */
     private switchRequested = false;
     private stopping = false;
+    /** When true, the miner reads and reports but never sends watch beats or claims. */
+    dryRun = false;
 
     constructor(
         private readonly auth: AuthState,
@@ -371,6 +373,10 @@ export class Miner extends EventEmitter {
         if (!drop.dropInstanceId || this.claimedDropIds.has(drop.id)) {
             return;
         }
+        if (this.dryRun) {
+            logger.info(`[dry run] Would claim: ${drop.rewardNames} (${campaign.gameName})`);
+            return;
+        }
         try {
             const claimed = await this.gql.claimDrop(drop.dropInstanceId);
             if (claimed) {
@@ -491,6 +497,84 @@ export class Miner extends EventEmitter {
     }
 
     /** Re-read every campaign and fold in our inventory progress. */
+    /**
+     * Exercise the whole pipeline without touching anything: log in, read campaigns and
+     * progress, pick what would be mined, find a channel, and resolve its Spade URL.
+     *
+     * This proves every moving part except the watch beat itself, and sends no watch events
+     * and claims nothing.
+     */
+    async runDryRun(): Promise<void> {
+        this.dryRun = true;
+        const line = "-".repeat(66);
+
+        console.log(`\n${line}\nDRY RUN - nothing will be watched or claimed\n${line}`);
+        console.log(`Account: ${this.auth.login} (id ${this.auth.userId})\n`);
+
+        await this.refreshCampaigns();
+
+        const all = [...this.campaigns.values()];
+        const active = all.filter((campaign) => campaign.isActive);
+        console.log(`Campaigns visible: ${all.length}  (${active.length} active)\n`);
+
+        const mineable = active
+            .filter((campaign) => !campaign.isCompleted)
+            .sort((a, b) => compareCampaigns(a, b, this.config.priorityGames));
+
+        if (mineable.length === 0) {
+            console.log("No campaigns with work remaining. Nothing to mine right now.");
+            console.log("This is a normal result - it depends on what Twitch is running today.\n");
+        } else {
+            console.log(`Campaigns with work remaining (${mineable.length}), in priority order:`);
+            for (const campaign of mineable.slice(0, 12)) {
+                const drop = campaign.nextDrop({ attemptImpossible: true });
+                const progress = drop
+                    ? `${drop.currentMinutes}/${drop.requiredMinutes} min - ${drop.rewardNames}`
+                    : "no eligible drop";
+                const linked = campaign.isAccountLinked ? "" : "  [ACCOUNT NOT LINKED]";
+                console.log(`  ${campaign.gameName} - ${campaign.name}`);
+                console.log(`      ${progress}${linked}`);
+            }
+            console.log("");
+        }
+
+        const target = this.selectCampaign();
+        if (!target) {
+            console.log("Nothing selected to mine. Dry run complete.\n");
+            return;
+        }
+        const drop = target.nextDrop({
+            attemptImpossible: this.config.attemptImpossibleCampaigns,
+        });
+        console.log(`Would mine: ${target.gameName} - ${target.name}`);
+        if (drop) {
+            console.log(`Target drop: ${drop.rewardNames} (${drop.remainingMinutes} min remaining)`);
+        }
+
+        console.log("\nLooking for an eligible channel...");
+        const channel = await this.findChannel(target);
+        if (!channel) {
+            console.log("  No eligible channel online right now.");
+            console.log("  (Channel selection ran correctly; nobody is streaming it.)\n");
+            return;
+        }
+        console.log(`  Selected: ${channel.displayName} (${channel.stream?.viewers ?? 0} viewers)`);
+        console.log(`  Verified this channel grants the campaign.`);
+
+        // Resolving the Spade URL is the one piece most likely to rot, so prove it here.
+        console.log("\nResolving the Spade watch endpoint...");
+        try {
+            const spade = await channel.probeSpadeUrl();
+            console.log(`  OK: ${spade}`);
+            console.log("  A real run would POST a minute-watched event here every 59s.");
+        } catch (error) {
+            console.log(`  FAILED: ${(error as Error).message}`);
+            console.log("  Twitch likely changed the channel page; see README > Maintenance.");
+        }
+
+        console.log(`\n${line}\nDry run complete. Nothing was watched or claimed.\n${line}\n`);
+    }
+
     private async refreshCampaigns(): Promise<void> {
         logger.debug("Refreshing campaigns...");
         const [listed, inventory] = await Promise.all([
@@ -557,7 +641,7 @@ export class Miner extends EventEmitter {
         this.emit("campaigns-updated", [...next.values()]);
 
         // Claim anything that finished while we were not looking.
-        if (this.config.autoClaimDrops) {
+        if (this.config.autoClaimDrops && !this.dryRun) {
             for (const campaign of next.values()) {
                 for (const drop of campaign.claimableDrops) {
                     await this.claim(drop, campaign);

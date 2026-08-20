@@ -150,6 +150,17 @@ export class Channel {
         }
     }
 
+    /**
+     * Resolve and cache this channel's Spade URL without sending anything.
+     * Used by the dry run to prove the scrape still works against Twitch's current page.
+     */
+    async probeSpadeUrl(): Promise<string> {
+        if (!this.spadeUrl) {
+            this.spadeUrl = await this.resolveSpadeUrl();
+        }
+        return this.spadeUrl;
+    }
+
     /** Primary method: POST a minute-watched event to the channel's Spade endpoint. */
     private async sendWatchSpade(): Promise<boolean> {
         if (!this.spadeUrl) {
