@@ -30,6 +30,13 @@ export class GqlError extends Error {
  * our stored SHA256 is stale. It is called out as its own error type so the failure is
  * obvious rather than surfacing as a confusing null dereference.
  */
+/** Raised when Twitch no longer accepts the token and a refresh could not rescue it. */
+export class AuthExpiredError extends GqlError {
+    constructor() {
+        super("Twitch rejected the access token. Re-authorize with --logout, or in the dashboard.");
+    }
+}
+
 export class StaleQueryHashError extends GqlError {
     constructor(readonly operationName: string) {
         super(
@@ -96,6 +103,15 @@ export class TwitchGql {
                     body: JSON.stringify(payload),
                 });
 
+                if (response.statusCode === 401) {
+                    await response.body.dump();
+                    // One refresh attempt per request; if it works the retry below succeeds,
+                    // and if it does not the error names the actual problem.
+                    if (attempt === 0 && (await this.auth.refresh())) {
+                        continue;
+                    }
+                    throw new AuthExpiredError();
+                }
                 if (response.statusCode >= 500) {
                     await response.body.dump();
                     lastError = new GqlError(`Twitch returned ${response.statusCode}`);

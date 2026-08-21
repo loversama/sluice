@@ -16,7 +16,9 @@
     "build:web": "npm --prefix web install && npm --prefix web run build",
     "build:all": "npm run build && npm run build:web",
     "dev:web": "npm --prefix web run dev",
-    "start:web": "node dist/index.js --web"
+    "start:web": "node dist/index.js --web",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "undici": "^7.10.0",
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.7"
   }
 }

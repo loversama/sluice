@@ -40,4 +40,5 @@ CMD ["node", "dist/index.js", \
      "--config", "/data/config.json", \
      "--auth", "/data/auth.json", \
      "--steam", "/data/steam.json", \
-     "--state", "/data/state.json"]
+     "--state", "/data/state.json", \
+     "--claims", "/data/claims.json"]

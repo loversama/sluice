@@ -163,6 +163,53 @@ export class AuthState {
     }
 
     /**
+     * Exchange the stored refresh token for a new access token.
+     *
+     * Twitch access tokens expire, and until now the refresh token was saved and never used:
+     * once the access token lapsed mid-run every call failed generically and the miner
+     * logged the same error forever with nothing actionable surfaced.
+     *
+     * Returns false when there is no usable refresh token, in which case the caller has to
+     * fall back to a fresh device-code login.
+     */
+    async refresh(): Promise<boolean> {
+        if (!this.refreshToken) {
+            return false;
+        }
+        const response = await request(OAUTH_TOKEN_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Client-Id": this.client.clientId,
+                "User-Agent": this.client.userAgent,
+            },
+            body: new URLSearchParams({
+                client_id: this.client.clientId,
+                grant_type: "refresh_token",
+                refresh_token: this.refreshToken,
+            }).toString(),
+        });
+
+        if (response.statusCode !== 200) {
+            await response.body.dump();
+            logger.debug(`Token refresh rejected with ${response.statusCode}`);
+            return false;
+        }
+        const token = (await response.body.json()) as TokenResponse;
+        this.accessToken = token.access_token;
+        // Twitch issues a new refresh token each time; keeping the old one would break the
+        // next refresh.
+        if (token.refresh_token) {
+            this.refreshToken = token.refresh_token;
+        }
+        const valid = await this.validate();
+        if (valid) {
+            logger.info("Refreshed the Twitch access token.");
+        }
+        return valid;
+    }
+
+    /**
      * Run the device code flow, calling `onCode` once the user needs to enter the code.
      * Resolves when the user has approved, or throws if they never do.
      */

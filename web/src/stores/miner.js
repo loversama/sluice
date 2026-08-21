@@ -19,6 +19,7 @@ export const useMinerStore = defineStore("miner", {
         nextRefreshAt: null,
         campaigns: [],
         claims: [],
+        stats: null,
         feed: [],
 
         config: null,
@@ -120,6 +121,7 @@ export const useMinerStore = defineStore("miner", {
             this.nextRefreshAt = snapshot.nextRefreshAt;
             this.campaigns = snapshot.campaigns ?? [];
             this.claims = snapshot.claims ?? [];
+            this.stats = snapshot.stats ?? null;
             this.feed = snapshot.feed ?? [];
         },
 

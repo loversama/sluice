@@ -9,6 +9,7 @@ import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
 import { PubSubPool, type DropProgressMessage } from "./twitch/websocket.js";
 import type { SteamLibrary } from "./steam/library.js";
 import { loadState, saveState } from "./state.js";
+import { loadClaims, saveClaims, summarise, type ClaimHistory, type ClaimStats } from "./claims.js";
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -153,6 +154,8 @@ export class Miner extends EventEmitter {
     /** Drops already flagged as claimed while unlinked. */
     private readonly notifiedUnlinkedClaims = new Set<string>();
     private statePath: string | null = null;
+    private claimsPath: string | null = null;
+    private claimHistory: ClaimHistory = { claims: [], completedCampaignIds: [] };
     private steam: SteamLibrary | null = null;
     private boundaryTimer: NodeJS.Timeout | null = null;
     /** Watch beats accepted since Twitch last confirmed progress. */
@@ -190,6 +193,32 @@ export class Miner extends EventEmitter {
             `Restored notification state: ${this.warnedExpiring.size} warned campaigns, ` +
                 `${this.notifiedUnlinkedClaims.size} flagged claims`,
         );
+    }
+
+    /** Restore the durable record of what has been earned. */
+    async loadClaimHistory(path: string): Promise<void> {
+        this.claimsPath = path;
+        this.claimHistory = await loadClaims(path);
+        // Seed the in-memory view so a fresh process still shows recent claims.
+        this.recentClaims.push(...this.claimHistory.claims.slice(-100));
+        logger.debug(`Restored ${this.claimHistory.claims.length} claims from history`);
+    }
+
+    /** Lifetime totals for the dashboard. */
+    getClaimStats(): ClaimStats {
+        const required = new Map<string, number>();
+        for (const campaign of this.campaigns.values()) {
+            for (const drop of campaign.drops) {
+                required.set(drop.id, drop.requiredMinutes);
+            }
+        }
+        return summarise(this.claimHistory, required);
+    }
+
+    private persistClaims(): void {
+        if (this.claimsPath) {
+            void saveClaims(this.claimsPath, this.claimHistory);
+        }
     }
 
     private persistState(): void {
@@ -808,6 +837,10 @@ export class Miner extends EventEmitter {
                     await this.claim(drop, campaign);
                     if (campaign.isCompleted) {
                         logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
+                        if (!this.claimHistory.completedCampaignIds.includes(campaign.id)) {
+                            this.claimHistory.completedCampaignIds.push(campaign.id);
+                            this.persistClaims();
+                        }
                         this.emit("campaign-completed", campaign);
                         return;
                     }
@@ -912,6 +945,8 @@ export class Miner extends EventEmitter {
                 if (this.recentClaims.length > 100) {
                     this.recentClaims.shift();
                 }
+                this.claimHistory.claims.push(this.recentClaims.at(-1)!);
+                this.persistClaims();
                 this.pushFeed("info", `Claimed ${drop.rewardNames} (${campaign.gameName})`);
                 this.emit("drop-claimed", { drop, campaign });
             } else {

@@ -9,7 +9,7 @@ import { Miner } from "./miner.js";
 import type { Campaign } from "./models/campaign.js";
 import { NotifierGroup } from "./notifiers/index.js";
 import { AuthState } from "./twitch/auth.js";
-import { StaleQueryHashError, TwitchGql } from "./twitch/gql.js";
+import { AuthExpiredError, StaleQueryHashError, TwitchGql } from "./twitch/gql.js";
 import { ApiServer, type DeviceCodeInfo, type ServerContext } from "./api/server.js";
 import { serializeCampaign } from "./api/serialize.js";
 import { SteamClient, resolveSteamId } from "./steam/client.js";
@@ -50,6 +50,7 @@ async function main(): Promise<void> {
             auth: { type: "string", short: "a", default: "auth.json" },
             steam: { type: "string", default: "steam.json" },
             state: { type: "string", default: "state.json" },
+            claims: { type: "string", default: "claims.json" },
             log: { type: "string", short: "l" },
             web: { type: "boolean", default: false },
             "web-addr": { type: "string", default: "127.0.0.1:4400" },
@@ -203,6 +204,7 @@ async function main(): Promise<void> {
     miner = new Miner(auth, gql, config);
     // Restored before mining starts, so a restart does not re-send alerts already sent.
     await miner.loadPersistedState(resolve(values.state!));
+    await miner.loadClaimHistory(resolve(values.claims!));
     miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
 
     // Refresh the Steam library if it is configured and the cache has gone stale.
@@ -317,11 +319,24 @@ async function main(): Promise<void> {
     miner.on("beat", (payload) => bus.emit("beat", payload));
     miner.on("feed", (entry) => bus.emit("feed", entry));
     miner.on("error", (error) => {
+        const fatal = error instanceof StaleQueryHashError || error instanceof AuthExpiredError;
         bus.emit("problem", {
-            level: error instanceof StaleQueryHashError ? "fatal" : "warn",
-            code: error instanceof StaleQueryHashError ? "stale-hash" : "generic",
+            level: fatal ? "fatal" : "warn",
+            code:
+                error instanceof StaleQueryHashError
+                    ? "stale-hash"
+                    : error instanceof AuthExpiredError
+                      ? "auth"
+                      : "generic",
             message: error.message,
         });
+        if (fatal) {
+            void notifier.send({
+                kind: "warning",
+                title: "Mining stopped",
+                lines: [error.message],
+            });
+        }
     });
 
     if (values["dry-run"]) {

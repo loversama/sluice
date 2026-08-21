@@ -381,6 +381,7 @@ export class ApiServer {
             campaigns:
                 miner?.getCampaigns().map((campaign) => serializeCampaign(campaign, config)) ?? [],
             claims: miner?.getRecentClaims() ?? [],
+            stats: miner?.getClaimStats() ?? null,
             feed: miner?.getFeed() ?? [],
         };
     }

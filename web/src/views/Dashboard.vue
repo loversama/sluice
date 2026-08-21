@@ -83,9 +83,45 @@ const claims = computed(() => store.claims.slice(0, 8));
             </section>
 
             <section class="card p-3 lg:col-span-5">
-                <h2 class="text-[11px] uppercase tracking-wider mb-3" :style="{ color: 'var(--text-2)' }">
-                    Recently claimed
-                </h2>
+                <header class="flex items-baseline justify-between mb-3">
+                    <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                        Recently claimed
+                    </h2>
+                    <span v-if="store.stats" class="text-[11px] tabular" :style="{ color: 'var(--text-2)' }">
+                        {{ store.stats.dropsLast7Days }} this week
+                        &middot; {{ store.stats.dropsAllTime }} all time
+                    </span>
+                </header>
+
+                <!-- A miner is judged by what it produced, so the totals lead. -->
+                <div
+                    v-if="store.stats && store.stats.dropsAllTime"
+                    class="grid grid-cols-3 gap-2 mb-3 pb-3"
+                    :style="{ borderBottom: '1px solid var(--border)' }"
+                >
+                    <div>
+                        <p class="text-[18px] font-semibold tabular">{{ store.stats.dropsAllTime }}</p>
+                        <p class="text-[10px] uppercase tracking-wide" :style="{ color: 'var(--text-2)' }">
+                            drops
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-[18px] font-semibold tabular">
+                            {{ store.stats.campaignsCompleted }}
+                        </p>
+                        <p class="text-[10px] uppercase tracking-wide" :style="{ color: 'var(--text-2)' }">
+                            campaigns
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-[18px] font-semibold tabular">
+                            {{ formatDuration(store.stats.minutesEarned) }}
+                        </p>
+                        <p class="text-[10px] uppercase tracking-wide" :style="{ color: 'var(--text-2)' }">
+                            watched
+                        </p>
+                    </div>
+                </div>
 
                 <div v-if="!claims.length" class="text-center py-6">
                     <p class="text-[22px] mb-1" :style="{ color: 'var(--muted)' }">◆</p>
