@@ -72,6 +72,8 @@ async function main(): Promise<void> {
     logger.info(`Config: ${configPath}`);
 
     const auth = new AuthState();
+    // The search endpoint is available as soon as the server is, before the miner exists.
+    const gqlForSearch = new TwitchGql(auth);
     // Rebuilt whenever the config changes: the group snapshots its channels at
     // construction, so a token added at runtime would otherwise do nothing until restart.
     let notifier = new NotifierGroup(config);
@@ -125,6 +127,7 @@ async function main(): Promise<void> {
         },
         getNotifier: () => notifier,
         getSteamLibrary: () => (steamLibrary.isLoaded ? steamLibrary : null),
+        searchGames: (term: string) => gqlForSearch.searchGames(term),
         connectSteam: async (input) => {
             const apiKey = input.apiKey ?? config.steam.apiKey;
             if (!apiKey) {

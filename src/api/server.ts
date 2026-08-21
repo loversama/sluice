@@ -36,6 +36,7 @@ export interface ServerContext {
     setConfig(config: Config): Promise<void>;
     getNotifier(): NotifierGroup;
     getSteamLibrary(): SteamLibrary | null;
+    searchGames(term: string): Promise<{ id: string; name: string; boxArtURL: string | null }[]>;
     /** Store credentials and pull the library. Returns the number of games found. */
     connectSteam(input: { apiKey?: string; steamId?: string }): Promise<number>;
     refreshSteam(): Promise<number>;
@@ -227,6 +228,12 @@ export class ApiServer {
                 events: miner?.getFeed(Number.isFinite(limit) ? limit : 50) ?? [],
                 claims: miner?.getRecentClaims() ?? [],
             });
+        }
+
+        if (path === "/api/games/search" && method === "GET") {
+            const term = url.searchParams.get("q") ?? "";
+            const games = await this.context.searchGames(term).catch(() => []);
+            return sendJson(response, 200, { games });
         }
 
         if (path === "/api/steam" && method === "GET") {

@@ -22,6 +22,13 @@ export interface Config {
     mineUnlistedGames?: boolean;
     /** Preferred channels, tried before searching the game directory. */
     preferredChannels: string[];
+    /** Channels never to watch, whatever else qualifies them. */
+    blockedChannels: string[];
+    /**
+     * Restrict channel search to these broadcaster languages, as two-letter codes such as
+     * "EN". Empty means any language.
+     */
+    broadcasterLanguages: string[];
     /** Minutes between full campaign refreshes. */
     campaignRefreshMinutes: number;
     /**
@@ -76,6 +83,8 @@ export const DEFAULT_CONFIG: Config = {
     excludedGames: [],
     priorityMode: "ending_soonest",
     preferredChannels: [],
+    blockedChannels: [],
+    broadcasterLanguages: [],
     campaignRefreshMinutes: 20,
     attemptImpossibleCampaigns: true,
     autoClaimDrops: true,

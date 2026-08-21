@@ -565,7 +565,7 @@ export class Miner extends EventEmitter {
     private async channelsFromLogins(logins: string[], campaign: Campaign): Promise<Channel[]> {
         const channels: Channel[] = [];
         for (const login of logins) {
-            if (this.isOnCooldown(login)) {
+            if (this.isOnCooldown(login) || this.isBlocked(login)) {
                 continue;
             }
             const info = await this.gql.getStreamInfo(login.toLowerCase()).catch(() => null);
@@ -594,13 +594,16 @@ export class Miner extends EventEmitter {
             return [];
         }
         const nodes = await this.gql
-            .getGameChannels(slug, { dropsOnly: options.dropsOnly })
+            .getGameChannels(slug, {
+                dropsOnly: options.dropsOnly,
+                languages: this.config.broadcasterLanguages,
+            })
             .catch(() => []);
 
         const channels: Channel[] = [];
         for (const node of nodes) {
             const channel = Channel.fromDirectory(node, this.auth, this.gql);
-            if (!channel || this.isOnCooldown(channel.login)) {
+            if (!channel || this.isOnCooldown(channel.login) || this.isBlocked(channel.login)) {
                 continue;
             }
             if (allowed && !allowed.has(channel.id)) {
@@ -633,7 +636,7 @@ export class Miner extends EventEmitter {
             // creator-program campaigns at all: for Battlefield 6's BCP campaign it returns
             // only an unrelated site-wide event, even for allow-listed channels streaming
             // the right game. Trusting the allow-list is what makes those campaigns minable.
-            if (allowed?.has(channel.id)) {
+            if (allowed?.has(channel.id) && !this.isBlocked(channel.login)) {
                 logger.debug(`${channel.login} is allow-listed for ${campaign.name}`);
                 return channel;
             }
@@ -677,6 +680,16 @@ export class Miner extends EventEmitter {
     private isOnCooldown(login: string): boolean {
         const until = this.channelCooldowns.get(login.toLowerCase());
         return until !== undefined && until > Date.now();
+    }
+
+    /**
+     * Channels the user never wants watched. Checked everywhere a candidate can enter,
+     * including the campaign allow-list path - a blocked channel being allow-listed is
+     * exactly when the user's own preference should win.
+     */
+    private isBlocked(login: string): boolean {
+        const target = login.toLowerCase();
+        return this.config.blockedChannels.some((entry) => entry.toLowerCase() === target);
     }
 
     /**
@@ -1067,7 +1080,7 @@ export class Miner extends EventEmitter {
         const desired = new Map<string, { login: string; displayName: string; campaignIds: Set<string> }>();
 
         const add = (id: string, login: string, displayName: string, campaignId: string) => {
-            if (!id || !login) {
+            if (!id || !login || this.isBlocked(login)) {
                 return;
             }
             const existing = desired.get(id);

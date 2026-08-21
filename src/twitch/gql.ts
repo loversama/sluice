@@ -140,6 +140,65 @@ export class TwitchGql {
         throw new GqlError(`${query.operationName} failed after ${retries + 1} attempts`, lastError);
     }
 
+    /**
+     * Send a raw GraphQL query rather than a persisted one.
+     *
+     * Twitch accepts both. Raw queries cannot go stale the way persisted hashes do, so they
+     * are preferable where the shape is simple and stable.
+     */
+    async rawQuery<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+        const response = await request(GQL_URL, {
+            method: "POST",
+            headers: {
+                ...this.auth.headers({ gql: true }),
+                "Content-Type": "text/plain;charset=UTF-8",
+            },
+            body: JSON.stringify({ query, variables }),
+        });
+        if (response.statusCode !== 200) {
+            const text = await response.body.text();
+            throw new GqlError(`Raw query failed (${response.statusCode}): ${text}`);
+        }
+        const body = (await response.body.json()) as GqlResponse<T>;
+        if (body.errors?.length) {
+            throw new GqlError(body.errors.map((error) => String(error.message)).join("; "));
+        }
+        if (body.data === undefined) {
+            throw new GqlError("Raw query returned no data");
+        }
+        return body.data;
+    }
+
+    /**
+     * Search every game category on Twitch, not just those with a campaign right now.
+     *
+     * The priority list is a standing preference - a user wants to queue a game before its
+     * campaign is announced - so it must be able to name games the campaign list has never
+     * mentioned.
+     */
+    async searchGames(
+        term: string,
+        limit = 8,
+    ): Promise<{ id: string; name: string; slug: string; boxArtURL: string | null }[]> {
+        if (!term.trim()) {
+            return [];
+        }
+        const data = await this.rawQuery<{
+            searchCategories: {
+                edges: { node: { id: string; name: string; slug: string; boxArtURL: string | null } }[];
+            } | null;
+        }>(
+            "query($q:String!,$n:Int!){searchCategories(query:$q first:$n)" +
+                "{edges{node{id name slug boxArtURL}}}}",
+            { q: term, n: limit },
+        );
+        return (data.searchCategories?.edges ?? []).map((edge) => ({
+            ...edge.node,
+            // Twitch returns a template with {width}x{height} placeholders.
+            boxArtURL: edge.node.boxArtURL?.replace("{width}x{height}", "72x96") ?? null,
+        }));
+    }
+
     /** Every campaign visible to this account, without per-drop detail. */
     async getCampaigns(): Promise<DropCampaign[]> {
         const data = await this.query<{ currentUser: { dropCampaigns: DropCampaign[] | null } }>(
@@ -195,7 +254,12 @@ export class TwitchGql {
      */
     async getGameChannels(
         slug: string,
-        options: { limit?: number; dropsOnly?: boolean } = {},
+        options: {
+            limit?: number;
+            dropsOnly?: boolean;
+            /** Two-letter codes, e.g. ["EN"]. Empty means any language. */
+            languages?: string[];
+        } = {},
     ): Promise<StreamNode[]> {
         const data = await this.query<{
             game: { streams: { edges: { node: StreamNode }[] } | null } | null;
@@ -206,7 +270,7 @@ export class TwitchGql {
             includeCostreaming: false,
             sortTypeIsRecency: false,
             options: {
-                broadcasterLanguages: [],
+                broadcasterLanguages: options.languages ?? [],
                 freeformTags: null,
                 includeRestricted: ["SUB_ONLY_LIVE"],
                 recommendationsContext: { platform: "web" },

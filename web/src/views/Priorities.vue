@@ -37,6 +37,46 @@ const PRIORITY_MODES = [
 ];
 const newPriority = ref("");
 const steamStatus = ref(null);
+const searchResults = ref([]);
+const searching = ref(false);
+let searchTimer = null;
+
+/**
+ * Search every category on Twitch, not just games with a campaign right now. A priority
+ * list is a standing preference, so it has to be able to name a game before its campaign
+ * is announced.
+ */
+function onSearchInput() {
+    clearTimeout(searchTimer);
+    const term = newPriority.value.trim();
+    if (term.length < 2) {
+        searchResults.value = [];
+        return;
+    }
+    searchTimer = setTimeout(async () => {
+        searching.value = true;
+        try {
+            const response = await fetch(`/api/games/search?q=${encodeURIComponent(term)}`);
+            searchResults.value = (await response.json()).games ?? [];
+        } catch {
+            searchResults.value = [];
+        } finally {
+            searching.value = false;
+        }
+    }, 300);
+}
+
+function addGame(name) {
+    if (!priorities.value.some((entry) => entry.toLowerCase() === name.toLowerCase())) {
+        excluded.value = excluded.value.filter(
+            (entry) => entry.toLowerCase() !== name.toLowerCase(),
+        );
+        priorities.value.push(name);
+        scheduleSave();
+    }
+    newPriority.value = "";
+    searchResults.value = [];
+}
 
 /** A Steam-driven mode is meaningless until a library has actually been fetched. */
 const needsSteam = computed(
@@ -125,15 +165,12 @@ async function persist() {
 }
 
 function addPriority() {
-    const game = newPriority.value.trim();
-    if (!game || priorities.value.some((entry) => entry.toLowerCase() === game.toLowerCase())) {
-        newPriority.value = "";
-        return;
+    // Enter takes the top search result when there is one, so the common case is two keys.
+    const first = searchResults.value[0];
+    const game = first ? first.name : newPriority.value.trim();
+    if (game) {
+        addGame(game);
     }
-    excluded.value = excluded.value.filter((entry) => entry.toLowerCase() !== game.toLowerCase());
-    priorities.value.push(game);
-    newPriority.value = "";
-    scheduleSave();
 }
 
 function addExcluded() {
@@ -183,19 +220,47 @@ function move(index, delta) {
             </header>
 
             <div class="flex gap-2">
-                <input
-                    v-model="newPriority"
-                    list="known-games"
-                    placeholder="Add a game (name or ID)"
-                    class="flex-1 px-3 py-2 rounded-lg text-[12px] outline-none"
-                    :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }"
-                    @keyup.enter="addPriority"
-                />
-                <datalist id="known-games">
-                    <option v-for="game in knownGames" :key="game.name" :value="game.name" />
-                </datalist>
+                <div class="relative flex-1">
+                    <input
+                        v-model="newPriority"
+                        placeholder="Search any game on Twitch"
+                        class="w-full px-3 py-2 rounded-lg text-[12px] outline-none"
+                        :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                        @input="onSearchInput"
+                        @keyup.enter="addPriority"
+                    />
+
+                    <ul
+                        v-if="searchResults.length"
+                        class="absolute z-20 left-0 right-0 mt-1 rounded-lg overflow-hidden shadow-xl"
+                        :style="{ background: 'var(--surface)', border: '1px solid var(--border)' }"
+                    >
+                        <li
+                            v-for="game in searchResults"
+                            :key="game.id"
+                            class="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:brightness-125"
+                            :style="{ background: 'var(--surface)' }"
+                            @click="addGame(game.name)"
+                        >
+                            <img
+                                v-if="game.boxArtURL"
+                                :src="game.boxArtURL"
+                                :alt="game.name"
+                                class="w-6 h-8 rounded object-cover"
+                            />
+                            <span class="text-[12px] truncate">{{ game.name }}</span>
+                        </li>
+                    </ul>
+                    <p
+                        v-else-if="searching"
+                        class="absolute left-0 right-0 mt-1 px-3 py-2 rounded-lg text-[11px]"
+                        :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-2)' }"
+                    >
+                        Searching Twitch&hellip;
+                    </p>
+                </div>
                 <button
-                    class="px-3 py-2 rounded-lg text-[12px] font-medium text-white"
+                    class="px-3 py-2 rounded-lg text-[12px] font-medium text-white shrink-0"
                     :style="{ background: 'var(--accent)' }"
                     @click="addPriority"
                 >

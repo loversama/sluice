@@ -16,6 +16,8 @@ const form = reactive({
     holdClaimsWhenUnlinked: false,
     unlinkedExpiryWarningHours: 12,
     preferredChannels: [],
+    blockedChannels: [],
+    broadcasterLanguages: [],
     logLevel: "info",
     telegramBotToken: "",
     telegramChatId: "",
@@ -23,6 +25,25 @@ const form = reactive({
 });
 
 const newChannel = ref("");
+const newBlocked = ref("");
+
+/** Languages Twitch exposes as broadcaster filters, by two-letter code. */
+const LANGUAGES = [
+    ["EN", "English"], ["ES", "Spanish"], ["DE", "German"], ["FR", "French"],
+    ["PT", "Portuguese"], ["RU", "Russian"], ["JA", "Japanese"], ["KO", "Korean"],
+    ["IT", "Italian"], ["PL", "Polish"], ["TR", "Turkish"], ["ZH", "Chinese"],
+];
+
+/** Accept a bare login or a full Twitch URL, since users paste both. */
+function normaliseLogin(value) {
+    return value.trim().toLowerCase().replace(/^https?:\/\/(www\.)?twitch\.tv\//, "").replace(/\/.*$/, "");
+}
+
+function toggleLanguage(code) {
+    const index = form.broadcasterLanguages.indexOf(code);
+    if (index === -1) form.broadcasterLanguages.push(code);
+    else form.broadcasterLanguages.splice(index, 1);
+}
 const steam = ref(null);
 const steamApiKey = ref("");
 const steamAccount = ref("");
@@ -109,6 +130,8 @@ watch(
         form.holdClaimsWhenUnlinked = config.holdClaimsWhenUnlinked;
         form.unlinkedExpiryWarningHours = config.unlinkedExpiryWarningHours;
         form.preferredChannels = [...config.preferredChannels];
+        form.blockedChannels = [...(config.blockedChannels ?? [])];
+        form.broadcasterLanguages = [...(config.broadcasterLanguages ?? [])];
         form.logLevel = config.logLevel;
         form.telegramBotToken = config.notifications?.telegram?.botToken ?? "";
         form.telegramChatId = config.notifications?.telegram?.chatId ?? "";
@@ -135,6 +158,8 @@ async function save() {
             holdClaimsWhenUnlinked: form.holdClaimsWhenUnlinked,
             unlinkedExpiryWarningHours: Number(form.unlinkedExpiryWarningHours),
             preferredChannels: form.preferredChannels,
+            blockedChannels: form.blockedChannels,
+            broadcasterLanguages: form.broadcasterLanguages,
             logLevel: form.logLevel,
             notifications,
         });
@@ -158,11 +183,21 @@ async function test() {
 }
 
 function addChannel() {
-    const login = newChannel.value.trim().toLowerCase().replace(/^https?:\/\/(www\.)?twitch\.tv\//, "");
+    const login = normaliseLogin(newChannel.value);
     if (login && !form.preferredChannels.includes(login)) {
         form.preferredChannels.push(login);
     }
     newChannel.value = "";
+}
+
+function addBlocked() {
+    const login = normaliseLogin(newBlocked.value);
+    if (login && !form.blockedChannels.includes(login)) {
+        form.blockedChannels.push(login);
+        // A channel cannot be both preferred and blocked; blocking is the stronger intent.
+        form.preferredChannels = form.preferredChannels.filter((entry) => entry !== login);
+    }
+    newBlocked.value = "";
 }
 </script>
 
@@ -269,6 +304,57 @@ function addChannel() {
                     :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }"
                     @keyup.enter="addChannel"
                 />
+            </div>
+
+            <div>
+                <p class="text-[13px]">Blocked channels</p>
+                <p class="text-[11px] mb-2" :style="{ color: 'var(--text-2)' }">
+                    Never watched, even when a campaign's own allow-list includes them.
+                </p>
+                <div class="flex flex-wrap gap-1.5 mb-2">
+                    <span
+                        v-for="(login, index) in form.blockedChannels"
+                        :key="login"
+                        class="flex items-center gap-1.5 px-2 py-1 rounded-full text-[12px]"
+                        :style="{
+                            background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+                            color: 'var(--danger)',
+                        }"
+                    >
+                        {{ login }}
+                        <button @click="form.blockedChannels.splice(index, 1)">&times;</button>
+                    </span>
+                </div>
+                <input
+                    v-model="newBlocked"
+                    placeholder="Block a channel and press Enter"
+                    class="w-full px-3 py-2 rounded-lg text-[12px] outline-none"
+                    :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                    @keyup.enter="addBlocked"
+                />
+            </div>
+
+            <div>
+                <p class="text-[13px]">Stream languages</p>
+                <p class="text-[11px] mb-2" :style="{ color: 'var(--text-2)' }">
+                    Only watch streams broadcast in these languages. None selected means any
+                    language, which finds a channel more often.
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                    <button
+                        v-for="[code, label] in LANGUAGES"
+                        :key="code"
+                        class="px-2 py-1 rounded-full text-[12px] transition-colors"
+                        :style="
+                            form.broadcasterLanguages.includes(code)
+                                ? { background: 'var(--accent)', color: 'white' }
+                                : { background: 'var(--surface-2)', color: 'var(--text-2)' }
+                        "
+                        @click="toggleLanguage(code)"
+                    >
+                        {{ label }}
+                    </button>
+                </div>
             </div>
         </section>
 
