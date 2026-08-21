@@ -13,6 +13,8 @@ const form = reactive({
     autoClaimDrops: true,
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,
+    holdClaimsWhenUnlinked: false,
+    unlinkedExpiryWarningHours: 12,
     preferredChannels: [],
     logLevel: "info",
     telegramBotToken: "",
@@ -104,6 +106,8 @@ watch(
         form.autoClaimDrops = config.autoClaimDrops;
         form.autoClaimPoints = config.autoClaimPoints;
         form.warnUnlinkedAccounts = config.warnUnlinkedAccounts;
+        form.holdClaimsWhenUnlinked = config.holdClaimsWhenUnlinked;
+        form.unlinkedExpiryWarningHours = config.unlinkedExpiryWarningHours;
         form.preferredChannels = [...config.preferredChannels];
         form.logLevel = config.logLevel;
         form.telegramBotToken = config.notifications?.telegram?.botToken ?? "";
@@ -128,6 +132,8 @@ async function save() {
             autoClaimDrops: form.autoClaimDrops,
             autoClaimPoints: form.autoClaimPoints,
             warnUnlinkedAccounts: form.warnUnlinkedAccounts,
+            holdClaimsWhenUnlinked: form.holdClaimsWhenUnlinked,
+            unlinkedExpiryWarningHours: Number(form.unlinkedExpiryWarningHours),
             preferredChannels: form.preferredChannels,
             logLevel: form.logLevel,
             notifications,
@@ -207,6 +213,37 @@ function addChannel() {
             <label class="flex items-center justify-between gap-4">
                 <span class="text-[13px]">Warn about unlinked accounts</span>
                 <el-switch v-model="form.warnUnlinkedAccounts" />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Hold claims when the account is not linked</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Publishers differ on whether a drop claimed before linking can be
+                        recovered &mdash; some honour a later link, some treat it as lost.
+                        Holding waits for you to link first, but an unclaimed drop is
+                        <em>definitely</em> gone 24 hours after its campaign ends, whereas a
+                        claimed one can often still be recovered. Off by default for that reason.
+                    </span>
+                </span>
+                <el-switch v-model="form.holdClaimsWhenUnlinked" />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Unlinked expiry warning</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Hours before an unlinked campaign expires to alert you that earned
+                        progress is about to be lost. Zero disables it.
+                    </span>
+                </span>
+                <input
+                    v-model="form.unlinkedExpiryWarningHours"
+                    type="number"
+                    min="0"
+                    class="w-20 px-2 py-1.5 rounded-lg text-[12px] tabular outline-none shrink-0"
+                    :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                />
             </label>
 
             <div>
