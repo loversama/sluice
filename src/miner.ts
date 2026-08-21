@@ -825,6 +825,14 @@ export class Miner extends EventEmitter {
                     logger.info("Switching to a higher-priority campaign.");
                     return;
                 }
+                // A campaign can expire mid-session. Nothing further can be earned, and the
+                // refresh will have stripped its drops, so keep beating and we would watch a
+                // dead campaign indefinitely.
+                if (!campaign.isActive) {
+                    logger.info(`${campaign.gameName} - "${campaign.name}" has ended.`);
+                    this.pushFeed("info", `${campaign.gameName} ended - moving on`);
+                    return;
+                }
 
                 const accepted = await channel.sendWatch();
                 if (!accepted) {
@@ -1476,8 +1484,15 @@ export class Miner extends EventEmitter {
         // Restricting this to interesting campaigns keeps the request count sane.
         const interesting = [...next.values()]
             // Upcoming campaigns are included so we can show what is coming and what it
-            // rewards, even though they cannot be mined yet.
-            .filter((campaign) => campaign.isActive || campaign.isUpcoming)
+            // rewards, even though they cannot be mined yet. Recently-ended ones are included
+            // because the campaign list carries no drops: without their details the claim
+            // grace window has nothing to claim and quietly does nothing.
+            .filter(
+                (campaign) =>
+                    campaign.isActive ||
+                    campaign.isUpcoming ||
+                    campaign.isInClaimGrace(CLAIM_GRACE_MS),
+            )
             .filter(
                 (campaign) =>
                     !this.config.excludedGames.some((game) => this.matchesGame(game, campaign)),

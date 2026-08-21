@@ -155,6 +155,15 @@ export class Campaign {
     }
 
     /**
+     * Ended, but still inside the window where Twitch lets a finished drop be claimed from
+     * the inventory. Such a campaign cannot be mined, but its drops must still be known.
+     */
+    isInClaimGrace(graceMs: number): boolean {
+        const ended = Date.now() - this.endAt.getTime();
+        return ended > 0 && ended <= graceMs;
+    }
+
+    /**
      * Whether the Twitch account is linked to the publisher's account. Unlinked campaigns
      * still accrue progress and appear in the Twitch inventory, but the reward will not
      * arrive in-game until the accounts are linked.
