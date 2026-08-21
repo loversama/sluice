@@ -597,9 +597,12 @@ export class Miner extends EventEmitter {
             () => this.channelsFromDirectory(campaign, allowed, { dropsOnly: false }),
         ];
 
-        for (const tier of tiers) {
+        for (const [index, tier] of tiers.entries()) {
             const candidates = await tier().catch(() => []);
-            const found = await this.firstEligible(candidates, campaign);
+            // Only the drops-enabled directory tier carries Twitch's own assurance, so it is
+            // the only one allowed to fall back without positive confirmation.
+            const trustDropsTag = index === 2;
+            const found = await this.firstEligible(candidates, campaign, { trustDropsTag });
             if (found) {
                 return found;
             }
@@ -678,10 +681,24 @@ export class Miner extends EventEmitter {
         return channels;
     }
 
-    /** First channel Twitch confirms is currently granting this campaign. */
+    /**
+     * Pick a channel for this campaign, preferring one Twitch positively confirms.
+     *
+     * DropsHighlightService_AvailableDrops is not trustworthy on its own. For a great many
+     * campaigns it reports only unrelated site-wide promotions, naming neither the campaign
+     * nor anything else useful - creator-program campaigns never appear, and plenty of
+     * ordinary ones do not either. Treating it as authoritative meant rejecting fifty live
+     * drops-enabled channels for a campaign that was perfectly minable.
+     *
+     * So it is used as evidence, not as a gate: a confirmed channel wins outright, and
+     * failing that we fall back on what Twitch already told us by listing the channel under
+     * its drops-enabled filter. The reference tool reaches the same conclusion from the
+     * other direction, shipping with this check disabled by default.
+     */
     private async firstEligible(
         candidates: Channel[],
         campaign: Campaign,
+        options: { trustDropsTag?: boolean } = {},
     ): Promise<Channel | null> {
         // Bound the lookups: a directory page is 50 streams and each check is a request, so
         // a game with no live drops would otherwise cost 50 calls per attempt.
@@ -715,6 +732,17 @@ export class Miner extends EventEmitter {
             } catch (error) {
                 logger.debug(`Could not check drops for ${channel.login}:`, error);
             }
+        }
+
+        // Nothing confirmed. If these came from the drops-enabled directory, Twitch has
+        // already vouched for them running a campaign for this game; that is better
+        // evidence than an endpoint which stayed silent.
+        if (options.trustDropsTag && candidates.length > 0) {
+            const fallback = candidates[0]!;
+            logger.debug(
+                `No channel confirmed ${campaign.name}; using drops-enabled ${fallback.login}`,
+            );
+            return fallback;
         }
         return null;
     }
@@ -1469,6 +1497,47 @@ export class Miner extends EventEmitter {
                 }
             } catch (error) {
                 logger.debug(`Could not fetch details for ${campaign.name}:`, error);
+            }
+        }
+
+        // A fully claimed campaign disappears from dropCampaignsInProgress, and
+        // DropCampaignDetails carries no `self` block at all, so nothing above knows the
+        // drops were already collected - the campaign looks brand new and gets mined again
+        // from zero. gameEventDrops is the surviving proof of ownership: it lists every
+        // reward actually granted, so reconcile against it before trusting the zeroes.
+        const ownedBenefits = new Map<string, number>();
+        for (const reward of inventory?.gameEventDrops ?? []) {
+            const awarded = Date.parse(reward.lastAwardedAt);
+            for (const key of [reward.id, reward.name?.toLowerCase()]) {
+                if (key) {
+                    ownedBenefits.set(key, Number.isNaN(awarded) ? 0 : awarded);
+                }
+            }
+        }
+
+        if (ownedBenefits.size > 0) {
+            for (const campaign of next.values()) {
+                const startedAt = campaign.startAt.getTime();
+                for (const drop of campaign.drops) {
+                    if (drop.isClaimed || drop.data.benefitEdges.length === 0) {
+                        continue;
+                    }
+                    // Every reward in the drop must be owned, and granted no earlier than
+                    // the campaign began - the same reward can recur across seasons.
+                    const owned = drop.data.benefitEdges.every((edge) => {
+                        const awarded =
+                            ownedBenefits.get(edge.benefit.id) ??
+                            ownedBenefits.get(edge.benefit.name?.toLowerCase() ?? "");
+                        return awarded !== undefined && awarded >= startedAt;
+                    });
+                    if (owned) {
+                        drop.update({
+                            isClaimed: true,
+                            currentMinutesWatched: drop.requiredMinutes,
+                        });
+                        this.claimedDropIds.add(drop.id);
+                    }
+                }
             }
         }
 
