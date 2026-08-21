@@ -31,7 +31,12 @@ export class Channel {
     /** Cached per channel - resolving it costs one or two page fetches. */
     private spadeUrl: string | null = null;
     private streamUrl: string | null = null;
-    private onlineSince: number | null = null;
+    /**
+     * Set only when we learned this channel came online from a stream-up event. Twitch sends
+     * that event slightly before the stream is actually ready, so watching immediately earns
+     * nothing. A channel found already streaming needs no such wait.
+     */
+    private pendingOnlineUntil: number | null = null;
 
     stream: StreamState | null = null;
     /** Whether this channel currently grants progress for the campaign we care about. */
@@ -63,7 +68,7 @@ export class Channel {
             title: node.title ?? "",
             viewers: node.viewersCount ?? 0,
         };
-        channel.onlineSince = Date.now();
+        // Discovered mid-broadcast, so it is watchable right now.
         return channel;
     }
 
@@ -76,25 +81,24 @@ export class Channel {
     }
 
     /**
-     * True once the stream has been up long enough for Twitch to credit watch time.
-     * Watching immediately after a stream-up event yields no progress.
+     * True once Twitch will actually credit watch time. Only a channel we saw come online
+     * has to wait; one that was already streaming when we found it is ready immediately.
      */
     get isWatchable(): boolean {
-        if (!this.stream || this.onlineSince === null) {
+        if (!this.stream) {
             return false;
         }
-        return Date.now() - this.onlineSince >= ONLINE_DELAY_MS;
+        return this.pendingOnlineUntil === null || Date.now() >= this.pendingOnlineUntil;
     }
 
-    markOnline(): void {
-        if (this.onlineSince === null) {
-            this.onlineSince = Date.now();
-        }
+    /** Note that this channel just came online, so hold off briefly before watching. */
+    markPendingOnline(): void {
+        this.pendingOnlineUntil = Date.now() + ONLINE_DELAY_MS;
     }
 
     markOffline(): void {
         this.stream = null;
-        this.onlineSince = null;
+        this.pendingOnlineUntil = null;
         // The Spade URL is per-broadcast; drop it so the next session re-resolves.
         this.spadeUrl = null;
         this.streamUrl = null;
@@ -119,9 +123,8 @@ export class Channel {
         if (previousBroadcast && previousBroadcast !== this.stream.broadcastId) {
             this.spadeUrl = null;
             this.streamUrl = null;
-            this.onlineSince = Date.now();
+            this.markPendingOnline();
         }
-        this.markOnline();
         return true;
     }
 
