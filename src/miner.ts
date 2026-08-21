@@ -845,7 +845,10 @@ export class Miner extends EventEmitter {
                 this.unconfirmedBeats++;
                 this.emit("beat", { at: this.lastBeatAt });
 
-                if (drop.isClaimed) {
+                // Re-read through currentDrop: a refresh may have replaced the instance
+                // this loop was handed.
+                const live = this.currentDrop ?? drop;
+                if (live.isClaimed) {
                     return;
                 }
 
@@ -853,7 +856,7 @@ export class Miner extends EventEmitter {
                 // beats have gone unconfirmed, check the inventory before writing the
                 // channel off - Twitch being silent is not the same as earning nothing.
                 if (this.unconfirmedBeats >= MAX_UNCONFIRMED_BEATS) {
-                    const advanced = await this.reconcileProgress(drop);
+                    const advanced = await this.reconcileProgress(live);
                     this.unconfirmedBeats = 0;
                     if (!advanced) {
                         logger.warn(
@@ -869,8 +872,8 @@ export class Miner extends EventEmitter {
                     }
                 }
 
-                if (drop.isClaimable && this.config.autoClaimDrops) {
-                    await this.claim(drop, campaign);
+                if (live.isClaimable && this.config.autoClaimDrops) {
+                    await this.claim(live, this.currentCampaign ?? campaign);
                     if (campaign.isCompleted) {
                         logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
                         if (!this.claimHistory.completedCampaignIds.includes(campaign.id)) {
@@ -1113,6 +1116,34 @@ export class Miner extends EventEmitter {
             }
         };
         setTimeout(tick, interval).unref();
+    }
+
+    /**
+     * Point the running watch loop at the objects this refresh just built.
+     *
+     * A refresh replaces every Campaign and Drop instance, but the loop captured the old
+     * ones. PubSub handlers and the claim sweep both resolve through the new map, so the
+     * loop would go on inspecting a drop nothing updates any more: after a drop was claimed
+     * at refresh time the loop kept beating, saw no progress for fifteen minutes, and
+     * benched a perfectly good channel for thirty.
+     */
+    private rebindWatchedObjects(next: Map<string, Campaign>): void {
+        const campaignId = this.currentCampaign?.id;
+        const dropId = this.currentDrop?.id;
+        if (!campaignId || !dropId) {
+            return;
+        }
+
+        const campaign = next.get(campaignId);
+        const drop = campaign?.drops.find((candidate) => candidate.id === dropId);
+
+        if (!campaign || !drop || drop.isClaimed || !campaign.isActive) {
+            // Nothing left to earn here; let the loop yield at its next beat.
+            this.switchRequested = true;
+            return;
+        }
+        this.currentCampaign = campaign;
+        this.currentDrop = drop;
     }
 
     /**
@@ -1574,6 +1605,7 @@ export class Miner extends EventEmitter {
         }
 
         this.campaigns = next;
+        this.rebindWatchedObjects(next);
         this.scheduleBoundaryRefresh();
         this.warnAboutExpiringUnlinked();
         await this.syncWatchlist();
