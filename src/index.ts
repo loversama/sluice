@@ -276,9 +276,12 @@ async function main(): Promise<void> {
         const hours = hoursLeft < 1 ? "under an hour" : `${Math.round(hoursLeft)} hours`;
         void notifier.send({
             kind: "warning",
-            title: "Link your account to keep this drop",
+            // Game name leads: it is what the reader recognises at a glance in a
+            // notification list, with the reason for the alert on the line beneath.
+            title: campaign.gameName,
             lines: [
-                `${campaign.gameName} - ${campaign.name}`,
+                "Link your account to keep this drop",
+                campaign.name,
                 `${earnedMinutes} minutes earned, expires in ${hours}.`,
                 rewards.length ? `At risk: ${rewards.join(", ")}` : "",
                 "Your Twitch account is not linked, so this will not reach the game.",
