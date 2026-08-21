@@ -35,6 +35,12 @@ export interface Config {
     autoClaimPoints: boolean;
     /** Warn when a campaign's rewards will not reach the game because accounts are unlinked. */
     warnUnlinkedAccounts: boolean;
+    /**
+     * Send a notification when an unlinked campaign you have already earned progress on is
+     * this many hours from expiring - the last chance to link the account and keep it.
+     * Zero disables it.
+     */
+    unlinkedExpiryWarningHours: number;
     logLevel: LogLevel;
     steam: {
         /**
@@ -63,6 +69,7 @@ export const DEFAULT_CONFIG: Config = {
     autoClaimDrops: true,
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,
+    unlinkedExpiryWarningHours: 24,
     logLevel: "info",
     steam: { refreshHours: 24 },
     notifications: {},

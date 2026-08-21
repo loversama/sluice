@@ -54,6 +54,10 @@ export interface MinerEvents {
     "campaign-completed": [Campaign];
     /** Emitted after each accepted watch beat; drives the dashboard heartbeat. */
     beat: [{ at: number }];
+    /** Progress has been earned on an unlinked campaign that is about to expire. */
+    "unlinked-expiring": [
+        { campaign: Campaign; earnedMinutes: number; rewards: string[]; hoursLeft: number },
+    ];
     /** Human-readable activity line for the dashboard feed. */
     feed: [FeedEntry];
     error: [Error];
@@ -136,6 +140,8 @@ export class Miner extends EventEmitter {
     private readonly feedEntries: FeedEntry[] = [];
     /** Regenerated each refresh so "random" mode varies between cycles but not within one. */
     private randomKeys = new Map<string, number>();
+    /** Campaigns already warned about, so the alert fires once rather than every refresh. */
+    private readonly warnedExpiring = new Set<string>();
     private steam: SteamLibrary | null = null;
     private boundaryTimer: NodeJS.Timeout | null = null;
     /** Watch beats accepted since Twitch last confirmed progress. */
@@ -943,6 +949,57 @@ export class Miner extends EventEmitter {
     }
 
     /**
+     * Flag unlinked campaigns that already hold earned progress and are about to expire.
+     *
+     * This is the only moment the user can still act: linking the account before the
+     * campaign ends converts watch time that would otherwise be discarded into a reward.
+     * Fires once per campaign, since repeating it every refresh would train the user to
+     * ignore it.
+     */
+    private warnAboutExpiringUnlinked(): void {
+        const hours = this.config.unlinkedExpiryWarningHours;
+        if (!hours || hours <= 0) {
+            return;
+        }
+        const horizon = Date.now() + hours * 3_600_000;
+
+        for (const campaign of this.campaigns.values()) {
+            if (
+                !campaign.isActive ||
+                campaign.isAccountLinked ||
+                this.warnedExpiring.has(campaign.id) ||
+                campaign.endAt.getTime() > horizon
+            ) {
+                continue;
+            }
+            const earned = campaign.drops.filter(
+                (drop) => !drop.isClaimed && drop.currentMinutes > 0,
+            );
+            if (earned.length === 0) {
+                continue;
+            }
+
+            this.warnedExpiring.add(campaign.id);
+            const earnedMinutes = earned.reduce((sum, drop) => sum + drop.currentMinutes, 0);
+            const hoursLeft = (campaign.endAt.getTime() - Date.now()) / 3_600_000;
+            logger.warn(
+                `${campaign.gameName} expires in ${hoursLeft.toFixed(1)}h with ` +
+                    `${earnedMinutes} minutes earned but the account is not linked.`,
+            );
+            this.pushFeed(
+                "warn",
+                `${campaign.gameName}: ${earnedMinutes} min earned but not linked, expires soon`,
+            );
+            this.emit("unlinked-expiring", {
+                campaign,
+                earnedMinutes,
+                rewards: earned.map((drop) => drop.rewardNames || drop.name),
+                hoursLeft,
+            });
+        }
+    }
+
+    /**
      * Keep PubSub subscriptions in step with the channels worth knowing about: every
      * allow-list channel of a mineable campaign, plus the user's preferred channels.
      *
@@ -1302,6 +1359,7 @@ export class Miner extends EventEmitter {
 
         this.campaigns = next;
         this.scheduleBoundaryRefresh();
+        this.warnAboutExpiringUnlinked();
         await this.syncWatchlist();
         const mineable = [...next.values()].filter(
             (campaign) => campaign.isActive && !campaign.isCompleted,

@@ -237,7 +237,15 @@ async function main(): Promise<void> {
             rewardImageURL: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
             at: Date.now(),
         });
-        void notifier.send(`Claimed <b>${drop.rewardNames}</b> from ${campaign.gameName}`);
+        void notifier.send({
+            kind: "claim",
+            title: "Drop claimed",
+            lines: [
+                drop.rewardNames || drop.name,
+                `${campaign.gameName} - ${campaign.name}`,
+            ],
+            imageUrl: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
+        });
     });
     miner.on("campaign-completed", (campaign) => {
         bus.emit("campaign-completed", {
@@ -245,7 +253,15 @@ async function main(): Promise<void> {
             name: campaign.name,
             gameName: campaign.gameName,
         });
-        void notifier.send(`Finished <b>${campaign.gameName}</b> - ${campaign.name}`);
+        void notifier.send({
+            kind: "complete",
+            title: "Campaign complete",
+            lines: [
+                `${campaign.gameName} - ${campaign.name}`,
+                `${campaign.drops.length} drop${campaign.drops.length === 1 ? "" : "s"} claimed`,
+            ],
+            imageUrl: campaign.data.game.boxArtURL ?? null,
+        });
     });
     miner.on("campaigns-updated", (campaigns: Campaign[]) => {
         bus.emit("campaigns", {
@@ -256,6 +272,22 @@ async function main(): Promise<void> {
                 : null,
         });
     });
+    miner.on("unlinked-expiring", ({ campaign, earnedMinutes, rewards, hoursLeft }) => {
+        const hours = hoursLeft < 1 ? "under an hour" : `${Math.round(hoursLeft)} hours`;
+        void notifier.send({
+            kind: "warning",
+            title: "Link your account to keep this drop",
+            lines: [
+                `${campaign.gameName} - ${campaign.name}`,
+                `${earnedMinutes} minutes earned, expires in ${hours}.`,
+                rewards.length ? `At risk: ${rewards.join(", ")}` : "",
+                "Your Twitch account is not linked, so this will not reach the game.",
+            ].filter(Boolean),
+            imageUrl: campaign.data.game.boxArtURL ?? null,
+            url: "https://www.twitch.tv/drops/campaigns",
+        });
+    });
+
     miner.on("beat", (payload) => bus.emit("beat", payload));
     miner.on("feed", (entry) => bus.emit("feed", entry));
     miner.on("error", (error) => {

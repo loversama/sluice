@@ -299,7 +299,11 @@ export class ApiServer {
             if (notifier.isEmpty) {
                 return sendJson(response, 400, { error: "No notifiers are configured." });
             }
-            await notifier.send("Test notification from Twitch Drops Bot.");
+            await notifier.send({
+                kind: "info",
+                title: "Test notification",
+                lines: ["Twitch Drops Bot is connected and can reach you here."],
+            });
             return sendJson(response, 200, { ok: true });
         }
 
