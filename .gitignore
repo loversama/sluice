@@ -10,5 +10,6 @@ web/dist/
 config.json
 auth.json
 steam.json
+state.json
 cache/
 data/
