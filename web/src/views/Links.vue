@@ -1,7 +1,11 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
+import { useMinerStore } from "@/stores/miner.js";
 import { formatDuration } from "@/lib/format.js";
+
+const store = useMinerStore();
+const steam = ref(null);
 
 /**
  * Unlinked campaigns are the quietest way to lose rewards: progress accrues normally and
@@ -19,17 +23,26 @@ const totalWasted = computed(() =>
     suggestions.value.reduce((sum, entry) => sum + entry.wastedMinutes, 0),
 );
 
-onMounted(async () => {
+async function load() {
     try {
         const response = await fetch("/api/links");
         if (!response.ok) throw new Error(`Daemon returned ${response.status}`);
         suggestions.value = (await response.json()).suggestions ?? [];
+        error.value = null;
     } catch (caught) {
         error.value = caught.message;
     } finally {
         loading.value = false;
     }
+}
+
+onMounted(async () => {
+    await load();
+    steam.value = await fetch("/api/steam").then((r) => r.json()).catch(() => null);
 });
+
+// Suggestions are derived from campaign state, so they go stale the moment it refreshes.
+watch(() => store.campaigns, load);
 
 function playtime(entry) {
     if (entry.playtimeMinutes === null) return null;
@@ -55,14 +68,28 @@ function playtime(entry) {
             {{ error }}
         </p>
         <p
-            v-else-if="!suggestions.length"
+            v-if="!loading && !error && !suggestions.length"
             class="card p-8 text-center text-[12px]"
             :style="{ color: 'var(--muted)' }"
         >
             Nothing to link &mdash; every active campaign is already connected to your account.
         </p>
 
-        <template v-else>
+        <!-- Half the ranking is Steam ownership; without it the page silently sorts on
+             one signal and never says so. -->
+        <p
+            v-if="!loading && steam && !steam.connected"
+            class="card p-3 text-[12px]"
+            :style="{ color: 'var(--text-2)' }"
+        >
+            Connect Steam to rank these by the games you actually own and play.
+            <RouterLink to="/settings" class="underline" :style="{ color: 'var(--accent)' }">
+                Connect Steam
+            </RouterLink>
+        </p>
+
+        <template v-else-if="false" />
+        <template v-if="!loading && !error && suggestions.length">
             <div
                 v-if="totalWasted > 0"
                 class="card p-3 flex items-center gap-3"

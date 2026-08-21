@@ -49,10 +49,15 @@ const groups = computed(() => {
         list.push(campaign);
         byGame.set(campaign.game.id, list);
     }
+    // Order by the miner's real queue, so this page and the Dashboard cannot disagree
+    // about what comes next. Anything not queued (upcoming, completed) falls back to name.
+    const queueIndex = new Map(store.queue.map((id, index) => [id, index]));
+    const best = (group) =>
+        Math.min(...group.map((c) => queueIndex.get(c.id) ?? Number.MAX_SAFE_INTEGER));
     return [...byGame.values()].sort((a, b) => {
-        const rankA = a[0].priorityRank ?? Number.MAX_SAFE_INTEGER;
-        const rankB = b[0].priorityRank ?? Number.MAX_SAFE_INTEGER;
-        return rankA - rankB || a[0].game.name.localeCompare(b[0].game.name);
+        const delta = best(a) - best(b);
+        if (delta !== 0 && Number.isFinite(delta)) return delta;
+        return a[0].game.name.localeCompare(b[0].game.name);
     });
 });
 
@@ -86,6 +91,18 @@ function preconditionName(drop, campaign) {
         .map((id) => campaign.drops.find((entry) => entry.id === id))
         .find((entry) => entry && !entry.isClaimed);
     return blocker?.name ?? "an earlier drop";
+}
+
+async function exclude(campaign) {
+    const games = [...(store.config?.excludedGames ?? [])];
+    if (!games.some((g) => g.toLowerCase() === campaign.game.name.toLowerCase())) {
+        games.push(campaign.game.name);
+    }
+    const priorities = (store.config?.priorityGames ?? []).filter(
+        (g) => g.toLowerCase() !== campaign.game.name.toLowerCase(),
+    );
+    await store.saveConfig({ excludedGames: games, priorityGames: priorities });
+    ElMessage.success(`${campaign.game.name} excluded.`);
 }
 
 async function prioritise(campaign) {
@@ -376,13 +393,24 @@ watch(
                 </section>
 
                 <footer class="pt-3" :style="{ borderTop: '1px solid var(--border)' }">
-                    <button
-                        class="px-3 py-1.5 rounded-lg text-[12px]"
-                        :style="{ background: 'var(--accent)', color: 'white' }"
-                        @click="prioritise(selected)"
-                    >
-                        Prioritise {{ selected.game.name }}
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button
+                            class="px-3 py-1.5 rounded-lg text-[12px]"
+                            :style="{ background: 'var(--accent)', color: 'white' }"
+                            @click="prioritise(selected)"
+                        >
+                            Prioritise {{ selected.game.name }}
+                        </button>
+                        <!-- The action people reach for when they see a campaign they will
+                             never want; previously only the positive one existed. -->
+                        <button
+                            class="px-3 py-1.5 rounded-lg text-[12px]"
+                            :style="{ background: 'var(--surface-2)', color: 'var(--danger)' }"
+                            @click="exclude(selected)"
+                        >
+                            Never mine this game
+                        </button>
+                    </div>
                 </footer>
             </div>
         </el-drawer>

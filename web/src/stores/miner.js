@@ -145,6 +145,18 @@ export const useMinerStore = defineStore("miner", {
             return this.config;
         },
 
+        /** Manual overrides: pause, resume, skip the current channel, refresh now. */
+        async action(name) {
+            const response = await fetch(`/api/actions/${name}`, { method: "POST" });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error ?? `Action failed (${response.status})`);
+            }
+            // The daemon is the source of truth for what changed.
+            await this.hydrate();
+            return body;
+        },
+
         async testNotification() {
             const response = await fetch("/api/notify/test", { method: "POST" });
             const body = await response.json().catch(() => ({}));

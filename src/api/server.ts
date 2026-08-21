@@ -230,6 +230,30 @@ export class ApiServer {
             });
         }
 
+        // Manual overrides. The bot is deliberately autonomous, but with no lever at all
+        // a user who dislikes the current channel can only edit config or restart.
+        if (path.startsWith("/api/actions/") && method === "POST") {
+            const miner = this.context.getMiner();
+            if (!miner) {
+                return sendJson(response, 409, { error: "The miner is not running yet." });
+            }
+            switch (path.slice("/api/actions/".length)) {
+                case "pause":
+                    miner.pause();
+                    return sendJson(response, 200, { paused: true });
+                case "resume":
+                    miner.resume();
+                    return sendJson(response, 200, { paused: false });
+                case "skip":
+                    return sendJson(response, 200, { skipped: miner.skipChannel() });
+                case "refresh":
+                    await miner.refreshNow();
+                    return sendJson(response, 200, { ok: true });
+                default:
+                    return sendJson(response, 404, { error: "Unknown action" });
+            }
+        }
+
         if (path === "/api/games/search" && method === "GET") {
             const term = url.searchParams.get("q") ?? "";
             const games = await this.context.searchGames(term).catch(() => []);
@@ -359,6 +383,7 @@ export class ApiServer {
                 version: this.context.version,
                 startedAt: new Date(this.context.startedAt).toISOString(),
                 dryRun: miner?.dryRun ?? false,
+                paused: miner?.isPaused ?? false,
             },
             auth: {
                 status: this.context.getAuthStatus(),

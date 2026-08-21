@@ -39,7 +39,43 @@ const newPriority = ref("");
 const steamStatus = ref(null);
 const searchResults = ref([]);
 const searching = ref(false);
+const excludeResults = ref([]);
 let searchTimer = null;
+let excludeTimer = null;
+
+/**
+ * The exclusion field was a blind text box while the priority field had search. A typo'd
+ * exclusion silently never matches anything, which is the worst failure mode a "never do
+ * this" control can have.
+ */
+function onExcludeInput() {
+    clearTimeout(excludeTimer);
+    const term = newExcluded.value.trim();
+    if (term.length < 2) {
+        excludeResults.value = [];
+        return;
+    }
+    excludeTimer = setTimeout(async () => {
+        try {
+            const response = await fetch(`/api/games/search?q=${encodeURIComponent(term)}`);
+            excludeResults.value = (await response.json()).games ?? [];
+        } catch {
+            excludeResults.value = [];
+        }
+    }, 300);
+}
+
+function excludeGame(name) {
+    if (!excluded.value.some((entry) => entry.toLowerCase() === name.toLowerCase())) {
+        priorities.value = priorities.value.filter(
+            (entry) => entry.toLowerCase() !== name.toLowerCase(),
+        );
+        excluded.value.push(name);
+        scheduleSave();
+    }
+    newExcluded.value = "";
+    excludeResults.value = [];
+}
 
 /**
  * Search every category on Twitch, not just games with a campaign right now. A priority
@@ -174,15 +210,11 @@ function addPriority() {
 }
 
 function addExcluded() {
-    const game = newExcluded.value.trim();
-    if (!game || excluded.value.some((entry) => entry.toLowerCase() === game.toLowerCase())) {
-        newExcluded.value = "";
-        return;
+    const first = excludeResults.value[0];
+    const game = first ? first.name : newExcluded.value.trim();
+    if (game) {
+        excludeGame(game);
     }
-    priorities.value = priorities.value.filter((entry) => entry.toLowerCase() !== game.toLowerCase());
-    excluded.value.push(game);
-    newExcluded.value = "";
-    scheduleSave();
 }
 
 function remove(list, index) {
@@ -368,13 +400,31 @@ function move(index, delta) {
             </div>
 
             <div class="flex gap-2">
-                <input
-                    v-model="newExcluded"
-                    placeholder="Add a game to exclude"
-                    class="flex-1 px-3 py-2 rounded-lg text-[12px] outline-none"
-                    :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }"
-                    @keyup.enter="addExcluded"
-                />
+                <div class="relative flex-1">
+                    <input
+                        v-model="newExcluded"
+                        placeholder="Search a game to exclude"
+                        class="w-full px-3 py-2 rounded-lg text-[12px] outline-none"
+                        :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                        @input="onExcludeInput"
+                        @keyup.enter="addExcluded"
+                    />
+                    <ul
+                        v-if="excludeResults.length"
+                        class="absolute z-20 left-0 right-0 mt-1 rounded-lg overflow-hidden shadow-xl"
+                        :style="{ background: 'var(--surface)', border: '1px solid var(--border)' }"
+                    >
+                        <li
+                            v-for="game in excludeResults"
+                            :key="game.id"
+                            class="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:brightness-125"
+                            @click="excludeGame(game.name)"
+                        >
+                            <img v-if="game.boxArtURL" :src="game.boxArtURL" :alt="game.name" class="w-6 h-8 rounded object-cover" />
+                            <span class="text-[12px] truncate">{{ game.name }}</span>
+                        </li>
+                    </ul>
+                </div>
                 <button
                     class="px-3 py-2 rounded-lg text-[12px]"
                     :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"

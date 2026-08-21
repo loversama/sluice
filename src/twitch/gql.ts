@@ -237,6 +237,28 @@ export class TwitchGql {
         return data.currentUser.inventory;
     }
 
+    /**
+     * How many minutes the current watch session has been credited on this channel.
+     *
+     * One cheap call that answers "is this channel actually earning?" directly, instead of
+     * waiting out fifteen unconfirmed beats and then reconciling the whole inventory.
+     * Returns null when Twitch reports no session, which is itself the answer.
+     */
+    async getCurrentDropSession(
+        channelId: string,
+    ): Promise<{ dropId: string; currentMinutes: number } | null> {
+        const data = await this.query<{
+            currentUser: {
+                dropCurrentSession: { dropID: string; currentMinutesWatched: number } | null;
+            } | null;
+        }>("currentDrop", { channelID: channelId, channelLogin: "" });
+        const session = data.currentUser?.dropCurrentSession;
+        if (!session) {
+            return null;
+        }
+        return { dropId: session.dropID, currentMinutes: session.currentMinutesWatched };
+    }
+
     /** Campaign IDs this channel currently grants progress toward. */
     async getAvailableDrops(channelId: string): Promise<TimeBasedDrop[]> {
         const data = await this.query<{

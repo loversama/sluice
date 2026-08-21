@@ -20,6 +20,17 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * connection does not masquerade as a stalled campaign.
  */
 const MAX_UNCONFIRMED_BEATS = 15;
+/**
+ * Beats to allow before asking Twitch directly whether this session is earning. Cheap enough
+ * to run often, and it turns "is this channel a dud?" from a fifteen-minute question into a
+ * three-minute one.
+ */
+const BEATS_BEFORE_SESSION_CHECK = 3;
+/**
+ * Consecutive rejected beats tolerated before benching the channel. A single CDN or Spade
+ * hiccup is common and should not cost a thirty-minute exclusion.
+ */
+const MAX_BEAT_FAILURES = 3;
 /** How long a channel that failed stays out of the rotation. */
 const CHANNEL_COOLDOWN_MS = 30 * 60_000;
 /** How many campaigns to try per cycle before giving the loop a rest. */
@@ -136,6 +147,8 @@ export class Miner extends EventEmitter {
     private stopping = false;
     /** When true, the miner reads and reports but never sends watch beats or claims. */
     dryRun = false;
+    /** Paused by the user. Campaigns keep refreshing; nothing is watched or claimed. */
+    private paused = false;
 
     private currentCampaign: Campaign | null = null;
     private miningSince: number | null = null;
@@ -230,6 +243,51 @@ export class Miner extends EventEmitter {
             notifiedUnlinkedClaims: [...this.notifiedUnlinkedClaims],
             failedClaims: [...this.failedClaimIds],
         });
+    }
+
+    get isPaused(): boolean {
+        return this.paused;
+    }
+
+    /** Stop watching without stopping the daemon. The loop yields at its next beat. */
+    pause(): void {
+        if (this.paused) {
+            return;
+        }
+        this.paused = true;
+        this.switchRequested = true;
+        logger.info("Paused by request.");
+        this.pushFeed("info", "Paused");
+    }
+
+    resume(): void {
+        if (!this.paused) {
+            return;
+        }
+        this.paused = false;
+        logger.info("Resumed by request.");
+        this.pushFeed("info", "Resumed");
+    }
+
+    /**
+     * Leave the current channel and pick another. The channel is benched briefly so the
+     * next selection does not immediately choose it again.
+     */
+    skipChannel(): boolean {
+        const channel = this.currentChannel;
+        if (!channel) {
+            return false;
+        }
+        this.channelCooldowns.set(channel.login, Date.now() + CHANNEL_COOLDOWN_MS);
+        this.switchRequested = true;
+        logger.info(`Skipping ${channel.displayName} by request.`);
+        this.pushFeed("info", `Skipped ${channel.displayName}`);
+        return true;
+    }
+
+    /** Refresh campaigns immediately rather than waiting for the next scheduled sweep. */
+    async refreshNow(): Promise<void> {
+        await this.refreshCampaigns();
     }
 
     /** Attach a Steam library so ownership and playtime can influence ranking. */
@@ -397,7 +455,7 @@ export class Miner extends EventEmitter {
     }
 
     async start(): Promise<void> {
-        this.pubsub = new PubSubPool(this.auth.accessToken);
+        this.pubsub = new PubSubPool(() => this.auth.accessToken);
         this.attachPubSubHandlers(this.pubsub);
         // Drop events are account-wide, so this one subscription covers every campaign.
         this.pubsub.listen(`user-drop-events.${this.auth.userId}`);
@@ -409,6 +467,10 @@ export class Miner extends EventEmitter {
 
         while (!this.stopping) {
             try {
+                if (this.paused) {
+                    await sleep(5_000);
+                    continue;
+                }
                 const worked = await this.runOnce();
                 if (!worked) {
                     logger.info("Nothing to mine right now. Waiting for the next refresh.");
@@ -790,6 +852,7 @@ export class Miner extends EventEmitter {
         this.lastBeatAt = null;
         this.unconfirmedBeats = 0;
         this.switchRequested = false;
+        let beatFailures = 0;
 
         const streamTopic = `video-playback-by-id.${channel.id}`;
         const pointsTopic = `community-points-user-v1.${this.auth.userId}`;
@@ -821,6 +884,10 @@ export class Miner extends EventEmitter {
                     logger.info(`${channel.displayName} went offline.`);
                     return;
                 }
+                if (this.paused) {
+                    logger.info("Paused; leaving the channel.");
+                    return;
+                }
                 if (this.switchRequested) {
                     logger.info("Switching to a higher-priority campaign.");
                     return;
@@ -836,11 +903,21 @@ export class Miner extends EventEmitter {
 
                 const accepted = await channel.sendWatch();
                 if (!accepted) {
-                    logger.warn(`${channel.displayName} rejected the watch beat.`);
-                    this.pushFeed("warn", `${channel.displayName} rejected the watch beat`);
-                    this.penalise(channel);
-                    return;
+                    beatFailures++;
+                    logger.warn(
+                        `${channel.displayName} rejected the watch beat ` +
+                            `(${beatFailures}/${MAX_BEAT_FAILURES}).`,
+                    );
+                    if (beatFailures >= MAX_BEAT_FAILURES) {
+                        this.pushFeed("warn", `${channel.displayName} kept rejecting beats`);
+                        this.penalise(channel);
+                        return;
+                    }
+                    // A transient failure; wait out the interval and try the next beat.
+                    await sleep(Math.max(0, WATCH_INTERVAL_MS - (Date.now() - beatStart)));
+                    continue;
                 }
+                beatFailures = 0;
                 this.lastBeatAt = Date.now();
                 this.unconfirmedBeats++;
                 this.emit("beat", { at: this.lastBeatAt });
@@ -855,6 +932,19 @@ export class Miner extends EventEmitter {
                 // PubSub is the fast path for progress, but it can go quiet. Once enough
                 // beats have gone unconfirmed, check the inventory before writing the
                 // channel off - Twitch being silent is not the same as earning nothing.
+                // Ask Twitch directly well before resorting to a full inventory sweep.
+                if (
+                    this.unconfirmedBeats === BEATS_BEFORE_SESSION_CHECK &&
+                    !(await this.isSessionEarning(channel, live))
+                ) {
+                    logger.warn(
+                        `${channel.displayName} is not crediting watch time; trying another channel.`,
+                    );
+                    this.pushFeed("warn", `${channel.displayName} credited nothing - switching`);
+                    this.penalise(channel);
+                    return;
+                }
+
                 if (this.unconfirmedBeats >= MAX_UNCONFIRMED_BEATS) {
                     const advanced = await this.reconcileProgress(live);
                     this.unconfirmedBeats = 0;
@@ -900,6 +990,32 @@ export class Miner extends EventEmitter {
             this.currentDrop = null;
             this.currentCampaign = null;
             this.miningSince = null;
+        }
+    }
+
+    /**
+     * Ask Twitch whether the current session on this channel is being credited.
+     *
+     * Treated as innocent-until-proven-guilty: only an explicit "no session" verdict counts
+     * against the channel, because a failed request or an unfamiliar shape is our problem,
+     * not the streamer's.
+     */
+    private async isSessionEarning(channel: Channel, drop: Drop): Promise<boolean> {
+        try {
+            const session = await this.gql.getCurrentDropSession(channel.id);
+            if (!session) {
+                return false;
+            }
+            // Progress may legitimately land on a sibling drop of the same campaign.
+            if (session.dropId === drop.id && session.currentMinutes > drop.currentMinutes) {
+                drop.update({ currentMinutesWatched: session.currentMinutes });
+                this.lastProgressAt = Date.now();
+                this.unconfirmedBeats = 0;
+            }
+            return true;
+        } catch (error) {
+            logger.debug("Could not read the current drop session:", error);
+            return true;
         }
     }
 

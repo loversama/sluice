@@ -1,10 +1,33 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { ElMessage } from "element-plus";
+
 import { useMinerStore } from "@/stores/miner.js";
 import { formatClock, formatDuration } from "@/lib/format.js";
 import StatusChip from "./StatusChip.vue";
 
 const store = useMinerStore();
+const busy = ref(false);
+
+const paused = computed(() => store.daemon?.paused === true);
+
+/** Always shown, not just when idle: it answers "when will it notice the new campaign". */
+const refreshIn = computed(() => {
+    const seconds = store.secondsToRefresh;
+    if (seconds === null) return null;
+    return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+});
+
+async function run(name) {
+    busy.value = true;
+    try {
+        await store.action(name);
+    } catch (error) {
+        ElMessage.error(error.message);
+    } finally {
+        busy.value = false;
+    }
+}
 
 const campaign = computed(() => store.currentCampaign);
 const drop = computed(() => store.currentDrop);
@@ -84,8 +107,12 @@ const idleReason = computed(() => {
     <section v-else-if="!store.mining || !drop" class="card p-4">
         <div class="flex items-center justify-between">
             <div>
-                <h2 class="text-[15px] font-semibold">Nothing to mine right now</h2>
-                <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">{{ idleReason }}</p>
+                <h2 class="text-[15px] font-semibold">
+                    {{ paused ? "Paused" : "Nothing to mine right now" }}
+                </h2>
+                <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
+                    {{ paused ? "Nothing is being watched or claimed until you resume." : idleReason }}
+                </p>
             </div>
             <RouterLink
                 v-if="store.upcomingCampaigns.length"
@@ -96,10 +123,28 @@ const idleReason = computed(() => {
                 See upcoming &rarr;
             </RouterLink>
         </div>
-        <p v-if="store.secondsToRefresh !== null" class="text-[11px] mt-3 tabular" :style="{ color: 'var(--muted)' }">
-            Next refresh in {{ Math.floor(store.secondsToRefresh / 60) }}m
-            {{ store.secondsToRefresh % 60 }}s
-        </p>
+        <div class="flex items-center gap-2 mt-3">
+            <button
+                v-if="paused"
+                class="px-3 py-1.5 rounded-lg text-[12px] text-white"
+                :style="{ background: 'var(--accent)' }"
+                :disabled="busy"
+                @click="run('resume')"
+            >
+                Resume
+            </button>
+            <button
+                class="px-3 py-1.5 rounded-lg text-[12px]"
+                :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                :disabled="busy"
+                @click="run('refresh')"
+            >
+                Refresh campaigns now
+            </button>
+            <span v-if="refreshIn" class="text-[11px] tabular ml-auto" :style="{ color: 'var(--muted)' }">
+                next refresh in {{ refreshIn }}
+            </span>
+        </div>
     </section>
 
     <!-- Active mining. -->
@@ -116,7 +161,26 @@ const idleReason = computed(() => {
                     &mdash; {{ campaign?.name }}
                 </span>
             </div>
-            <StatusChip v-if="campaign && !campaign.isAccountLinked" status="unlinked" />
+            <div class="flex items-center gap-2 shrink-0">
+                <StatusChip v-if="campaign && !campaign.isAccountLinked" status="unlinked" />
+                <button
+                    class="px-2 py-1 rounded text-[11px]"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"
+                    :disabled="busy"
+                    title="Leave this channel and pick another"
+                    @click="run('skip')"
+                >
+                    Skip channel
+                </button>
+                <button
+                    class="px-2 py-1 rounded text-[11px]"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"
+                    :disabled="busy"
+                    @click="run('pause')"
+                >
+                    Pause
+                </button>
+            </div>
         </header>
 
         <!-- The reward is the headline. Users care about the item, not the streamer. -->

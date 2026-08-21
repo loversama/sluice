@@ -42,7 +42,12 @@ class PubSubSocket extends EventEmitter {
 
     readonly topics = new Set<string>();
 
-    constructor(private readonly authToken: string) {
+    /**
+     * The token is read through a getter rather than captured: it can be refreshed while
+     * sockets are open, and a reconnect that re-subscribed with the old one would fail
+     * silently, stopping every progress event without any obvious symptom.
+     */
+    constructor(private readonly getAuthToken: () => string) {
         super();
     }
 
@@ -67,7 +72,7 @@ class PubSubSocket extends EventEmitter {
                 this.send({
                     type: "LISTEN",
                     nonce: randomUUID(),
-                    data: { topics: [...this.topics], auth_token: this.authToken },
+                    data: { topics: [...this.topics], auth_token: this.getAuthToken() },
                 });
             }
         });
@@ -106,7 +111,7 @@ class PubSubSocket extends EventEmitter {
         this.send({
             type: "LISTEN",
             nonce: randomUUID(),
-            data: { topics: [topic], auth_token: this.authToken },
+            data: { topics: [topic], auth_token: this.getAuthToken() },
         });
     }
 
@@ -117,7 +122,7 @@ class PubSubSocket extends EventEmitter {
         this.send({
             type: "UNLISTEN",
             nonce: randomUUID(),
-            data: { topics: [topic], auth_token: this.authToken },
+            data: { topics: [topic], auth_token: this.getAuthToken() },
         });
     }
 
@@ -263,7 +268,12 @@ export class PubSubPool extends EventEmitter {
     private readonly sockets: PubSubSocket[] = [];
     private readonly topicOwners = new Map<string, PubSubSocket>();
 
-    constructor(private readonly authToken: string) {
+    /**
+     * The token is read through a getter rather than captured: it can be refreshed while
+     * sockets are open, and a reconnect that re-subscribed with the old one would fail
+     * silently, stopping every progress event without any obvious symptom.
+     */
+    constructor(private readonly getAuthToken: () => string) {
         super();
     }
 
@@ -311,7 +321,7 @@ export class PubSubPool extends EventEmitter {
         if (this.sockets.length >= MAX_SOCKETS) {
             return null;
         }
-        const socket = new PubSubSocket(this.authToken);
+        const socket = new PubSubSocket(this.getAuthToken);
         // Forward every event so consumers subscribe to the pool, not individual sockets.
         for (const event of [
             "drop-progress",
