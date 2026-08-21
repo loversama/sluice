@@ -70,7 +70,9 @@ async function main(): Promise<void> {
     logger.info(`Config: ${configPath}`);
 
     const auth = new AuthState();
-    const notifier = new NotifierGroup(config);
+    // Rebuilt whenever the config changes: the group snapshots its channels at
+    // construction, so a token added at runtime would otherwise do nothing until restart.
+    let notifier = new NotifierGroup(config);
     // Decouples the miner's lifetime from the server's: the server starts first, before a
     // miner exists, and simply relays whatever arrives on this bus.
     const bus = new EventEmitter();
@@ -109,6 +111,7 @@ async function main(): Promise<void> {
         setConfig: async (next: Config) => {
             config = next;
             await saveConfig(configPath, next);
+            notifier = new NotifierGroup(next);
             miner?.applyConfig(next);
             // Ranking may have changed, so push a fresh campaign view to the dashboard.
             if (miner) {
