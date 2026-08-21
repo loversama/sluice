@@ -163,6 +163,32 @@ export class Campaign {
         return this.data.self?.isAccountConnected ?? true;
     }
 
+    /**
+     * True when every reward here is a Twitch badge or emote. Those are granted on Twitch
+     * itself, so they arrive with or without a game account link - warning about linking
+     * would be wrong, and skipping them as "unlinked" would discard a reward that works.
+     */
+    get isTwitchNativeReward(): boolean {
+        const benefits = this.drops.flatMap((drop) => drop.data.benefitEdges);
+        if (benefits.length === 0) {
+            return false;
+        }
+        return benefits.every(
+            (edge) =>
+                edge.benefit.distributionType === "BADGE" ||
+                edge.benefit.distributionType === "EMOTE",
+        );
+    }
+
+    /**
+     * Whether a reward from this campaign can actually reach the user. Unlinked campaigns
+     * still accrue progress that may never be delivered, so this is what ranking and any
+     * skip policy should consult rather than `isAccountLinked` alone.
+     */
+    get isDeliverable(): boolean {
+        return this.isAccountLinked || this.isTwitchNativeReward;
+    }
+
     /** Campaigns may restrict progress to a specific set of channels. */
     get allowedChannelIds(): Set<string> | null {
         const allow = this.data.allow;
@@ -299,6 +325,13 @@ export function compareCampaigns(a: Campaign, b: Campaign, options: RankingOptio
     const rankDelta = priorityRank(a, priorityGames) - priorityRank(b, priorityGames);
     if (rankDelta !== 0) {
         return rankDelta;
+    }
+
+    // A campaign whose reward cannot be delivered is worth less than one that can, whatever
+    // else is equal: watch time spent on it may produce nothing at all. Applied below the
+    // explicit priority list, so a game the user named still wins.
+    if (a.isDeliverable !== b.isDeliverable) {
+        return a.isDeliverable ? -1 : 1;
     }
 
     // Keep working the game already in progress before starting another one.

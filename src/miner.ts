@@ -236,7 +236,7 @@ export class Miner extends EventEmitter {
         const byGame = new Map<string, LinkSuggestion>();
 
         for (const campaign of this.campaigns.values()) {
-            if (!campaign.isActive || campaign.isAccountLinked || campaign.isCompleted) {
+            if (!campaign.isActive || campaign.isDeliverable || campaign.isCompleted) {
                 continue;
             }
             const existing = byGame.get(campaign.gameId) ?? {
@@ -438,7 +438,7 @@ export class Miner extends EventEmitter {
             }
             examined++;
 
-            if (this.config.warnUnlinkedAccounts && !campaign.isAccountLinked) {
+            if (this.config.warnUnlinkedAccounts && !campaign.isDeliverable) {
                 logger.warn(
                     `${campaign.gameName} - "${campaign.name}" is not linked to your Twitch ` +
                         "account. Progress is tracked, but rewards will not reach the game.",
@@ -479,6 +479,9 @@ export class Miner extends EventEmitter {
             if (this.config.excludedGames.some((game) => this.matchesGame(game, campaign))) {
                 return false;
             }
+            if (!campaign.isDeliverable && !this.shouldMineUnlinked(campaign)) {
+                return false;
+            }
             if (
                 this.config.priorityMode === "priority_only" &&
                 !this.config.priorityGames.some((game) => this.matchesGame(game, campaign))
@@ -494,6 +497,28 @@ export class Miner extends EventEmitter {
         const options = this.rankingOptions();
         candidates.sort((a, b) => compareCampaigns(a, b, options));
         return candidates;
+    }
+
+    /**
+     * Whether an unlinked campaign is still worth the watch time.
+     *
+     * Under "ownedOrChosen" it is, but only where there is a real signal the user would go
+     * and link it: they own the game on Steam, or they put it in the priority list
+     * themselves. Anything else earns progress toward a reward nobody plans to collect.
+     */
+    private shouldMineUnlinked(campaign: Campaign): boolean {
+        switch (this.config.unlinkedPolicy) {
+            case "skip":
+                return false;
+            case "ownedOrChosen": {
+                const chosen = this.config.priorityGames.some((game) =>
+                    this.matchesGame(game, campaign),
+                );
+                return chosen || (this.steam?.owns(campaign.gameName) ?? false);
+            }
+            default:
+                return true;
+        }
     }
 
     private matchesGame(game: string, campaign: Campaign): boolean {
@@ -849,7 +874,7 @@ export class Miner extends EventEmitter {
 
         // Claiming a drop on an unlinked campaign is the point of no return for some
         // publishers, so flag it - and optionally stop short of claiming.
-        if (!campaign.isAccountLinked && !this.notifiedUnlinkedClaims.has(drop.id)) {
+        if (!campaign.isDeliverable && !this.notifiedUnlinkedClaims.has(drop.id)) {
             const held = this.config.holdClaimsWhenUnlinked;
             // Held drops stay claimable, so this would otherwise re-fire every refresh.
             this.notifiedUnlinkedClaims.add(drop.id);
@@ -1034,7 +1059,7 @@ export class Miner extends EventEmitter {
         for (const campaign of this.campaigns.values()) {
             if (
                 !campaign.isActive ||
-                campaign.isAccountLinked ||
+                campaign.isDeliverable ||
                 this.warnedExpiring.has(campaign.id) ||
                 campaign.endAt.getTime() > horizon
             ) {

@@ -3,6 +3,16 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { LogLevel } from "./logger.js";
 import type { PriorityMode } from "./models/campaign.js";
 
+/**
+ * How unlinked campaigns are treated.
+ *
+ * "ownedOrChosen" is the useful middle: mining an unlinked campaign is only worth the time
+ * if the user would plausibly go and link it, and the honest signals for that are owning the
+ * game on Steam or having named it in the priority list. Everything else is watch time spent
+ * on a reward nobody intends to collect.
+ */
+export type UnlinkedPolicy = "mine" | "skip" | "ownedOrChosen";
+
 export interface Config {
     /**
      * Games to mine, most wanted first. Accepts display names ("Rust") or numeric game IDs.
@@ -42,6 +52,14 @@ export interface Config {
     autoClaimPoints: boolean;
     /** Warn when a campaign's rewards will not reach the game because accounts are unlinked. */
     warnUnlinkedAccounts: boolean;
+    /**
+     * What to do with campaigns whose account is not linked, and whose rewards therefore may
+     * never arrive. Badge and emote campaigns are always mined - those need no link.
+     *
+     * Linked campaigns are ranked first regardless, so this only decides what happens once
+     * they run out.
+     */
+    unlinkedPolicy: UnlinkedPolicy;
     /**
      * Send a notification when an unlinked campaign you have already earned progress on is
      * this many hours from expiring - the last chance to link the account and keep it.
@@ -90,6 +108,7 @@ export const DEFAULT_CONFIG: Config = {
     autoClaimDrops: true,
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,
+    unlinkedPolicy: "mine",
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
     logLevel: "info",

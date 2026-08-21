@@ -14,6 +14,7 @@ const form = reactive({
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,
     holdClaimsWhenUnlinked: false,
+    unlinkedPolicy: "mine",
     unlinkedExpiryWarningHours: 12,
     preferredChannels: [],
     blockedChannels: [],
@@ -128,6 +129,7 @@ watch(
         form.autoClaimPoints = config.autoClaimPoints;
         form.warnUnlinkedAccounts = config.warnUnlinkedAccounts;
         form.holdClaimsWhenUnlinked = config.holdClaimsWhenUnlinked;
+        form.unlinkedPolicy = config.unlinkedPolicy ?? "mine";
         form.unlinkedExpiryWarningHours = config.unlinkedExpiryWarningHours;
         form.preferredChannels = [...config.preferredChannels];
         form.blockedChannels = [...(config.blockedChannels ?? [])];
@@ -156,6 +158,7 @@ async function save() {
             autoClaimPoints: form.autoClaimPoints,
             warnUnlinkedAccounts: form.warnUnlinkedAccounts,
             holdClaimsWhenUnlinked: form.holdClaimsWhenUnlinked,
+            unlinkedPolicy: form.unlinkedPolicy,
             unlinkedExpiryWarningHours: Number(form.unlinkedExpiryWarningHours),
             preferredChannels: form.preferredChannels,
             blockedChannels: form.blockedChannels,
@@ -248,6 +251,27 @@ function addBlocked() {
             <label class="flex items-center justify-between gap-4">
                 <span class="text-[13px]">Warn about unlinked accounts</span>
                 <el-switch v-model="form.warnUnlinkedAccounts" />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Unlinked campaigns</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Campaigns whose account is not linked may never deliver their reward.
+                        Linked campaigns are always ranked first; this decides what happens
+                        once they run out. Badge and emote rewards are always mined &mdash;
+                        they need no link.
+                    </span>
+                </span>
+                <select
+                    v-model="form.unlinkedPolicy"
+                    class="px-2 py-1.5 rounded-lg text-[12px] outline-none shrink-0 max-w-[210px]"
+                    :style="{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)' }"
+                >
+                    <option value="mine">Mine them all</option>
+                    <option value="ownedOrChosen">Only games I own or chose</option>
+                    <option value="skip">Never mine them</option>
+                </select>
             </label>
 
             <label class="flex items-center justify-between gap-4">

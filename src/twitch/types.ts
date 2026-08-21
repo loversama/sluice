@@ -13,11 +13,19 @@ export interface Game {
     boxArtURL?: string;
 }
 
+/**
+ * How a reward reaches the user. Badges and emotes are granted on Twitch itself, so they
+ * arrive whether or not a game account is linked; a direct entitlement is delivered by the
+ * publisher and needs the link.
+ */
+export type BenefitDistribution = "BADGE" | "EMOTE" | "DIRECT_ENTITLEMENT" | "UNKNOWN";
+
 export interface DropBenefit {
     id: string;
     name: string;
     imageAssetURL?: string;
     game?: Game;
+    distributionType?: BenefitDistribution;
 }
 
 export interface BenefitEdge {
