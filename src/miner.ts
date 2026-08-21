@@ -90,6 +90,8 @@ export interface LinkSuggestion {
     wastedMinutes: number;
     /** Rewards at stake, for showing the user what they are missing. */
     rewards: string[];
+    /** The publisher's linking page for this game. */
+    linkUrl: string;
 }
 
 export interface ClaimRecord {
@@ -247,6 +249,7 @@ export class Miner extends EventEmitter {
                 playtimeMinutes: null,
                 wastedMinutes: 0,
                 rewards: [],
+                linkUrl: campaign.accountLinkUrl,
             };
             existing.campaignCount++;
             for (const drop of campaign.drops) {

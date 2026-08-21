@@ -69,6 +69,9 @@ export interface DropCampaign {
     game: Game;
     /** False when the Twitch account is not linked to the publisher's account. */
     self?: { isAccountConnected: boolean } | null;
+    /** The publisher's own linking page - far more useful than Twitch's generic one. */
+    accountLinkURL?: string | null;
+    detailsURL?: string | null;
     timeBasedDrops?: TimeBasedDrop[] | null;
     allow?: AllowList | null;
 }

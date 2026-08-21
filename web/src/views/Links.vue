@@ -96,7 +96,15 @@ function playtime(entry) {
                 >
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <p class="text-[13px] font-medium">{{ entry.gameName }}</p>
+                            <a
+                                v-if="entry.linkUrl"
+                                :href="entry.linkUrl"
+                                target="_blank"
+                                rel="noreferrer"
+                                class="text-[13px] font-medium hover:underline"
+                                :style="{ color: 'var(--accent)' }"
+                            >{{ entry.gameName }} &rarr;</a>
+                            <p v-else class="text-[13px] font-medium">{{ entry.gameName }}</p>
                             <span
                                 class="text-[10px] px-1.5 py-0.5 rounded-full"
                                 :style="{
@@ -137,7 +145,15 @@ function playtime(entry) {
                     class="card p-3 flex items-center gap-4 opacity-80"
                 >
                     <div class="min-w-0 flex-1">
-                        <p class="text-[13px]">{{ entry.gameName }}</p>
+                        <a
+                            v-if="entry.linkUrl"
+                            :href="entry.linkUrl"
+                            target="_blank"
+                            rel="noreferrer"
+                            class="text-[13px] hover:underline"
+                            :style="{ color: 'var(--accent)' }"
+                        >{{ entry.gameName }} &rarr;</a>
+                        <p v-else class="text-[13px]">{{ entry.gameName }}</p>
                         <p class="text-[11px] mt-0.5 truncate" :style="{ color: 'var(--text-2)' }">
                             {{ entry.rewards.join(", ") || "no rewards listed" }}
                         </p>

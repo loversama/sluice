@@ -370,7 +370,6 @@ function move(index, delta) {
             <div class="flex gap-2">
                 <input
                     v-model="newExcluded"
-                    list="known-games"
                     placeholder="Add a game to exclude"
                     class="flex-1 px-3 py-2 rounded-lg text-[12px] outline-none"
                     :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }"

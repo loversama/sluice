@@ -294,7 +294,7 @@ async function main(): Promise<void> {
                 "Your Twitch account is not linked, so this will not reach the game.",
             ].filter(Boolean),
             imageUrl: campaign.data.game.boxArtURL ?? null,
-            url: "https://www.twitch.tv/drops/campaigns",
+            url: campaign.accountLinkUrl,
         });
     });
 
@@ -310,7 +310,7 @@ async function main(): Promise<void> {
                     : "Link your account now - some publishers only honour a link made before claiming.",
             ],
             imageUrl: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
-            url: "https://www.twitch.tv/drops/campaigns",
+            url: campaign.accountLinkUrl,
         });
     });
 
@@ -340,7 +340,27 @@ async function main(): Promise<void> {
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-    await miner.start();
+    try {
+        await miner.start();
+    } catch (error) {
+        if (error instanceof StaleQueryHashError && server) {
+            // Exiting here would be a crash loop under `restart: unless-stopped`, and the
+            // dashboard's "Mining paused" banner could never be seen because the process
+            // serving it dies. A rotated hash needs a code change, so there is nothing to
+            // retry - stay up, keep the API and dashboard alive, and say what is wrong.
+            logger.error(error.message);
+            logger.error("Mining is paused. The dashboard remains available.");
+            bus.emit("problem", { level: "fatal", code: "stale-hash", message: error.message });
+            void notifier.send({
+                kind: "warning",
+                title: "Mining paused",
+                lines: [error.message, "Run npm run check-hashes to see which queries rotated."],
+            });
+            // Hold the process open for the HTTP server.
+            await new Promise(() => {});
+        }
+        throw error;
+    }
 }
 
 main().catch((error) => {

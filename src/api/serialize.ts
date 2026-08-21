@@ -41,6 +41,8 @@ export interface CampaignJson {
     isDeliverable: boolean;
     /** Rewards are badges or emotes, which need no game account link. */
     isTwitchNativeReward: boolean;
+    /** The publisher's own account-linking page. */
+    accountLinkUrl: string;
     /** Empty means any drops-enabled channel streaming the game qualifies. */
     allowedChannels: string[];
     inPriorities: boolean;
@@ -91,6 +93,7 @@ export function serializeCampaign(campaign: Campaign, config: Config): CampaignJ
         isAccountLinked: campaign.isAccountLinked,
         isDeliverable: campaign.isDeliverable,
         isTwitchNativeReward: campaign.isTwitchNativeReward,
+        accountLinkUrl: campaign.accountLinkUrl,
         allowedChannels: campaign.allowedChannelLogins,
         inPriorities: rank !== -1,
         priorityRank: rank === -1 ? null : rank,

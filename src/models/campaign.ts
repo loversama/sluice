@@ -189,6 +189,15 @@ export class Campaign {
         return this.isAccountLinked || this.isTwitchNativeReward;
     }
 
+    /**
+     * Where to go to link this campaign's account. Twitch returns the publisher's own page,
+     * which lands the user exactly where the link is made rather than on a directory of
+     * every campaign they have.
+     */
+    get accountLinkUrl(): string {
+        return this.data.accountLinkURL || "https://www.twitch.tv/drops/campaigns";
+    }
+
     /** Campaigns may restrict progress to a specific set of channels. */
     get allowedChannelIds(): Set<string> | null {
         const allow = this.data.allow;

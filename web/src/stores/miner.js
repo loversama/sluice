@@ -22,6 +22,12 @@ export const useMinerStore = defineStore("miner", {
         feed: [],
 
         config: null,
+        /**
+         * Set by a fatal `problem` event and cleared whenever a fresh snapshot arrives.
+         * Declared here so Pinia makes it reactive - assigning it in an action alone left
+         * the "Mining paused" banner unable to render.
+         */
+        fatal: null,
         /** Ticks every second so countdowns recompute without per-component timers. */
         now: Date.now(),
 
@@ -104,6 +110,9 @@ export const useMinerStore = defineStore("miner", {
         },
 
         applySnapshot(snapshot) {
+            // A snapshot means the daemon is answering, so any previous fatal has passed
+            // or the process was replaced.
+            this.fatal = null;
             this.daemon = snapshot.daemon;
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
