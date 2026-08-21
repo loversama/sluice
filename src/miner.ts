@@ -30,6 +30,8 @@ const MAX_CAMPAIGNS_PER_CYCLE = 12;
 const CLAIM_GRACE_MS = 24 * 60 * 60_000;
 /** Eligibility checks cost a request each, so cap them per search tier. */
 const MAX_ELIGIBILITY_CHECKS = 8;
+/** Above this, an allow-list is intersected against the directory instead of walked. */
+const MAX_ALLOW_LIST_LOOKUPS = 20;
 
 /**
  * Channels to keep PubSub subscriptions for. Each costs one topic, and the pool allows
@@ -293,6 +295,15 @@ export class Miner extends EventEmitter {
     applyConfig(config: Config): void {
         this.config = config;
         this.pushFeed("info", "Configuration updated");
+
+        // Re-rank straight away. Editing priorities and then watching the bot carry on with
+        // the old campaign for another refresh interval reads as the setting not working.
+        const best = this.getMineableCampaigns()[0];
+        if (this.currentChannel && best && best.id !== this.currentCampaign?.id) {
+            logger.info(`Priorities changed; switching to ${best.gameName}.`);
+            this.pushFeed("info", `Priorities changed - switching to ${best.gameName}`);
+            this.switchRequested = true;
+        }
     }
 
     /** Every campaign currently known, active and upcoming alike. */
@@ -470,9 +481,16 @@ export class Miner extends EventEmitter {
         const allowed = campaign.allowedChannelIds;
 
         // A campaign restricted to specific channels must be mined on one of them.
-        const preferred = campaign.allowedChannelLogins.length
-            ? campaign.allowedChannelLogins
-            : this.config.preferredChannels;
+        // Creator-program campaigns can allow hundreds of channels, and resolving each by
+        // login is a request apiece, so only small lists are worth walking directly - the
+        // directory tiers intersect against the same allow-list in a single request.
+        const allowLogins = campaign.allowedChannelLogins;
+        const preferred =
+            allowLogins.length > 0
+                ? allowLogins.length <= MAX_ALLOW_LIST_LOOKUPS
+                    ? allowLogins
+                    : []
+                : this.config.preferredChannels;
 
         const tiers: (() => Promise<Channel[]>)[] = [
             // Channels PubSub already told us are live, so a failover costs no directory
@@ -566,9 +584,20 @@ export class Miner extends EventEmitter {
         candidates: Channel[],
         campaign: Campaign,
     ): Promise<Channel | null> {
-        // Bound the lookups: an unfiltered directory page is 30 streams and each check is a
-        // request, so a game with no live drops would otherwise cost 30 calls per attempt.
+        // Bound the lookups: a directory page is 50 streams and each check is a request, so
+        // a game with no live drops would otherwise cost 50 calls per attempt.
+        const allowed = campaign.allowedChannelIds;
+
         for (const channel of candidates.slice(0, MAX_ELIGIBILITY_CHECKS)) {
+            // Twitch listing a channel on the campaign's own allow-list is a stronger
+            // statement than DropsHighlightService_AvailableDrops, which does not report
+            // creator-program campaigns at all: for Battlefield 6's BCP campaign it returns
+            // only an unrelated site-wide event, even for allow-listed channels streaming
+            // the right game. Trusting the allow-list is what makes those campaigns minable.
+            if (allowed?.has(channel.id)) {
+                logger.debug(`${channel.login} is allow-listed for ${campaign.name}`);
+                return channel;
+            }
 
             try {
                 const available = await this.gql.getAvailableDrops(channel.id);
