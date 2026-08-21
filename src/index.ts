@@ -291,6 +291,22 @@ async function main(): Promise<void> {
         });
     });
 
+    miner.on("unlinked-claim", ({ campaign, drop, held }) => {
+        void notifier.send({
+            kind: "warning",
+            title: campaign.gameName,
+            lines: [
+                held ? "Drop ready but held - account not linked" : "Drop claimed while unlinked",
+                drop.rewardNames || drop.name,
+                held
+                    ? "Link your account, then claim it from the Twitch inventory."
+                    : "Link your account now - some publishers only honour a link made before claiming.",
+            ],
+            imageUrl: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
+            url: "https://www.twitch.tv/drops/campaigns",
+        });
+    });
+
     miner.on("beat", (payload) => bus.emit("beat", payload));
     miner.on("feed", (entry) => bus.emit("feed", entry));
     miner.on("error", (error) => {

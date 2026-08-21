@@ -54,6 +54,8 @@ export interface MinerEvents {
     "campaign-completed": [Campaign];
     /** Emitted after each accepted watch beat; drives the dashboard heartbeat. */
     beat: [{ at: number }];
+    /** A drop finished on a campaign the account is not linked to. */
+    "unlinked-claim": [{ campaign: Campaign; drop: Drop; held: boolean }];
     /** Progress has been earned on an unlinked campaign that is about to expire. */
     "unlinked-expiring": [
         { campaign: Campaign; earnedMinutes: number; rewards: string[]; hoursLeft: number },
@@ -799,6 +801,24 @@ export class Miner extends EventEmitter {
         if (this.dryRun) {
             logger.info(`[dry run] Would claim: ${drop.rewardNames} (${campaign.gameName})`);
             return;
+        }
+
+        // Claiming a drop on an unlinked campaign is the point of no return for some
+        // publishers, so flag it - and optionally stop short of claiming.
+        if (!campaign.isAccountLinked) {
+            const held = this.config.holdClaimsWhenUnlinked;
+            this.emit("unlinked-claim", { campaign, drop, held });
+            if (held) {
+                logger.warn(
+                    `Holding the claim for ${drop.rewardNames} - ${campaign.gameName} is not ` +
+                        "linked to your Twitch account.",
+                );
+                this.pushFeed(
+                    "warn",
+                    `Holding ${drop.rewardNames} - ${campaign.gameName} is not linked`,
+                );
+                return;
+            }
         }
         try {
             const claimed = await this.gql.claimDrop(instanceId);

@@ -41,6 +41,18 @@ export interface Config {
      * Zero disables it.
      */
     unlinkedExpiryWarningHours: number;
+    /**
+     * Hold back the claim on a drop whose campaign is not linked to your account, and notify
+     * instead of claiming.
+     *
+     * Publishers differ on whether a drop claimed before linking can be recovered. Some
+     * honour a later link (Rust offers "check for missing drops"; Halo allows 14 days after
+     * the campaign), while others treat it as gone - Bungie states plainly that rewards
+     * claimed before linking are lost. Holding trades a certain-but-recoverable state for an
+     * uncertain one, so it is off by default: an unclaimed drop is definitely lost once the
+     * 24-hour post-campaign window closes, whereas a claimed one is often still recoverable.
+     */
+    holdClaimsWhenUnlinked: boolean;
     logLevel: LogLevel;
     steam: {
         /**
@@ -69,7 +81,8 @@ export const DEFAULT_CONFIG: Config = {
     autoClaimDrops: true,
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,
-    unlinkedExpiryWarningHours: 24,
+    unlinkedExpiryWarningHours: 12,
+    holdClaimsWhenUnlinked: false,
     logLevel: "info",
     steam: { refreshHours: 24 },
     notifications: {},
