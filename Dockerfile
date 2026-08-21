@@ -39,4 +39,5 @@ CMD ["node", "dist/index.js", \
      "--web", "--web-addr", "0.0.0.0:4400", \
      "--config", "/data/config.json", \
      "--auth", "/data/auth.json", \
-     "--steam", "/data/steam.json"]
+     "--steam", "/data/steam.json", \
+     "--state", "/data/state.json"]

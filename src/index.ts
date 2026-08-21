@@ -26,6 +26,7 @@ Options:
   -c, --config <path>   Config file (default: ./config.json)
   -a, --auth <path>     Credential store (default: ./auth.json)
       --steam <path>    Steam library cache (default: ./steam.json)
+      --state <path>    Notification bookkeeping (default: ./state.json)
   -l, --log <level>     error | warn | info | debug
       --web             Serve the dashboard and HTTP API
       --web-addr <addr> Address for the dashboard (default: 127.0.0.1:4400)
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
             config: { type: "string", short: "c", default: "config.json" },
             auth: { type: "string", short: "a", default: "auth.json" },
             steam: { type: "string", default: "steam.json" },
+            state: { type: "string", default: "state.json" },
             log: { type: "string", short: "l" },
             web: { type: "boolean", default: false },
             "web-addr": { type: "string", default: "127.0.0.1:4400" },
@@ -196,6 +198,8 @@ async function main(): Promise<void> {
 
     const gql = new TwitchGql(auth);
     miner = new Miner(auth, gql, config);
+    // Restored before mining starts, so a restart does not re-send alerts already sent.
+    await miner.loadPersistedState(resolve(values.state!));
     miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
 
     // Refresh the Steam library if it is configured and the cache has gone stale.

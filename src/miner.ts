@@ -8,6 +8,7 @@ import type { AuthState } from "./twitch/auth.js";
 import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
 import { PubSubPool, type DropProgressMessage } from "./twitch/websocket.js";
 import type { SteamLibrary } from "./steam/library.js";
+import { loadState, saveState } from "./state.js";
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -142,8 +143,14 @@ export class Miner extends EventEmitter {
     private readonly feedEntries: FeedEntry[] = [];
     /** Regenerated each refresh so "random" mode varies between cycles but not within one. */
     private randomKeys = new Map<string, number>();
-    /** Campaigns already warned about, so the alert fires once rather than every refresh. */
+    /**
+     * Campaigns already warned about, so the alert fires once rather than every refresh -
+     * or every restart, which is why this is persisted rather than kept in memory.
+     */
     private readonly warnedExpiring = new Set<string>();
+    /** Drops already flagged as claimed while unlinked. */
+    private readonly notifiedUnlinkedClaims = new Set<string>();
+    private statePath: string | null = null;
     private steam: SteamLibrary | null = null;
     private boundaryTimer: NodeJS.Timeout | null = null;
     /** Watch beats accepted since Twitch last confirmed progress. */
@@ -168,6 +175,30 @@ export class Miner extends EventEmitter {
         private config: Config,
     ) {
         super();
+    }
+
+    /** Restore notification bookkeeping so "once" survives a restart. */
+    async loadPersistedState(path: string): Promise<void> {
+        this.statePath = path;
+        const state = await loadState(path);
+        state.warnedExpiring.forEach((id: string) => this.warnedExpiring.add(id));
+        state.notifiedUnlinkedClaims.forEach((id: string) => this.notifiedUnlinkedClaims.add(id));
+        state.failedClaims.forEach((id: string) => this.failedClaimIds.add(id));
+        logger.debug(
+            `Restored notification state: ${this.warnedExpiring.size} warned campaigns, ` +
+                `${this.notifiedUnlinkedClaims.size} flagged claims`,
+        );
+    }
+
+    private persistState(): void {
+        if (!this.statePath) {
+            return;
+        }
+        void saveState(this.statePath, {
+            warnedExpiring: [...this.warnedExpiring],
+            notifiedUnlinkedClaims: [...this.notifiedUnlinkedClaims],
+            failedClaims: [...this.failedClaimIds],
+        });
     }
 
     /** Attach a Steam library so ownership and playtime can influence ranking. */
@@ -805,8 +836,11 @@ export class Miner extends EventEmitter {
 
         // Claiming a drop on an unlinked campaign is the point of no return for some
         // publishers, so flag it - and optionally stop short of claiming.
-        if (!campaign.isAccountLinked) {
+        if (!campaign.isAccountLinked && !this.notifiedUnlinkedClaims.has(drop.id)) {
             const held = this.config.holdClaimsWhenUnlinked;
+            // Held drops stay claimable, so this would otherwise re-fire every refresh.
+            this.notifiedUnlinkedClaims.add(drop.id);
+            this.persistState();
             this.emit("unlinked-claim", { campaign, drop, held });
             if (held) {
                 logger.warn(
@@ -843,6 +877,7 @@ export class Miner extends EventEmitter {
                 // Almost always a drop Twitch considers ineligible rather than a transient
                 // failure, so stop asking rather than repeating it every refresh.
                 this.failedClaimIds.add(drop.id);
+                this.persistState();
                 logger.debug(`Twitch did not confirm the claim for ${drop.name}`);
             }
         } catch (error) {
@@ -1000,6 +1035,7 @@ export class Miner extends EventEmitter {
             }
 
             this.warnedExpiring.add(campaign.id);
+            this.persistState();
             const earnedMinutes = earned.reduce((sum, drop) => sum + drop.currentMinutes, 0);
             const hoursLeft = (campaign.endAt.getTime() - Date.now()) / 3_600_000;
             logger.warn(
