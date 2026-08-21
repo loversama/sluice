@@ -246,14 +246,22 @@ async function main(): Promise<void> {
             rewardImageURL: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
             at: Date.now(),
         });
+        // An unlinked claim used to send two messages at once - a claim and a separate
+        // warning about the same drop. The warning is folded in here instead.
+        const deliverable = campaign.isDeliverable;
         void notifier.send({
-            kind: "claim",
-            title: "Drop claimed",
+            kind: deliverable ? "claim" : "warning",
+            title: deliverable ? "Drop claimed" : campaign.gameName,
             lines: [
+                deliverable ? "" : "Drop claimed, but your account is not linked",
                 drop.rewardNames || drop.name,
                 `${campaign.gameName} - ${campaign.name}`,
-            ],
+                deliverable
+                    ? ""
+                    : "Link now - some publishers only honour a link made before claiming.",
+            ].filter(Boolean),
             imageUrl: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
+            url: deliverable ? null : campaign.accountLinkUrl,
         });
     });
     miner.on("campaign-completed", (campaign) => {
@@ -301,15 +309,18 @@ async function main(): Promise<void> {
     });
 
     miner.on("unlinked-claim", ({ campaign, drop, held }) => {
+        // Only a held drop needs its own message: nothing was claimed, so no claim
+        // notification follows. When the drop is claimed the warning travels with it.
+        if (!held) {
+            return;
+        }
         void notifier.send({
             kind: "warning",
             title: campaign.gameName,
             lines: [
-                held ? "Drop ready but held - account not linked" : "Drop claimed while unlinked",
+                "Drop ready but held - account not linked",
                 drop.rewardNames || drop.name,
-                held
-                    ? "Link your account, then claim it from the Twitch inventory."
-                    : "Link your account now - some publishers only honour a link made before claiming.",
+                "Link your account, then claim it from the Twitch inventory.",
             ],
             imageUrl: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
             url: campaign.accountLinkUrl,
