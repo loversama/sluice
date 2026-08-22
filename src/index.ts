@@ -131,12 +131,10 @@ async function main(): Promise<void> {
         searchGames: (term: string) => gqlForSearch.searchGames(term),
         connectSteam: async (input) => {
             const apiKey = input.apiKey ?? config.steam.apiKey;
-            if (!apiKey) {
-                throw new Error("A Steam Web API key is required to read your library.");
-            }
-            const client = new SteamClient(apiKey);
+            // Identity first: a profile URL resolves through Steam's community XML view,
+            // which needs no key, so the account can be attached before one is supplied.
             const steamId = input.steamId
-                ? await resolveSteamId(input.steamId, client)
+                ? await resolveSteamId(input.steamId, apiKey ? new SteamClient(apiKey) : undefined)
                 : config.steam.steamId;
             if (!steamId) {
                 throw new Error("No Steam account given.");
@@ -145,6 +143,13 @@ async function main(): Promise<void> {
                 ...config,
                 steam: { ...config.steam, apiKey, steamId },
             });
+            // Reading the library is the part that genuinely requires a key.
+            if (!apiKey) {
+                throw new Error(
+                    "Account saved. Add a Web API key to read your library - the key is what " +
+                        "grants access to it.",
+                );
+            }
             return refreshSteam();
         },
         refreshSteam,

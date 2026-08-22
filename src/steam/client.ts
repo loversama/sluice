@@ -127,10 +127,33 @@ export class SteamClient {
 }
 
 /**
- * Accept whatever the user pastes: a bare 64-bit ID, a /profiles/ URL, a /id/ vanity URL, or
- * a bare vanity name. Vanity forms need an API round-trip to resolve.
+ * Resolve a custom profile name using Steam's community XML view.
+ *
+ * This needs no API key, which matters: it means pasting a profile URL identifies the
+ * account straight away, and the key is only required later for reading the library.
  */
-export async function resolveSteamId(input: string, client: SteamClient): Promise<string> {
+async function resolveVanityWithoutKey(vanity: string): Promise<string | null> {
+    try {
+        // fetch() follows redirects, which the community view uses; undici's request does not.
+        const response = await fetch(
+            `https://steamcommunity.com/id/${encodeURIComponent(vanity)}/?xml=1`,
+        );
+        if (!response.ok) {
+            return null;
+        }
+        const xml = await response.text();
+        return /<steamID64>(\d{17})<\/steamID64>/.exec(xml)?.[1] ?? null;
+    } catch (error) {
+        logger.debug("Keyless vanity resolution failed:", error);
+        return null;
+    }
+}
+
+/**
+ * Accept whatever the user pastes: a bare 64-bit ID, a /profiles/ URL, a /id/ vanity URL, or
+ * a bare vanity name. A client is only needed as a fallback for the vanity forms.
+ */
+export async function resolveSteamId(input: string, client?: SteamClient): Promise<string> {
     const trimmed = input.trim();
 
     if (/^\d{17}$/.test(trimmed)) {
@@ -145,7 +168,12 @@ export async function resolveSteamId(input: string, client: SteamClient): Promis
     const vanityMatch = trimmed.match(/steamcommunity\.com\/id\/([^/?#]+)/);
     const vanity = vanityMatch?.[1] ?? (/^[\w.-]+$/.test(trimmed) ? trimmed : null);
     if (vanity) {
-        const resolved = await client.resolveVanityUrl(vanity);
+        // Keyless first, so a pasted profile URL works before any key is entered.
+        const keyless = await resolveVanityWithoutKey(vanity);
+        if (keyless) {
+            return keyless;
+        }
+        const resolved = client ? await client.resolveVanityUrl(vanity) : null;
         if (resolved) {
             return resolved;
         }

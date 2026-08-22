@@ -380,30 +380,29 @@ const inputStyle = {
             <label class="block">
                 <span class="text-[12px]">Steam Web API key</span>
                 <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
-                    Required to read your library &mdash; signing in proves who you are but grants
-                    no access. Get one at
+                    Required to read your library. Your profile URL alone identifies the
+                    account, but only a key grants access to what is in it. Get one at
                     <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer" class="underline">steamcommunity.com/dev/apikey</a>.
                     Your profile's &ldquo;Game details&rdquo; must be public.
                 </span>
                 <input v-model="steamApiKey" type="password" class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
             </label>
             <!-- Connecting makes live API calls, so it is an explicit action rather than
-                 part of the page's autosave. Disabled without a key because a custom profile
-                 URL cannot even be resolved to a Steam ID without one. -->
+                 part of the page's autosave. -->
             <div class="flex items-center gap-2 flex-wrap">
                 <button
-                    class="px-3 py-1.5 rounded-lg text-[12px] text-white transition-opacity"
-                    :style="{ background: 'var(--accent)', opacity: steamApiKey ? 1 : 0.4 }"
-                    :disabled="steamBusy || !steamApiKey"
+                    class="px-3 py-1.5 rounded-lg text-[12px] text-white"
+                    :style="{ background: 'var(--accent)' }"
+                    :disabled="steamBusy"
                     @click="connectSteam"
                 >
                     {{ steamBusy ? "Connecting..." : steam?.connected ? "Update key" : "Connect Steam" }}
                 </button>
-                <span v-if="!steamApiKey" class="text-[11px]" :style="{ color: 'var(--warn)' }">
-                    Add an API key first &mdash; a custom profile URL cannot be resolved without one.
+                <span v-if="steam?.steamId && !steam?.hasApiKey" class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                    Account identified. A key is still needed to read the library.
                 </span>
                 <span v-else-if="!steam?.connected" class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                    This one is not autosaved; press Connect to apply it.
+                    Not autosaved &mdash; press Connect to apply.
                 </span>
             </div>
         </section>
