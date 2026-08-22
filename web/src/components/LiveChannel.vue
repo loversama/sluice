@@ -6,7 +6,8 @@ import { useMinerStore } from "@/stores/miner.js";
 const store = useMinerStore();
 
 const collapsed = ref(false);
-const playing = ref(false);
+/** The player is the point of the panel, so it leads; preview is the fallback. */
+const playing = ref(true);
 /** Bumped to bust the CDN cache; Twitch refreshes previews every few minutes. */
 const nonce = ref(Date.now());
 
@@ -28,6 +29,23 @@ const embedUrl = computed(() => {
     return `https://player.twitch.tv/?channel=${channel.value.login}&parent=${parent}&muted=true&autoplay=true`;
 });
 
+const enabling = ref(false);
+
+/**
+ * Turn the player on from here rather than making the user go and find the setting. It is
+ * still a stored preference, so the choice persists.
+ */
+async function enableEmbed() {
+    enabling.value = true;
+    try {
+        await store.saveConfig({ allowStreamEmbed: true });
+        store.allowStreamEmbed = true;
+        playing.value = true;
+    } finally {
+        enabling.value = false;
+    }
+}
+
 const timer = setInterval(() => (nonce.value = Date.now()), 30_000);
 onUnmounted(() => clearInterval(timer));
 
@@ -41,9 +59,20 @@ const watchingFor = computed(() => {
 <template>
     <section v-if="channel" class="card overflow-hidden">
         <header class="flex items-center gap-2 px-3 py-2">
-            <h2 class="text-[11px] uppercase tracking-wider flex-1" :style="{ color: 'var(--text-2)' }">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Live channel
             </h2>
+            <span class="text-[11px] flex-1 truncate" :style="{ color: 'var(--muted)' }">
+                &mdash; the stream currently being mined
+            </span>
+            <button
+                v-if="store.allowStreamEmbed"
+                class="text-[11px] hover:underline shrink-0"
+                :style="{ color: 'var(--text-2)' }"
+                @click="playing = !playing"
+            >
+                {{ playing ? "Preview" : "Player" }}
+            </button>
             <button
                 class="text-[11px] hover:underline"
                 :style="{ color: 'var(--text-2)' }"
@@ -114,12 +143,11 @@ const watchingFor = computed(() => {
                 </p>
 
                 <p
-                    v-if="!store.allowStreamEmbed"
+                    v-if="!store.allowStreamEmbed || !playing"
                     class="text-[10px] pt-1"
                     :style="{ color: 'var(--muted)' }"
                 >
-                    Preview refreshes every 30s. The live player is off &mdash; enable it in
-                    Settings if you accept that it may disturb mining.
+                    Preview image, refreshed every 30s.
                 </p>
             </div>
         </template>

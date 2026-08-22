@@ -47,7 +47,7 @@ const deliverableShare = computed(() => {
         >
             <!-- Showing the real queue is the strongest trust signal a bot UI has: the user
                  can see exactly why the miner will do what it does next. -->
-            <section class="card p-3 lg:col-span-7 xl:col-span-5 flex flex-col min-h-0">
+            <section class="card p-3 lg:col-span-7 xl:col-span-4 flex flex-col min-h-0">
                 <header class="flex items-center justify-between mb-3">
                     <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Up next
@@ -122,12 +122,7 @@ const deliverableShare = computed(() => {
                 </ul>
             </section>
 
-            <div class="lg:col-span-5 xl:col-span-3 flex flex-col gap-4 min-h-0">
-                <LiveChannel />
-                <TierLadder class="flex-1 min-h-0" />
-            </div>
-
-            <section class="card p-3 lg:col-span-12 xl:col-span-4 flex flex-col min-h-0">
+            <section class="card p-3 lg:col-span-12 xl:col-span-3 xl:order-2 flex flex-col min-h-0">
                 <header class="flex items-baseline justify-between mb-3">
                     <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Recently claimed
@@ -224,6 +219,12 @@ const deliverableShare = computed(() => {
                     </li>
                 </ul>
             </section>
+
+            <!-- Rightmost and widest: it is the one panel you actually watch. -->
+            <div class="lg:col-span-12 xl:col-span-5 xl:order-3 flex flex-col gap-4 min-h-0">
+                <LiveChannel />
+                <TierLadder class="flex-1 min-h-0" />
+            </div>
         </div>
 
         <EventFeed :entries="store.feed" />

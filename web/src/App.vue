@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted, watch } from "vue";
+import { ElNotification } from "element-plus";
 import { useRoute } from "vue-router";
 
 import { useMinerStore } from "@/stores/miner.js";
@@ -30,6 +31,43 @@ const problem = computed(() => {
 function isActive(to) {
     return to === "/" ? route.path === "/" : route.path.startsWith(to);
 }
+
+/**
+ * Surface a claim wherever the user happens to be, not only on the dashboard. Keyed on the
+ * newest claim rather than list length, so a re-hydrate that replaces the list cannot
+ * re-announce everything in it.
+ */
+watch(
+    () => store.claims[0],
+    (claim, previous) => {
+        if (!claim || !previous || claim.at === previous.at) {
+            return;
+        }
+        ElNotification({
+            title: "Drop claimed",
+            message: `${claim.dropName} — ${claim.gameName}`,
+            type: "success",
+            position: "bottom-right",
+            duration: 6000,
+        });
+    },
+);
+
+watch(
+    () => store.campaigns.filter((campaign) => campaign.isCompleted).length,
+    (now, before) => {
+        if (before === undefined || now <= before) {
+            return;
+        }
+        ElNotification({
+            title: "Campaign complete",
+            message: "Every drop in a campaign has been claimed.",
+            type: "success",
+            position: "bottom-right",
+            duration: 6000,
+        });
+    },
+);
 
 onMounted(async () => {
     await store.hydrate();
