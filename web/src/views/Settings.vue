@@ -387,10 +387,25 @@ const inputStyle = {
                 </span>
                 <input v-model="steamApiKey" type="password" class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
             </label>
-            <button class="px-3 py-1.5 rounded-lg text-[12px] text-white" :style="{ background: 'var(--accent)' }"
-                    :disabled="steamBusy" @click="connectSteam">
-                {{ steam?.connected ? "Update key" : "Connect Steam" }}
-            </button>
+            <!-- Connecting makes live API calls, so it is an explicit action rather than
+                 part of the page's autosave. Disabled without a key because a custom profile
+                 URL cannot even be resolved to a Steam ID without one. -->
+            <div class="flex items-center gap-2 flex-wrap">
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] text-white transition-opacity"
+                    :style="{ background: 'var(--accent)', opacity: steamApiKey ? 1 : 0.4 }"
+                    :disabled="steamBusy || !steamApiKey"
+                    @click="connectSteam"
+                >
+                    {{ steamBusy ? "Connecting..." : steam?.connected ? "Update key" : "Connect Steam" }}
+                </button>
+                <span v-if="!steamApiKey" class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                    Add an API key first &mdash; a custom profile URL cannot be resolved without one.
+                </span>
+                <span v-else-if="!steam?.connected" class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                    This one is not autosaved; press Connect to apply it.
+                </span>
+            </div>
         </section>
 
         <section class="card p-4 space-y-3 break-inside-avoid mb-4">
