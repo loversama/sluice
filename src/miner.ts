@@ -113,6 +113,17 @@ export interface ClaimRecord {
     dropName: string;
     gameName: string;
     rewardImageURL: string | null;
+    /**
+     * Watch time this drop required, recorded here rather than looked up later.
+     *
+     * Deriving it from the live campaign store made the figure depend on state that is
+     * empty for the first half-minute after a restart and that drops campaigns as they
+     * rotate out - so the dashboard reported 0m on some loads and undercounted on all of
+     * them. Optional only because records written before this change lack it.
+     */
+    requiredMinutes?: number;
+    /** Whether the reward could actually reach the user, as judged when it was claimed. */
+    deliverable?: boolean;
 }
 
 /** What the miner is doing right now, or null when idle. */
@@ -274,6 +285,36 @@ export class Miner extends EventEmitter {
         this.persistClaims();
         logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
         this.emit("campaign-completed", campaign);
+    }
+
+    /**
+     * Fill in numbers on claims written before the record carried them, using whatever the
+     * campaign store still knows. Runs on refresh, so a claim keeps its figures even after
+     * its campaign rotates out of view.
+     */
+    private backfillClaimRecords(): void {
+        let changed = false;
+        for (const claim of this.claimHistory.claims) {
+            if (claim.requiredMinutes !== undefined && claim.deliverable !== undefined) {
+                continue;
+            }
+            const campaign = this.campaigns.get(claim.campaignId);
+            if (!campaign) {
+                continue;
+            }
+            const drop = campaign.drops.find((candidate) => candidate.id === claim.dropId);
+            if (claim.requiredMinutes === undefined && drop) {
+                claim.requiredMinutes = drop.requiredMinutes;
+                changed = true;
+            }
+            if (claim.deliverable === undefined) {
+                claim.deliverable = campaign.isDeliverable;
+                changed = true;
+            }
+        }
+        if (changed) {
+            this.persistClaims();
+        }
     }
 
     /**
@@ -1165,6 +1206,8 @@ export class Miner extends EventEmitter {
                     dropName: drop.rewardNames || drop.name,
                     gameName: campaign.gameName,
                     rewardImageURL: drop.data.benefitEdges[0]?.benefit.imageAssetURL ?? null,
+                    requiredMinutes: drop.requiredMinutes,
+                    deliverable: campaign.isDeliverable,
                 });
                 if (this.recentClaims.length > 100) {
                     this.recentClaims.shift();
@@ -1791,6 +1834,7 @@ export class Miner extends EventEmitter {
         }
 
         this.campaigns = next;
+        this.backfillClaimRecords();
         this.reconcileCompletions();
         this.rebindWatchedObjects(next);
         this.scheduleBoundaryRefresh();

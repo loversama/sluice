@@ -76,11 +76,13 @@ export function summarise(
     let wasted = 0;
 
     for (const claim of history.claims) {
-        const minutes = requiredMinutesByDrop.get(claim.dropId) ?? 0;
+        // The record's own figure first: the campaign store is empty for the first moments
+        // after a restart and forgets campaigns as they rotate out, so relying on it made
+        // this total flicker to zero and undercount thereafter.
+        const minutes = claim.requiredMinutes ?? requiredMinutesByDrop.get(claim.dropId) ?? 0;
         earned += minutes;
-        // Campaigns rotate out of view, so an unknown one is counted in neither column
-        // rather than guessed at.
-        const known = deliverableByCampaign.get(claim.campaignId);
+
+        const known = claim.deliverable ?? deliverableByCampaign.get(claim.campaignId);
         if (known === true) {
             deliverable += minutes;
         } else if (known === false) {
