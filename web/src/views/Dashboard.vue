@@ -42,24 +42,29 @@ const claims = computed(() => store.claims.slice(0, 8));
                         class="flex items-center gap-3 py-2 px-2 rounded-lg"
                         :style="{ background: 'var(--surface-2)' }"
                     >
-                        <span
-                            class="w-5 h-5 rounded-full grid place-items-center text-[10px] font-semibold shrink-0"
-                            :style="
-                                campaign.inPriorities
-                                    ? { background: 'var(--accent)', color: 'white' }
-                                    : { border: '1px solid var(--border)', color: 'var(--text-2)' }
-                            "
-                            :title="campaign.inPriorities ? `Priority #${campaign.priorityRank + 1}` : 'Not in your priority list'"
-                        >
-                            {{ index + 1 }}
-                        </span>
-
-                        <img
-                            v-if="campaign.game.boxArtURL"
-                            :src="campaign.game.boxArtURL"
-                            :alt="campaign.game.name"
-                            class="w-8 h-10 rounded object-cover shrink-0"
-                        />
+                        <!-- Box art with the rank as a corner tag, so the number rides
+                             with the game rather than taking a column of its own. -->
+                        <div class="relative shrink-0">
+                            <img
+                                v-if="campaign.game.boxArtURL"
+                                :src="campaign.game.boxArtURL"
+                                :alt="campaign.game.name"
+                                class="w-9 h-12 rounded object-cover"
+                                :style="{ background: 'var(--surface)' }"
+                            />
+                            <div v-else class="w-9 h-12 rounded" :style="{ background: 'var(--surface)' }" />
+                            <span
+                                class="absolute -top-1 -left-1 min-w-[16px] h-4 px-1 rounded grid place-items-center text-[10px] font-semibold"
+                                :style="
+                                    campaign.inPriorities
+                                        ? { background: 'var(--accent)', color: 'white' }
+                                        : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-2)' }
+                                "
+                                :title="campaign.inPriorities ? `Priority #${campaign.priorityRank + 1}` : 'Not in your priority list'"
+                            >
+                                {{ index + 1 }}
+                            </span>
+                        </div>
 
                         <div class="min-w-0 flex-1">
                             <p class="text-[13px] font-medium truncate">{{ campaign.game.name }}</p>
@@ -67,6 +72,10 @@ const claims = computed(() => store.claims.slice(0, 8));
                                 {{ campaign.name }}
                             </p>
                         </div>
+
+                        <!-- Ahead of the time, so the eye meets the warning before the number
+                             it qualifies. -->
+                        <StatusChip v-if="!campaign.isAccountLinked" status="unlinked" small />
 
                         <div class="text-right shrink-0">
                             <p class="text-[12px] tabular">
@@ -76,8 +85,6 @@ const claims = computed(() => store.claims.slice(0, 8));
                                 ends {{ formatUntil(campaign.endAt) }}
                             </p>
                         </div>
-
-                        <StatusChip v-if="!campaign.isAccountLinked" status="unlinked" small />
                     </li>
                 </ul>
             </section>
