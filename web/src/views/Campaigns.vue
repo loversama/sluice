@@ -165,41 +165,63 @@ watch(
 
 <template>
     <div class="space-y-4">
-        <header class="flex flex-wrap items-center gap-3">
-            <div class="flex rounded-lg overflow-hidden" :style="{ border: '1px solid var(--border)' }">
+        <!-- One surface for the whole toolbar, so the controls read as a group rather
+             than as loose items floating above the list. -->
+        <header class="card p-2 flex flex-wrap items-center gap-2">
+            <div class="flex rounded-lg overflow-hidden shrink-0" :style="{ background: 'var(--surface-2)' }">
                 <button
                     v-for="key in ['active', 'upcoming', 'completed']"
                     :key="key"
                     class="px-3 py-1.5 text-[12px] capitalize transition-colors"
                     :style="{
-                        background: segment === key ? 'var(--accent)' : 'var(--surface)',
+                        background: segment === key ? 'var(--accent)' : 'transparent',
                         color: segment === key ? 'white' : 'var(--text-2)',
                     }"
                     @click="segment = key"
                 >
-                    {{ key }} ({{ pools[key].length }})
+                    {{ key }}
+                    <span class="tabular opacity-70">{{ pools[key].length }}</span>
                 </button>
             </div>
 
-            <input
-                v-model="search"
-                type="search"
-                placeholder="Search game or campaign"
-                class="px-3 py-1.5 rounded-lg text-[12px] flex-1 min-w-[180px] outline-none"
-                :style="{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }"
-            />
+            <div class="relative flex-1 min-w-[180px]">
+                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px]" :style="{ color: 'var(--muted)' }">
+                    &#9906;
+                </span>
+                <input
+                    v-model="search"
+                    type="search"
+                    placeholder="Search game or campaign"
+                    class="w-full pl-7 pr-3 py-1.5 rounded-lg text-[12px] outline-none"
+                    :style="{ background: 'var(--surface-2)', border: '1px solid transparent', color: 'var(--text)' }"
+                />
+            </div>
 
-            <label class="flex items-center gap-1.5 text-[12px] cursor-pointer" :style="{ color: 'var(--text-2)' }">
-                <input v-model="unlinkedOnly" type="checkbox" /> Unlinked only
-            </label>
-            <label class="flex items-center gap-1.5 text-[12px] cursor-pointer" :style="{ color: 'var(--text-2)' }">
-                <input v-model="prioritiesOnly" type="checkbox" /> My priorities
-            </label>
+            <!-- Filters as toggles rather than native checkboxes: these are on/off states
+                 the eye should be able to read at a glance, and a platform checkbox is a
+                 pale square that ignores the theme entirely. -->
+            <button
+                v-for="filter in [
+                    { key: 'unlinked', label: 'Unlinked only', on: unlinkedOnly },
+                    { key: 'priorities', label: 'My priorities', on: prioritiesOnly },
+                ]"
+                :key="filter.key"
+                class="px-2.5 py-1.5 rounded-lg text-[12px] transition-colors flex items-center gap-1.5 shrink-0"
+                :style="
+                    filter.on
+                        ? { background: 'color-mix(in srgb, var(--accent) 18%, transparent)', color: 'var(--accent)' }
+                        : { background: 'var(--surface-2)', color: 'var(--text-2)' }
+                "
+                @click="filter.key === 'unlinked' ? (unlinkedOnly = !unlinkedOnly) : (prioritiesOnly = !prioritiesOnly)"
+            >
+                <span class="text-[10px]">{{ filter.on ? "\u2713" : "\u25CB" }}</span>
+                {{ filter.label }}
+            </button>
 
             <button
                 v-if="groups.length"
-                class="text-[12px] hover:underline"
-                :style="{ color: 'var(--text-2)' }"
+                class="px-2.5 py-1.5 rounded-lg text-[12px] shrink-0"
+                :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"
                 @click="setAll(collapsed.size < groups.length)"
             >
                 {{ collapsed.size < groups.length ? "Collapse all" : "Expand all" }}
@@ -218,11 +240,12 @@ watch(
             <template v-else>No active campaigns match your filters.</template>
         </p>
 
-        <section v-for="group in groups" :key="group[0].game.id" class="space-y-1">
+        <section v-for="group in groups" :key="group[0].game.id" class="space-y-1.5">
             <!-- The whole header is the control: a games list is long, and reaching for
                  a small chevron on every row is worse than a large target. -->
             <button
-                class="flex items-center gap-2 px-1 w-full text-left"
+                class="flex items-center gap-2.5 px-2 py-1.5 w-full text-left rounded-lg transition-colors hover:brightness-125"
+                :style="{ background: 'var(--surface)' }"
                 @click="toggleGroup(group[0].game.id)"
             >
                 <span
@@ -255,7 +278,7 @@ watch(
             <button
                 v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group)"
                 :key="campaign.id"
-                class="card w-full text-left p-3 flex items-center gap-4 hover:brightness-110 transition"
+                class="card w-full text-left p-3 flex items-center gap-4 hover:brightness-110 transition ml-3"
                 :style="
                     campaign.id === store.mining?.campaignId
                         ? { borderLeft: '3px solid var(--accent)' }
@@ -315,7 +338,7 @@ watch(
             <p
                 v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group.filter((c) => c.status === 'upcoming' && !c.inPriorities && !c.isExcluded))"
                 :key="`${campaign.id}-hint`"
-                class="text-[11px] px-3 pb-1"
+                class="text-[11px] px-3 pb-1 ml-3"
                 :style="{ color: 'var(--text-2)' }"
             >
                 Will be mined only because &ldquo;everything else&rdquo; is on.

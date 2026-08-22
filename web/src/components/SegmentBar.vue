@@ -7,7 +7,7 @@ import { computed } from "vue";
  */
 const props = defineProps({
     drops: { type: Array, required: true },
-    height: { type: Number, default: 6 },
+    height: { type: Number, default: 7 },
 });
 
 const segments = computed(() =>
@@ -28,7 +28,7 @@ const segments = computed(() =>
             v-for="segment in segments"
             :key="segment.id"
             class="flex-1 rounded-full overflow-hidden"
-            :style="{ background: 'var(--surface-2)' }"
+            :style="{ background: 'color-mix(in srgb, var(--text-2) 22%, transparent)' }"
             :title="segment.title"
         >
             <div
