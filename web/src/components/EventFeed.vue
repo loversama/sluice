@@ -39,7 +39,7 @@ function time(at) {
             Nothing has happened yet.
         </p>
 
-        <ul v-else class="space-y-1">
+        <ul v-else class="space-y-1 max-h-[240px] overflow-y-auto pr-1 scroll-thin">
             <li v-for="(entry, index) in visible" :key="index" class="flex items-start gap-2">
                 <span class="tabular font-mono text-[11px] shrink-0" :style="{ color: 'var(--muted)' }">
                     {{ time(entry.at) }}

@@ -13,7 +13,7 @@ const store = useMinerStore();
 
 /** Max five, since this is a preview of the queue rather than the full list. */
 const queue = computed(() => store.upNext);
-const claims = computed(() => store.claims.slice(0, 12));
+const claims = computed(() => store.claims);
 
 /** Of the time invested, how much went to campaigns that can actually pay out. */
 const deliverableShare = computed(() => {
@@ -33,10 +33,21 @@ const deliverableShare = computed(() => {
     <div class="space-y-4">
         <NowMining />
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <!-- A fixed row height on wide screens so the three columns end level; each
+             panel scrolls inside itself rather than stretching the row. -->
+        <!--
+            Three equal-height columns on wide screens. The row is pinned to minmax(0,1fr)
+            rather than left as auto: a fixed height on the grid alone does not constrain an
+            auto row, so h-full would resolve against the content and the panels would run to
+            thousands of pixels instead of scrolling.
+        -->
+        <div
+            class="grid grid-cols-1 lg:grid-cols-12 gap-4 xl:h-[620px]
+                   xl:grid-rows-[minmax(0,1fr)] xl:items-stretch"
+        >
             <!-- Showing the real queue is the strongest trust signal a bot UI has: the user
                  can see exactly why the miner will do what it does next. -->
-            <section class="card p-3 lg:col-span-7 xl:col-span-5">
+            <section class="card p-3 lg:col-span-7 xl:col-span-5 flex flex-col min-h-0">
                 <header class="flex items-center justify-between mb-3">
                     <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Up next
@@ -52,7 +63,7 @@ const deliverableShare = computed(() => {
 
                 <!-- Scrolls rather than truncating: the queue routinely runs past a
                      hundred campaigns and the count is itself informative. -->
-                <ul v-else class="space-y-1 max-h-[520px] overflow-y-auto pr-1">
+                <ul v-else class="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin">
                     <li
                         v-for="(campaign, index) in queue"
                         :key="campaign.id"
@@ -111,12 +122,12 @@ const deliverableShare = computed(() => {
                 </ul>
             </section>
 
-            <div class="lg:col-span-5 xl:col-span-3 space-y-4">
+            <div class="lg:col-span-5 xl:col-span-3 flex flex-col gap-4 min-h-0">
                 <LiveChannel />
-                <TierLadder />
+                <TierLadder class="flex-1 min-h-0" />
             </div>
 
-            <section class="card p-3 lg:col-span-12 xl:col-span-4">
+            <section class="card p-3 lg:col-span-12 xl:col-span-4 flex flex-col min-h-0">
                 <header class="flex items-baseline justify-between mb-3">
                     <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Recently claimed
@@ -187,7 +198,7 @@ const deliverableShare = computed(() => {
                     </p>
                 </div>
 
-                <ul v-else class="space-y-1">
+                <ul v-else class="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin">
                     <li
                         v-for="(claim, index) in claims"
                         :key="`${claim.dropId}-${claim.at}`"

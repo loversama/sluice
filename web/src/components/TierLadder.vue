@@ -21,7 +21,7 @@ const tiers = computed(() =>
 </script>
 
 <template>
-    <section v-if="campaign && tiers.length" class="card p-3">
+    <section v-if="campaign && tiers.length" class="card p-3 flex flex-col min-h-0">
         <header class="flex items-baseline justify-between mb-2">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 {{ campaign.game.name }} tiers
@@ -33,7 +33,7 @@ const tiers = computed(() =>
 
         <!-- Ladders run to six or more tiers, so this scrolls rather than pushing the
              column out of shape. -->
-        <ul class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+        <ul class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin">
             <li
                 v-for="tier in tiers"
                 :key="tier.id"
