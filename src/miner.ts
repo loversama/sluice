@@ -222,6 +222,16 @@ export class Miner extends EventEmitter {
         this.claimHistory = await loadClaims(path);
         // Seed the in-memory view so a fresh process still shows recent claims.
         this.recentClaims.push(...this.claimHistory.claims.slice(-100));
+        // Backfill the activity feed too, carrying each claim's real timestamp, so the log
+        // has history behind it rather than starting blank at every restart.
+        this.feedEntries.unshift(
+            ...this.claimHistory.claims.slice(-60).map((claim) => ({
+                at: claim.at,
+                level: "info" as const,
+                message: `Claimed ${claim.dropName} (${claim.gameName})`,
+            })),
+        );
+        this.feedEntries.sort((a, b) => a.at - b.at);
         logger.debug(`Restored ${this.claimHistory.claims.length} claims from history`);
     }
 
