@@ -129,6 +129,8 @@ export interface MiningState {
     campaignId: string;
     dropId: string;
     since: number;
+    /** When we started on this channel, unbroken across claims and campaign switches. */
+    channelSince: number;
     lastBeatAt: number | null;
     lastProgressAt: number | null;
 }
@@ -160,6 +162,15 @@ export class Miner extends EventEmitter {
 
     private currentCampaign: Campaign | null = null;
     private miningSince: number | null = null;
+    /**
+     * Continuous time on the current channel, kept across re-entries into the watch loop.
+     *
+     * The loop is re-entered after every claim and every priority switch, so resetting on
+     * entry reported "watched 4m" after an hour on the same streamer. This only restarts
+     * when the channel genuinely changes.
+     */
+    private channelWatchStart: number | null = null;
+    private lastWatchedLogin: string | null = null;
     private lastBeatAt: number | null = null;
     private nextRefreshAt: number | null = null;
     /** Ring buffers so a dashboard that connects late still has recent history. */
@@ -461,6 +472,7 @@ export class Miner extends EventEmitter {
             campaignId: campaign.id,
             dropId: drop.id,
             since: this.miningSince,
+            channelSince: this.channelWatchStart ?? this.miningSince,
             lastBeatAt: this.lastBeatAt,
             lastProgressAt: this.lastProgressAt || null,
         };
@@ -905,6 +917,10 @@ export class Miner extends EventEmitter {
         this.currentDrop = drop;
         this.currentCampaign = campaign;
         this.miningSince = Date.now();
+        if (this.lastWatchedLogin !== channel.login || this.channelWatchStart === null) {
+            this.channelWatchStart = Date.now();
+        }
+        this.lastWatchedLogin = channel.login;
         this.lastProgressAt = Date.now();
         this.lastBeatAt = null;
         this.unconfirmedBeats = 0;
@@ -1097,6 +1113,10 @@ export class Miner extends EventEmitter {
 
     private penalise(channel: Channel): void {
         this.channelCooldowns.set(channel.login, Date.now() + CHANNEL_COOLDOWN_MS);
+        if (this.lastWatchedLogin === channel.login) {
+            this.lastWatchedLogin = null;
+            this.channelWatchStart = null;
+        }
     }
 
     private async claim(drop: Drop, campaign: Campaign): Promise<void> {

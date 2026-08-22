@@ -49,9 +49,14 @@ async function enableEmbed() {
 const timer = setInterval(() => (nonce.value = Date.now()), 30_000);
 onUnmounted(() => clearInterval(timer));
 
+/**
+ * Time on this streamer without a break, which survives claims and campaign switches - the
+ * loop is re-entered on both, and measuring from that made an hour look like four minutes.
+ */
 const watchingFor = computed(() => {
-    if (!store.mining) return null;
-    const minutes = Math.round((store.now - store.mining.since) / 60_000);
+    const start = store.mining?.channelSince ?? store.mining?.since;
+    if (!start) return null;
+    const minutes = Math.round((store.now - start) / 60_000);
     return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 });
 </script>

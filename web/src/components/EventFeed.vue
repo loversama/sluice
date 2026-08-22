@@ -69,7 +69,7 @@ function time(at) {
         <ul
             v-else
             ref="list"
-            class="space-y-1 h-[220px] overflow-y-auto pr-1 scroll-thin"
+            class="space-y-1 h-[min(220px,18vh)] min-h-[120px] overflow-y-auto pr-1 scroll-thin"
             @scroll="onScroll"
         >
             <li v-for="(entry, index) in visible" :key="index" class="flex items-start gap-2">

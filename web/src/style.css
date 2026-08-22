@@ -51,6 +51,30 @@ body {
     font-size: 13px;
 }
 
+/* The document scrollbar, so the page frame matches the panels inside it. */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg);
+}
+html::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+html::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+html::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 3px solid var(--bg);
+    border-radius: 999px;
+}
+html::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+}
+html::-webkit-scrollbar-corner {
+    background: var(--bg);
+}
+
 /*
  * Panels scroll internally, and the platform scrollbar is a bright slab against a dark
  * surface. Styled here rather than per-component so every scrolling panel matches.
