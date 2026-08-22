@@ -52,21 +52,6 @@ export interface CampaignJson {
     drops: DropJson[];
 }
 
-/**
- * Twitch returns boxArtURL on some queries and not on the campaign list, so build it from
- * the game ID when it is missing. The plain `<id>-WxH` form resolves to a 404 placeholder;
- * the `_IGDB` variant is the one that actually carries art.
- */
-function boxArtFor(gameId: string, existing: string | null | undefined): string | null {
-    if (existing) {
-        return existing.replace("{width}x{height}", "72x96");
-    }
-    if (!gameId) {
-        return null;
-    }
-    return `https://static-cdn.jtvnw.net/ttv-boxart/${gameId}_IGDB-72x96.jpg`;
-}
-
 function matchesGame(game: string, campaign: Campaign): boolean {
     return game === campaign.gameId || game.toLowerCase() === campaign.gameName.toLowerCase();
 }
@@ -100,7 +85,7 @@ export function serializeCampaign(campaign: Campaign, config: Config): CampaignJ
             id: campaign.gameId,
             name: campaign.gameName,
             slug: campaign.gameSlug,
-            boxArtURL: boxArtFor(campaign.gameId, campaign.data.game.boxArtURL),
+            boxArtURL: campaign.boxArtUrl("72x96"),
         },
         status: campaign.isUpcoming ? "upcoming" : campaign.isActive ? "active" : "expired",
         startAt: campaign.data.startAt,

@@ -284,7 +284,7 @@ async function main(): Promise<void> {
                 `${campaign.gameName} - ${campaign.name}`,
                 `${campaign.drops.length} drop${campaign.drops.length === 1 ? "" : "s"} claimed`,
             ],
-            imageUrl: campaign.data.game.boxArtURL ?? null,
+            imageUrl: campaign.boxArtUrl(),
         });
     });
     miner.on("campaigns-updated", (campaigns: Campaign[]) => {
@@ -310,7 +310,7 @@ async function main(): Promise<void> {
                 rewards.length ? `At risk: ${rewards.join(", ")}` : "",
                 "Your Twitch account is not linked, so this will not reach the game.",
             ].filter(Boolean),
-            imageUrl: campaign.data.game.boxArtURL ?? null,
+            imageUrl: campaign.boxArtUrl(),
             url: campaign.accountLinkUrl,
         });
     });

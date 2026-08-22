@@ -133,6 +133,22 @@ export class Campaign {
         return this.data.game.displayName ?? this.data.game.name ?? "Unknown";
     }
 
+    /**
+     * Box art for the game, built from its id when Twitch omits the field - which it does on
+     * the campaign list, so relying on the raw value meant notifications went out with no
+     * image at all. The plain `<id>-WxH` form resolves to a grey 404 placeholder; the _IGDB
+     * variant is the one carrying real art.
+     */
+    boxArtUrl(size = "144x192"): string | null {
+        const provided = this.data.game.boxArtURL;
+        if (provided) {
+            return provided.replace("{width}x{height}", size);
+        }
+        return this.gameId
+            ? `https://static-cdn.jtvnw.net/ttv-boxart/${this.gameId}_IGDB-${size}.jpg`
+            : null;
+    }
+
     get gameSlug(): string | null {
         return this.data.game.slug ?? null;
     }
