@@ -135,7 +135,7 @@ onUnmounted(() => store.disconnect());
                     {{ problem.message }}
                 </div>
 
-                <div class="p-4 max-w-[1800px] mx-auto">
+                <div class="p-4 max-w-[1800px] mx-auto [&_.sticky]:backdrop-blur">
                     <RouterView />
                 </div>
             </main>

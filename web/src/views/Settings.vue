@@ -209,15 +209,22 @@ const inputStyle = {
 </script>
 
 <template>
-    <div class="space-y-4 max-w-[720px]">
-        <header class="flex items-baseline justify-between">
-            <h1 class="text-[15px] font-semibold">Settings</h1>
-            <span class="text-[12px] h-4" :style="{ color: 'var(--success)' }">
-                {{ saved ? "Saved" : "" }}
+    <div class="space-y-4 max-w-[1100px]">
+        <header class="card p-2 px-3 flex items-baseline justify-between sticky top-0 z-10">
+            <h1 class="text-[13px] font-semibold">Settings</h1>
+            <span class="text-[12px] h-4" :style="{ color: saved ? 'var(--success)' : 'var(--muted)' }">
+                {{ saved ? "Saved" : "Changes save automatically" }}
             </span>
         </header>
 
-        <section class="card p-4 space-y-4">
+        <!--
+            Multi-column rather than a grid: a grid aligns rows to the tallest card, which
+            left a short card like Claiming sitting above a large void. Columns let the cards
+            pack against each other instead.
+        -->
+        <div class="xl:columns-2 xl:gap-4">
+
+        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Claiming</h2>
             <label class="flex items-center justify-between gap-4">
                 <span class="text-[13px]">Claim drops automatically</span>
@@ -229,7 +236,7 @@ const inputStyle = {
             </label>
         </section>
 
-        <section class="card p-4 space-y-4">
+        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Unlinked rewards
             </h2>
@@ -281,7 +288,7 @@ const inputStyle = {
             </label>
         </section>
 
-        <section class="card p-4 space-y-4">
+        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Channels</h2>
 
             <div>
@@ -338,7 +345,7 @@ const inputStyle = {
             </div>
         </section>
 
-        <section class="card p-4 space-y-3">
+        <section class="card p-4 space-y-3 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Steam library</h2>
             <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
                 Lets the miner rank campaigns by the games you actually own and play, and shows
@@ -386,7 +393,7 @@ const inputStyle = {
             </button>
         </section>
 
-        <section class="card p-4 space-y-3">
+        <section class="card p-4 space-y-3 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Notifications</h2>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label class="block">
@@ -409,7 +416,7 @@ const inputStyle = {
         </section>
 
         <!-- Walled off deliberately: nothing here needs changing in normal use. -->
-        <section class="card p-4 space-y-4">
+        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Advanced
             </h2>
@@ -469,5 +476,6 @@ const inputStyle = {
                 <dd class="tabular">{{ store.daemon ? formatRelative(store.daemon.startedAt) : "-" }}</dd>
             </dl>
         </section>
+        </div>
     </div>
 </template>

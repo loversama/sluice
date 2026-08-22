@@ -167,7 +167,9 @@ watch(
     <div class="space-y-4">
         <!-- One surface for the whole toolbar, so the controls read as a group rather
              than as loose items floating above the list. -->
-        <header class="card p-2 flex flex-wrap items-center gap-2">
+        <!-- Sticky: with over a hundred campaigns the filters are otherwise scrolled
+             away exactly when they become useful. -->
+        <header class="card p-2 flex flex-wrap items-center gap-2 sticky top-0 z-10">
             <div class="flex rounded-lg overflow-hidden shrink-0" :style="{ background: 'var(--surface-2)' }">
                 <button
                     v-for="key in ['active', 'upcoming', 'completed']"

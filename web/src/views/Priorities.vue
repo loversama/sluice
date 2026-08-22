@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 import draggable from "vuedraggable";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { boxArt } from "@/lib/format.js";
 
 const store = useMinerStore();
 
@@ -152,6 +153,7 @@ const knownGames = computed(() => {
         if (!seen.has(campaign.game.name)) {
             seen.set(campaign.game.name, {
                 name: campaign.game.name,
+                id: campaign.game.id,
                 boxArtURL: campaign.game.boxArtURL,
                 status: campaign.status,
             });
@@ -171,9 +173,12 @@ function campaignCount(game) {
     return "no campaigns right now";
 }
 
-function boxArt(game) {
-    return knownGames.value.find((entry) => entry.name.toLowerCase() === game.toLowerCase())
-        ?.boxArtURL;
+/** Art for a game named in the list, matched against whatever campaigns we know of. */
+function artFor(game) {
+    const known = knownGames.value.find(
+        (entry) => entry.name.toLowerCase() === game.toLowerCase(),
+    );
+    return known?.boxArtURL ?? boxArt(known?.id);
 }
 
 /** Debounced so a fumbled drag does not fire three writes. */
@@ -321,13 +326,24 @@ function move(index, delta) {
                         @keydown.ctrl.down.prevent="move(index, 1)"
                     >
                         <span class="drag-handle cursor-grab select-none" :style="{ color: 'var(--muted)' }">⠿</span>
-                        <span
-                            class="w-5 h-5 rounded-full grid place-items-center text-[10px] font-semibold shrink-0 text-white"
-                            :style="{ background: 'var(--accent)' }"
-                        >
-                            {{ index + 1 }}
-                        </span>
-                        <img v-if="boxArt(game)" :src="boxArt(game)" :alt="game" class="w-6 h-8 rounded object-cover" />
+                        <!-- Rank rides on the art, as on the dashboard queue, rather than
+                             taking a column of its own. -->
+                        <div class="relative shrink-0">
+                            <img
+                                v-if="artFor(game)"
+                                :src="artFor(game)"
+                                :alt="game"
+                                class="w-8 h-11 rounded object-cover"
+                                :style="{ background: 'var(--surface-2)' }"
+                            />
+                            <div v-else class="w-8 h-11 rounded" :style="{ background: 'var(--surface-2)' }" />
+                            <span
+                                class="absolute -top-1 -left-1 min-w-[16px] h-4 px-1 rounded grid place-items-center text-[10px] font-semibold text-white"
+                                :style="{ background: 'var(--accent)' }"
+                            >
+                                {{ index + 1 }}
+                            </span>
+                        </div>
                         <span class="text-[13px] flex-1 truncate">{{ game }}</span>
                         <span class="text-[11px] shrink-0" :style="{ color: 'var(--muted)' }">
                             {{ campaignCount(game) }}
@@ -442,9 +458,15 @@ function move(index, delta) {
                 <span
                     v-for="(game, index) in excluded"
                     :key="game"
-                    class="flex items-center gap-1.5 px-2 py-1 rounded-full text-[12px]"
+                    class="flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full text-[12px]"
                     :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"
                 >
+                    <img
+                        v-if="artFor(game)"
+                        :src="artFor(game)"
+                        :alt="game"
+                        class="w-4 h-5 rounded-sm object-cover"
+                    />
                     {{ game }}
                     <button :style="{ color: 'var(--danger)' }" @click="remove(excluded, index)">×</button>
                 </span>

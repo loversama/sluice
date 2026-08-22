@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
-import { formatDuration } from "@/lib/format.js";
+import { boxArt, formatDuration } from "@/lib/format.js";
 
 const store = useMinerStore();
 const steam = ref(null);
@@ -121,6 +121,13 @@ function playtime(entry) {
                     class="card p-3 flex items-center gap-4"
                     :style="{ borderLeft: '3px solid var(--warn)' }"
                 >
+                    <img
+                        v-if="boxArt(entry.gameId)"
+                        :src="boxArt(entry.gameId)"
+                        :alt="entry.gameName"
+                        class="w-9 h-12 rounded object-cover shrink-0"
+                        :style="{ background: 'var(--surface-2)' }"
+                    />
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2 flex-wrap">
                             <a
@@ -171,6 +178,13 @@ function playtime(entry) {
                     :key="entry.gameId"
                     class="card p-3 flex items-center gap-4 opacity-80"
                 >
+                    <img
+                        v-if="boxArt(entry.gameId)"
+                        :src="boxArt(entry.gameId)"
+                        :alt="entry.gameName"
+                        class="w-9 h-12 rounded object-cover shrink-0 opacity-70"
+                        :style="{ background: 'var(--surface-2)' }"
+                    />
                     <div class="min-w-0 flex-1">
                         <a
                             v-if="entry.linkUrl"

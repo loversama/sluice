@@ -52,3 +52,11 @@ export function totalRemainingMinutes(campaign) {
         .filter((drop) => !drop.isClaimed)
         .reduce((sum, drop) => sum + Math.max(0, drop.requiredMinutes - drop.currentMinutes), 0);
 }
+
+/**
+ * Twitch's box art for a game id. The plain `<id>-WxH` form resolves to a grey 404
+ * placeholder; the _IGDB variant is the one that carries real art.
+ */
+export function boxArt(gameId, size = "72x96") {
+    return gameId ? `https://static-cdn.jtvnw.net/ttv-boxart/${gameId}_IGDB-${size}.jpg` : null;
+}
