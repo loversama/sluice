@@ -228,6 +228,40 @@ export class Miner extends EventEmitter {
         return summarise(this.claimHistory, required);
     }
 
+    /**
+     * Note a campaign as finished once its last drop is claimed.
+     *
+     * This lives here rather than in the watch loop because most claims happen in the
+     * refresh sweep, which never ran the check - so a campaign finished by that path was
+     * never counted, and the dashboard reported zero completions against real claims.
+     */
+    private recordCompletionIfFinished(campaign: Campaign): void {
+        if (!campaign.isCompleted || this.claimHistory.completedCampaignIds.includes(campaign.id)) {
+            return;
+        }
+        this.claimHistory.completedCampaignIds.push(campaign.id);
+        this.persistClaims();
+        logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
+        this.emit("campaign-completed", campaign);
+    }
+
+    /**
+     * Recover completions that predate the fix, or that happened while the bot was stopped:
+     * any known campaign that is finished and that we hold a claim for.
+     */
+    private reconcileCompletions(): void {
+        const claimedDrops = new Set(this.claimHistory.claims.map((claim) => claim.dropId));
+        for (const campaign of this.campaigns.values()) {
+            if (!campaign.isCompleted) {
+                continue;
+            }
+            const ours = campaign.drops.some((drop) => claimedDrops.has(drop.id));
+            if (ours) {
+                this.recordCompletionIfFinished(campaign);
+            }
+        }
+    }
+
     private persistClaims(): void {
         if (this.claimsPath) {
             void saveClaims(this.claimsPath, this.claimHistory);
@@ -963,17 +997,9 @@ export class Miner extends EventEmitter {
                 }
 
                 if (live.isClaimable && this.config.autoClaimDrops) {
+                    // claim() records completion itself, for every path that claims.
                     await this.claim(live, this.currentCampaign ?? campaign);
-                    if (campaign.isCompleted) {
-                        logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
-                        if (!this.claimHistory.completedCampaignIds.includes(campaign.id)) {
-                            this.claimHistory.completedCampaignIds.push(campaign.id);
-                            this.persistClaims();
-                        }
-                        this.emit("campaign-completed", campaign);
-                        return;
-                    }
-                    // Move on to the next drop in this campaign.
+                    // Either the campaign is done or the next drop needs re-selecting.
                     return;
                 }
 
@@ -1104,6 +1130,7 @@ export class Miner extends EventEmitter {
                 this.persistClaims();
                 this.pushFeed("info", `Claimed ${drop.rewardNames} (${campaign.gameName})`);
                 this.emit("drop-claimed", { drop, campaign });
+                this.recordCompletionIfFinished(campaign);
             } else {
                 // Almost always a drop Twitch considers ineligible rather than a transient
                 // failure, so stop asking rather than repeating it every refresh.
@@ -1721,6 +1748,7 @@ export class Miner extends EventEmitter {
         }
 
         this.campaigns = next;
+        this.reconcileCompletions();
         this.rebindWatchedObjects(next);
         this.scheduleBoundaryRefresh();
         this.warnAboutExpiringUnlinked();
