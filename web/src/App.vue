@@ -53,15 +53,20 @@ watch(
     },
 );
 
+/**
+ * Keyed on the completion event rather than a count of completed campaigns. The count went
+ * from zero to whatever the account already held the moment a snapshot arrived, so every
+ * page load announced a completion that had happened hours earlier.
+ */
 watch(
-    () => store.campaigns.filter((campaign) => campaign.isCompleted).length,
-    (now, before) => {
-        if (before === undefined || now <= before) {
+    () => store.lastCompletion,
+    (completion) => {
+        if (!completion) {
             return;
         }
         ElNotification({
             title: "Campaign complete",
-            message: "Every drop in a campaign has been claimed.",
+            message: `${completion.gameName} — ${completion.name}`,
             type: "success",
             position: "bottom-right",
             duration: 6000,

@@ -43,7 +43,7 @@ const deliverableShare = computed(() => {
         -->
         <div
             class="grid grid-cols-1 lg:grid-cols-12 gap-4
-                   xl:h-[calc(100vh-32rem)] xl:min-h-[320px] xl:max-h-[900px]
+                   xl:h-[calc(100vh-34rem)] xl:min-h-[320px] xl:max-h-[880px]
                    xl:grid-rows-[minmax(0,1fr)] xl:items-stretch"
         >
             <!-- Showing the real queue is the strongest trust signal a bot UI has: the user

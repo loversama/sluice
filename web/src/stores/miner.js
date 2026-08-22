@@ -30,6 +30,8 @@ export const useMinerStore = defineStore("miner", {
          * the "Mining paused" banner unable to render.
          */
         fatal: null,
+        /** Set only by the SSE event, so a hydrate cannot look like a completion. */
+        lastCompletion: null,
         /** Ticks every second so countdowns recompute without per-component timers. */
         now: Date.now(),
 
@@ -252,6 +254,7 @@ export const useMinerStore = defineStore("miner", {
                 if (campaign) {
                     campaign.isCompleted = true;
                 }
+                this.lastCompletion = { ...payload, at: Date.now() };
             });
 
             // Campaign sets are small, so replacing wholesale beats diffing.
