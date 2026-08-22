@@ -18,6 +18,41 @@ const route = useRoute();
 const router = useRouter();
 
 const segment = ref("active");
+
+/**
+ * Collapsed game groups, remembered per browser. A game the user has decided they do not
+ * want to look at should stay shut when they come back to the page.
+ */
+const STORAGE_KEY = "campaigns.collapsed";
+const collapsed = ref(new Set());
+try {
+    collapsed.value = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"));
+} catch {
+    // Private windows and blocked site data both land here; an empty set is fine.
+}
+
+function toggleGroup(gameId) {
+    const next = new Set(collapsed.value);
+    if (!next.delete(gameId)) {
+        next.add(gameId);
+    }
+    collapsed.value = next;
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+        // Not being able to remember it is not a reason to refuse to collapse it.
+    }
+}
+
+function setAll(collapse) {
+    const next = collapse ? new Set(groups.value.map((group) => group[0].game.id)) : new Set();
+    collapsed.value = next;
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+        /* ignore */
+    }
+}
 const search = ref("");
 const unlinkedOnly = ref(false);
 const prioritiesOnly = ref(false);
@@ -160,6 +195,15 @@ watch(
             <label class="flex items-center gap-1.5 text-[12px] cursor-pointer" :style="{ color: 'var(--text-2)' }">
                 <input v-model="prioritiesOnly" type="checkbox" /> My priorities
             </label>
+
+            <button
+                v-if="groups.length"
+                class="text-[12px] hover:underline"
+                :style="{ color: 'var(--text-2)' }"
+                @click="setAll(collapsed.size < groups.length)"
+            >
+                {{ collapsed.size < groups.length ? "Collapse all" : "Expand all" }}
+            </button>
         </header>
 
         <p v-if="!groups.length" class="card p-8 text-center text-[12px]" :style="{ color: 'var(--muted)' }">
@@ -175,7 +219,19 @@ watch(
         </p>
 
         <section v-for="group in groups" :key="group[0].game.id" class="space-y-1">
-            <header class="flex items-center gap-2 px-1">
+            <!-- The whole header is the control: a games list is long, and reaching for
+                 a small chevron on every row is worse than a large target. -->
+            <button
+                class="flex items-center gap-2 px-1 w-full text-left"
+                @click="toggleGroup(group[0].game.id)"
+            >
+                <span
+                    class="text-[11px] w-3 shrink-0 transition-transform"
+                    :style="{
+                        color: 'var(--text-2)',
+                        transform: collapsed.has(group[0].game.id) ? 'rotate(-90deg)' : 'none',
+                    }"
+                >&#9662;</span>
                 <img
                     v-if="group[0].game.boxArtURL"
                     :src="group[0].game.boxArtURL"
@@ -191,10 +247,13 @@ watch(
                     #{{ group[0].priorityRank + 1 }}
                 </span>
                 <StatusChip v-if="group[0].isExcluded" status="excluded" small />
-            </header>
+                <span class="text-[11px] ml-auto" :style="{ color: 'var(--muted)' }">
+                    {{ group.length }} campaign{{ group.length === 1 ? "" : "s" }}
+                </span>
+            </button>
 
             <button
-                v-for="campaign in group"
+                v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group)"
                 :key="campaign.id"
                 class="card w-full text-left p-3 flex items-center gap-4 hover:brightness-110 transition"
                 :style="
@@ -254,7 +313,7 @@ watch(
 
             <!-- Upcoming campaigns are only useful if they say whether the bot will act. -->
             <p
-                v-for="campaign in group.filter((c) => c.status === 'upcoming' && !c.inPriorities && !c.isExcluded)"
+                v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group.filter((c) => c.status === 'upcoming' && !c.inPriorities && !c.isExcluded))"
                 :key="`${campaign.id}-hint`"
                 class="text-[11px] px-3 pb-1"
                 :style="{ color: 'var(--text-2)' }"
