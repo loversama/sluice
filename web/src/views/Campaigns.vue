@@ -213,7 +213,12 @@ watch(
                             status="mining"
                             small
                         />
-                        <StatusChip v-if="!campaign.isAccountLinked" status="unlinked" small />
+                        <StatusChip
+                            v-if="!campaign.isAccountLinked"
+                            status="unlinked"
+                            small
+                            :href="campaign.accountLinkUrl"
+                        />
                         <StatusChip v-if="campaign.allowedChannels.length" status="restricted" small />
                     </div>
                     <p class="text-[11px] mt-0.5" :style="{ color: 'var(--text-2)' }">
@@ -277,7 +282,12 @@ watch(
                         </p>
                         <div class="flex gap-1.5 mt-2 flex-wrap">
                             <StatusChip :status="selected.isCompleted ? 'completed' : selected.status" small />
-                            <StatusChip v-if="!selected.isAccountLinked" status="unlinked" small />
+                            <StatusChip
+                                v-if="!selected.isAccountLinked"
+                                status="unlinked"
+                                small
+                                :href="selected.accountLinkUrl"
+                            />
                         </div>
                     </div>
                 </header>

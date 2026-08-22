@@ -162,7 +162,11 @@ const idleReason = computed(() => {
                 </span>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-                <StatusChip v-if="campaign && !campaign.isAccountLinked" status="unlinked" />
+                <StatusChip
+                    v-if="campaign && !campaign.isAccountLinked"
+                    status="unlinked"
+                    :href="campaign.accountLinkUrl"
+                />
                 <button
                     class="px-2 py-1 rounded text-[11px]"
                     :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"

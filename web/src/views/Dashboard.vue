@@ -75,7 +75,12 @@ const claims = computed(() => store.claims.slice(0, 8));
 
                         <!-- Ahead of the time, so the eye meets the warning before the number
                              it qualifies. -->
-                        <StatusChip v-if="!campaign.isAccountLinked" status="unlinked" small />
+                        <StatusChip
+                            v-if="!campaign.isAccountLinked"
+                            status="unlinked"
+                            small
+                            :href="campaign.accountLinkUrl"
+                        />
 
                         <div class="text-right shrink-0">
                             <p class="text-[12px] tabular">
