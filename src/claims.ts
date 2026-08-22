@@ -58,17 +58,42 @@ export interface ClaimStats {
     campaignsCompleted: number;
     /** Total required watch time across everything claimed, as a rough "time invested". */
     minutesEarned: number;
+    /** Of that, the minutes spent on campaigns whose reward could actually arrive. */
+    deliverableMinutes: number;
+    /** Minutes spent on campaigns that could not pay out. */
+    wastedMinutes: number;
 }
 
-export function summarise(history: ClaimHistory, requiredMinutesByDrop: Map<string, number>): ClaimStats {
+export function summarise(
+    history: ClaimHistory,
+    requiredMinutesByDrop: Map<string, number>,
+    /** Whether each campaign's reward could reach the user; absent means we no longer know. */
+    deliverableByCampaign: Map<string, boolean>,
+): ClaimStats {
     const weekAgo = Date.now() - 7 * 24 * 60 * 60_000;
+    let earned = 0;
+    let deliverable = 0;
+    let wasted = 0;
+
+    for (const claim of history.claims) {
+        const minutes = requiredMinutesByDrop.get(claim.dropId) ?? 0;
+        earned += minutes;
+        // Campaigns rotate out of view, so an unknown one is counted in neither column
+        // rather than guessed at.
+        const known = deliverableByCampaign.get(claim.campaignId);
+        if (known === true) {
+            deliverable += minutes;
+        } else if (known === false) {
+            wasted += minutes;
+        }
+    }
+
     return {
         dropsLast7Days: history.claims.filter((claim) => claim.at >= weekAgo).length,
         dropsAllTime: history.claims.length,
         campaignsCompleted: history.completedCampaignIds.length,
-        minutesEarned: history.claims.reduce(
-            (sum, claim) => sum + (requiredMinutesByDrop.get(claim.dropId) ?? 0),
-            0,
-        ),
+        minutesEarned: earned,
+        deliverableMinutes: deliverable,
+        wastedMinutes: wasted,
     };
 }

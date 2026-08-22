@@ -224,7 +224,14 @@ async function main(): Promise<void> {
     // Translate miner events into the JSON shapes the dashboard consumes.
     miner.on("watching", ({ channel, campaign, drop }) => {
         bus.emit("watching", {
-            channel: { login: channel.login, displayName: channel.displayName, url: channel.url },
+            channel: {
+                login: channel.login,
+                displayName: channel.displayName,
+                url: channel.url,
+                title: channel.stream?.title ?? "",
+                viewers: channel.stream?.viewers ?? 0,
+                game: channel.stream?.gameName ?? null,
+            },
             campaignId: campaign.id,
             dropId: drop.id,
         });

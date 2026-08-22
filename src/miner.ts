@@ -117,7 +117,15 @@ export interface ClaimRecord {
 
 /** What the miner is doing right now, or null when idle. */
 export interface MiningState {
-    channel: { login: string; displayName: string; url: string };
+    channel: {
+        login: string;
+        displayName: string;
+        url: string;
+        /** Live stream detail for the dashboard's channel panel. */
+        title: string;
+        viewers: number;
+        game: string | null;
+    };
     campaignId: string;
     dropId: string;
     since: number;
@@ -220,12 +228,14 @@ export class Miner extends EventEmitter {
     /** Lifetime totals for the dashboard. */
     getClaimStats(): ClaimStats {
         const required = new Map<string, number>();
+        const deliverable = new Map<string, boolean>();
         for (const campaign of this.campaigns.values()) {
+            deliverable.set(campaign.id, campaign.isDeliverable);
             for (const drop of campaign.drops) {
                 required.set(drop.id, drop.requiredMinutes);
             }
         }
-        return summarise(this.claimHistory, required);
+        return summarise(this.claimHistory, required, deliverable);
     }
 
     /**
@@ -434,6 +444,9 @@ export class Miner extends EventEmitter {
                 login: channel.login,
                 displayName: channel.displayName,
                 url: channel.url,
+                title: channel.stream?.title ?? "",
+                viewers: channel.stream?.viewers ?? 0,
+                game: channel.stream?.gameName ?? null,
             },
             campaignId: campaign.id,
             dropId: drop.id,

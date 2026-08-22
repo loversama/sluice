@@ -13,6 +13,7 @@ export const useMinerStore = defineStore("miner", {
         connection: "connecting",
 
         daemon: null,
+        allowStreamEmbed: false,
         auth: { status: "pending", user: null, device: null },
         mining: null,
         queue: [],
@@ -115,6 +116,7 @@ export const useMinerStore = defineStore("miner", {
             // or the process was replaced.
             this.fatal = null;
             this.daemon = snapshot.daemon;
+            this.allowStreamEmbed = snapshot.allowStreamEmbed ?? false;
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
             this.queue = snapshot.queue ?? [];

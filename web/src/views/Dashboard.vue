@@ -4,30 +4,45 @@ import { computed } from "vue";
 import { useMinerStore } from "@/stores/miner.js";
 import { formatDuration, formatRelative, formatUntil, totalRemainingMinutes } from "@/lib/format.js";
 import NowMining from "@/components/NowMining.vue";
+import LiveChannel from "@/components/LiveChannel.vue";
+import TierLadder from "@/components/TierLadder.vue";
 import EventFeed from "@/components/EventFeed.vue";
 import StatusChip from "@/components/StatusChip.vue";
 
 const store = useMinerStore();
 
 /** Max five, since this is a preview of the queue rather than the full list. */
-const queue = computed(() => store.upNext.slice(0, 5));
-const claims = computed(() => store.claims.slice(0, 8));
+const queue = computed(() => store.upNext);
+const claims = computed(() => store.claims.slice(0, 12));
+
+/** Of the time invested, how much went to campaigns that can actually pay out. */
+const deliverableShare = computed(() => {
+    const stats = store.stats;
+    if (!stats) return null;
+    const known = stats.deliverableMinutes + stats.wastedMinutes;
+    if (!known) return null;
+    return {
+        percent: Math.round((stats.deliverableMinutes / known) * 100),
+        deliverable: stats.deliverableMinutes,
+        wasted: stats.wastedMinutes,
+    };
+});
 </script>
 
 <template>
     <div class="space-y-4">
         <NowMining />
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             <!-- Showing the real queue is the strongest trust signal a bot UI has: the user
                  can see exactly why the miner will do what it does next. -->
-            <section class="card p-3 lg:col-span-7">
+            <section class="card p-3 lg:col-span-7 xl:col-span-5">
                 <header class="flex items-center justify-between mb-3">
                     <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Up next
                     </h2>
                     <RouterLink to="/campaigns" class="text-[11px] hover:underline" :style="{ color: 'var(--text-2)' }">
-                        View all &rarr;
+                        {{ queue.length }} queued &rarr;
                     </RouterLink>
                 </header>
 
@@ -35,7 +50,9 @@ const claims = computed(() => store.claims.slice(0, 8));
                     Nothing queued behind the current campaign.
                 </p>
 
-                <ul v-else class="space-y-1">
+                <!-- Scrolls rather than truncating: the queue routinely runs past a
+                     hundred campaigns and the count is itself informative. -->
+                <ul v-else class="space-y-1 max-h-[520px] overflow-y-auto pr-1">
                     <li
                         v-for="(campaign, index) in queue"
                         :key="campaign.id"
@@ -94,7 +111,12 @@ const claims = computed(() => store.claims.slice(0, 8));
                 </ul>
             </section>
 
-            <section class="card p-3 lg:col-span-5">
+            <div class="lg:col-span-5 xl:col-span-3 space-y-4">
+                <LiveChannel />
+                <TierLadder />
+            </div>
+
+            <section class="card p-3 lg:col-span-12 xl:col-span-4">
                 <header class="flex items-baseline justify-between mb-3">
                     <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Recently claimed
@@ -134,6 +156,29 @@ const claims = computed(() => store.claims.slice(0, 8));
                         </p>
                     </div>
                 </div>
+
+                <!-- The number that says whether the bot is working FOR you: watch time on
+                     campaigns that can pay out, versus time that can never arrive. -->
+                <RouterLink
+                    v-if="deliverableShare"
+                    to="/links"
+                    class="block mb-3 pb-3 group"
+                    :style="{ borderBottom: '1px solid var(--border)' }"
+                >
+                    <div class="flex items-baseline justify-between mb-1.5">
+                        <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                            Reaches your games
+                        </span>
+                        <span class="text-[12px] tabular font-semibold">{{ deliverableShare.percent }}%</span>
+                    </div>
+                    <div class="h-1.5 rounded-full overflow-hidden flex" :style="{ background: 'var(--surface-2)' }">
+                        <div :style="{ width: `${deliverableShare.percent}%`, background: 'var(--success)' }" />
+                        <div :style="{ width: `${100 - deliverableShare.percent}%`, background: 'var(--warn)' }" />
+                    </div>
+                    <p class="text-[10px] mt-1 group-hover:underline" :style="{ color: 'var(--muted)' }">
+                        {{ formatDuration(deliverableShare.wasted) }} went to unlinked campaigns &rarr;
+                    </p>
+                </RouterLink>
 
                 <div v-if="!claims.length" class="text-center py-6">
                     <p class="text-[22px] mb-1" :style="{ color: 'var(--muted)' }">◆</p>

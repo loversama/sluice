@@ -92,7 +92,7 @@ onUnmounted(() => store.disconnect());
                     {{ problem.message }}
                 </div>
 
-                <div class="p-4 max-w-[1200px] mx-auto">
+                <div class="p-4 max-w-[1800px] mx-auto">
                     <RouterView />
                 </div>
             </main>

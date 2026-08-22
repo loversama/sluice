@@ -20,6 +20,7 @@ const form = reactive({
     campaignRefreshMinutes: 20,
     attemptImpossibleCampaigns: true,
     logLevel: "info",
+    allowStreamEmbed: false,
     telegramBotToken: "",
     telegramChatId: "",
     discordWebhookUrl: "",
@@ -70,6 +71,7 @@ watch(
             campaignRefreshMinutes: config.campaignRefreshMinutes,
             attemptImpossibleCampaigns: config.attemptImpossibleCampaigns,
             logLevel: config.logLevel,
+            allowStreamEmbed: config.allowStreamEmbed ?? false,
             telegramBotToken: config.notifications?.telegram?.botToken ?? "",
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
@@ -117,6 +119,7 @@ async function save() {
             campaignRefreshMinutes: Number(form.campaignRefreshMinutes),
             attemptImpossibleCampaigns: form.attemptImpossibleCampaigns,
             logLevel: form.logLevel,
+            allowStreamEmbed: form.allowStreamEmbed,
             notifications,
         });
         saved.value = true;
@@ -434,6 +437,20 @@ const inputStyle = {
                     </span>
                 </span>
                 <el-switch v-model="form.attemptImpossibleCampaigns" />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Allow the live stream player</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Adds a play button to the dashboard's channel panel. The player runs in
+                        this browser and sends your Twitch cookies, so it can open a second
+                        watch session on your account &mdash; which is the documented way to
+                        make a miner report false progress and stall. The preview thumbnail
+                        shown by default carries none of that risk.
+                    </span>
+                </span>
+                <el-switch v-model="form.allowStreamEmbed" />
             </label>
 
             <label class="flex items-center justify-between gap-4">

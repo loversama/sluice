@@ -78,6 +78,16 @@ export interface Config {
      * 24-hour post-campaign window closes, whereas a claimed one is often still recoverable.
      */
     holdClaimsWhenUnlinked: boolean;
+    /**
+     * Allow the dashboard to embed the live Twitch player.
+     *
+     * Off by default and deliberately so: the embed runs in your browser, which sends your
+     * Twitch cookies, so it can open a second watch session on the same account. Twitch
+     * tracks roughly one active session per account, and a competing one makes the miner
+     * report false progress and stall - the documented failure mode of watching in a browser
+     * while mining. The preview thumbnail carries none of that risk.
+     */
+    allowStreamEmbed: boolean;
     logLevel: LogLevel;
     steam: {
         /**
@@ -111,6 +121,7 @@ export const DEFAULT_CONFIG: Config = {
     unlinkedPolicy: "mine",
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
+    allowStreamEmbed: false,
     logLevel: "info",
     steam: { refreshHours: 24 },
     notifications: {},
