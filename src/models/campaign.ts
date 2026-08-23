@@ -240,7 +240,11 @@ export class Campaign {
     }
 
     get isCompleted(): boolean {
-        return this.drops.every((drop) => drop.isClaimed || !drop.isActive);
+        // Drops that need no watch time are not ours to finish, so they must not hold a
+        // campaign open indefinitely either.
+        return this.drops.every(
+            (drop) => drop.isClaimed || !drop.isActive || drop.requiredMinutes <= 0,
+        );
     }
 
     /** The tightest slack across this campaign's unfinished drops. */
@@ -272,6 +276,13 @@ export class Campaign {
     nextDrop(options: { attemptImpossible?: boolean } = {}): Drop | null {
         for (const drop of this.drops) {
             if (drop.isClaimed || !drop.isActive) {
+                continue;
+            }
+            // A drop needing no watch time cannot be advanced by watching. Twitch grants
+            // these by other means, and treating one as work parks the miner on a channel
+            // forever: an EWC campaign offered a 0-minute reward ahead of a real 720-minute
+            // tier, and the bot sat on the former while the latter went unearned.
+            if (drop.requiredMinutes <= 0) {
                 continue;
             }
             if (!this.arePreconditionsMet(drop)) {

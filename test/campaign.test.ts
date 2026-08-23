@@ -100,6 +100,37 @@ describe("Campaign.nextDrop", () => {
         expect(campaign.nextDrop()?.id).toBe("tier2");
     });
 
+    it("skips a drop that needs no watch time, and moves to real work", () => {
+        // An EWC campaign offered a 0-minute reward ahead of a 720-minute tier; the miner
+        // parked on the former, which watching can never advance.
+        const campaign = new Campaign(
+            makeCampaign({
+                id: "c",
+                drops: [
+                    makeDrop({ id: "bonus", requiredMinutesWatched: 0 }),
+                    makeDrop({ id: "real", requiredMinutesWatched: 720, endAt: iso(6000) }),
+                ],
+            }),
+        );
+        expect(campaign.nextDrop()?.id).toBe("real");
+    });
+
+    it("does not let a zero-minute drop hold a campaign open", () => {
+        const campaign = new Campaign(
+            makeCampaign({
+                id: "c",
+                drops: [
+                    makeDrop({
+                        id: "done",
+                        self: { currentMinutesWatched: 60, dropInstanceID: "x", isClaimed: true },
+                    }),
+                    makeDrop({ id: "bonus", requiredMinutesWatched: 0 }),
+                ],
+            }),
+        );
+        expect(campaign.isCompleted).toBe(true);
+    });
+
     it("skips an unfinishable drop unless asked to attempt it", () => {
         const campaign = new Campaign(
             makeCampaign({
