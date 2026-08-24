@@ -89,8 +89,27 @@ there is no 2FA prompt to scrape. To sign out, run with `--logout`.
 | `autoClaimPoints` | `true` | Claim channel points bonuses while watching. |
 | `warnUnlinkedAccounts` | `true` | Warn when rewards will not reach the game because accounts are not linked. |
 | `logLevel` | `"info"` | `error`, `warn`, `info`, or `debug`. |
+| `libraryPolicy` | `"ownedOrListed"` | Restrict mining to games you own on Steam or named in `priorityGames`. `"all"` mines any game with a campaign. Inert until a Steam library is loaded. |
 | `steam` | `{}` | Steam library integration. See below. |
 | `notifications` | `{}` | Optional Telegram / Discord webhooks. |
+
+### Which games get mined
+
+Twitch runs campaigns for hundreds of games at once, and watch time spent on one you neither
+own nor asked for earns a reward you cannot use. Once a Steam library is connected,
+`libraryPolicy` defaults to `"ownedOrListed"`: a campaign is only mined if you own the game
+on Steam, or the game is in `priorityGames`.
+
+The priority list is the escape hatch, and it is why ownership alone is not the rule. Steam
+cannot see an Epic or console title, and a Twitch category like "Special Events" is not a
+game at all - putting either on the list mines it regardless.
+
+Without a Steam library the policy is inert and everything is mined, since there would be
+nothing to check ownership against. Set it to `"all"` to mine every game with a campaign, as
+earlier versions did. Both are on the Settings page under "Which games to mine".
+
+This is a separate question from whether a reward can reach you; see `unlinkedPolicy` for
+that. A campaign has to pass both.
 
 ### Priority modes
 

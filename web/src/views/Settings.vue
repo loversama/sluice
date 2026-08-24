@@ -11,6 +11,7 @@ const form = reactive({
     autoClaimDrops: true,
     autoClaimPoints: true,
     unlinkedPolicy: "mine",
+    libraryPolicy: "ownedOrListed",
     holdClaimsWhenUnlinked: false,
     unlinkedExpiryWarningHours: 12,
     warnUnlinkedAccounts: true,
@@ -65,6 +66,7 @@ watch(
             autoClaimDrops: config.autoClaimDrops,
             autoClaimPoints: config.autoClaimPoints,
             unlinkedPolicy: config.unlinkedPolicy ?? "mine",
+            libraryPolicy: config.libraryPolicy ?? "ownedOrListed",
             holdClaimsWhenUnlinked: config.holdClaimsWhenUnlinked,
             unlinkedExpiryWarningHours: config.unlinkedExpiryWarningHours,
             warnUnlinkedAccounts: config.warnUnlinkedAccounts,
@@ -113,6 +115,7 @@ async function save() {
             autoClaimDrops: form.autoClaimDrops,
             autoClaimPoints: form.autoClaimPoints,
             unlinkedPolicy: form.unlinkedPolicy,
+            libraryPolicy: form.libraryPolicy,
             holdClaimsWhenUnlinked: form.holdClaimsWhenUnlinked,
             unlinkedExpiryWarningHours: Number(form.unlinkedExpiryWarningHours),
             warnUnlinkedAccounts: form.warnUnlinkedAccounts,
@@ -250,6 +253,43 @@ const inputStyle = {
                 <span class="text-[13px]">Claim channel points bonuses</span>
                 <el-switch v-model="form.autoClaimPoints" />
             </label>
+        </section>
+
+        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Which games to mine
+            </h2>
+            <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
+                Twitch runs campaigns for hundreds of games at once. Watching one you neither
+                own nor asked for earns a reward you cannot use.
+            </p>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Limit to games I own</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Your
+                        <RouterLink to="/priorities" class="underline" :style="{ color: 'var(--accent)' }">priority list</RouterLink>
+                        always counts as owned &mdash; that is how you include anything Steam
+                        cannot see, like an Epic or console title, or a category such as
+                        &ldquo;Special Events&rdquo;.
+                    </span>
+                </span>
+                <select v-model="form.libraryPolicy" class="px-2 py-1.5 rounded-lg text-[12px] outline-none shrink-0 max-w-[210px]" :style="inputStyle">
+                    <option value="ownedOrListed">Owned or on my list</option>
+                    <option value="all">Any game with a campaign</option>
+                </select>
+            </label>
+
+            <p v-if="form.libraryPolicy === 'ownedOrListed' && !steam?.connected"
+               class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                No Steam library connected, so this is currently inactive &mdash; every game is
+                being mined. Connect Steam below to apply it.
+            </p>
+            <p v-else-if="form.libraryPolicy === 'ownedOrListed'"
+               class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                Active &mdash; matching against {{ steam?.gameCount || 0 }} owned games.
+            </p>
         </section>
 
         <section class="card p-4 space-y-4 break-inside-avoid mb-4">

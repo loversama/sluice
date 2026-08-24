@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Campaign, compareCampaigns, type RankingOptions } from "../src/models/campaign.js";
+import { Campaign, compareCampaigns, type RankingOptions, isInLibraryScope } from "../src/models/campaign.js";
 import { iso, makeCampaign, makeDrop } from "./fixtures.js";
 
 const rank = (options: Partial<RankingOptions> = {}): RankingOptions => ({
@@ -291,5 +291,88 @@ describe("compareCampaigns", () => {
                 ).toBe(0);
             }
         }
+    });
+});
+
+describe("isInLibraryScope", () => {
+    const owned = (...names: string[]) => (name: string) => names.includes(name);
+
+    const campaign = (gameName: string) =>
+        new Campaign(
+            makeCampaign({ id: "c1", game: { id: "g1", displayName: gameName } }),
+        );
+
+    it("mines a game the user owns on Steam", () => {
+        expect(
+            isInLibraryScope(campaign("Rust"), {
+                policy: "ownedOrListed",
+                priorityGames: [],
+                owns: owned("Rust"),
+            }),
+        ).toBe(true);
+    });
+
+    it("skips a game the user neither owns nor asked for", () => {
+        expect(
+            isInLibraryScope(campaign("Some Mobile Gacha"), {
+                policy: "ownedOrListed",
+                priorityGames: ["Rust"],
+                owns: owned("Rust"),
+            }),
+        ).toBe(false);
+    });
+
+    it("mines an unowned game that is on the priority list", () => {
+        // The escape hatch for anything Steam cannot see - an Epic or console title, or a
+        // Twitch category like "Special Events" that is not a game at all.
+        expect(
+            isInLibraryScope(campaign("Special Events"), {
+                policy: "ownedOrListed",
+                priorityGames: ["Special Events"],
+                owns: owned("Rust"),
+            }),
+        ).toBe(true);
+    });
+
+    it("matches a priority entry regardless of case", () => {
+        expect(
+            isInLibraryScope(campaign("Black Desert"), {
+                policy: "ownedOrListed",
+                priorityGames: ["black desert"],
+                owns: owned(),
+            }),
+        ).toBe(true);
+    });
+
+    it("matches a priority entry given by game id", () => {
+        expect(
+            isInLibraryScope(campaign("Black Desert"), {
+                policy: "ownedOrListed",
+                priorityGames: ["g1"],
+                owns: owned(),
+            }),
+        ).toBe(true);
+    });
+
+    it("mines everything when no library is loaded", () => {
+        // Without a library there is nothing to check ownership against; applying the rule
+        // would quietly shrink mining to the priority list.
+        expect(
+            isInLibraryScope(campaign("Anything At All"), {
+                policy: "ownedOrListed",
+                priorityGames: [],
+                owns: null,
+            }),
+        ).toBe(true);
+    });
+
+    it("mines everything when the policy is turned off", () => {
+        expect(
+            isInLibraryScope(campaign("Some Mobile Gacha"), {
+                policy: "all",
+                priorityGames: [],
+                owns: owned("Rust"),
+            }),
+        ).toBe(true);
     });
 });

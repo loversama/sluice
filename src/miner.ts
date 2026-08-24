@@ -2,7 +2,13 @@ import { EventEmitter } from "node:events";
 
 import logger from "./logger.js";
 import type { Config } from "./config.js";
-import { Campaign, compareCampaigns, type Drop, type RankingOptions } from "./models/campaign.js";
+import {
+    Campaign,
+    compareCampaigns,
+    isInLibraryScope,
+    type Drop,
+    type RankingOptions,
+} from "./models/campaign.js";
 import { Channel } from "./models/channel.js";
 import type { AuthState } from "./twitch/auth.js";
 import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
@@ -683,6 +689,9 @@ export class Miner extends EventEmitter {
             if (this.config.excludedGames.some((game) => this.matchesGame(game, campaign))) {
                 return false;
             }
+            if (!this.isInLibraryScope(campaign)) {
+                return false;
+            }
             if (!campaign.isDeliverable && !this.shouldMineUnlinked(campaign)) {
                 return false;
             }
@@ -701,6 +710,27 @@ export class Miner extends EventEmitter {
         const options = this.rankingOptions();
         candidates.sort((a, b) => compareCampaigns(a, b, options));
         return candidates;
+    }
+
+    /**
+     * Whether a campaign is for a game the user actually has a claim on.
+     *
+     * Twitch runs campaigns for hundreds of games at once, and watching one you neither own
+     * nor asked for buys a reward you cannot use. Owning it on Steam counts, and so does
+     * naming it in the priority list - which is the escape hatch for anything Steam does not
+     * know about: a console or Epic title, or a Twitch category like "Special Events" that
+     * is not a game at all.
+     *
+     * Inert until a Steam library is loaded. Without one there is nothing to test ownership
+     * against, and applying the rule would silently reduce mining to the priority list.
+     */
+    private isInLibraryScope(campaign: Campaign): boolean {
+        const steam = this.steam;
+        return isInLibraryScope(campaign, {
+            policy: this.config.libraryPolicy,
+            priorityGames: this.config.priorityGames,
+            owns: steam?.isLoaded ? (name: string) => steam.owns(name) : null,
+        });
     }
 
     /**
@@ -1843,10 +1873,15 @@ export class Miner extends EventEmitter {
         const mineable = [...next.values()].filter(
             (campaign) => campaign.isActive && !campaign.isCompleted,
         );
-        logger.info(`${next.size} campaigns known, ${mineable.length} with work remaining.`);
+        // A filter that silently discards work is hard to trust, so say how much it took.
+        const outOfScope = mineable.filter((campaign) => !this.isInLibraryScope(campaign)).length;
+        const scopeNote = outOfScope > 0 ? `, ${outOfScope} skipped as not owned` : "";
+        logger.info(
+            `${next.size} campaigns known, ${mineable.length} with work remaining${scopeNote}.`,
+        );
         this.pushFeed(
             "info",
-            `Refreshed campaigns: ${next.size} known, ${mineable.length} with work remaining`,
+            `Refreshed campaigns: ${next.size} known, ${mineable.length} with work remaining${scopeNote}`,
         );
         this.emit("campaigns-updated", [...next.values()]);
 

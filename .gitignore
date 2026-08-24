@@ -5,11 +5,15 @@ reference/
 web/node_modules/
 web/dist/
 
-# Runtime state. auth.json holds an OAuth token with full access to the Twitch
-# account, and steam.json holds the Steam Web API key - never commit either.
+# Runtime state, none of which belongs in the repository. Three of these hold
+# credentials: auth.json an OAuth token with full access to the Twitch account,
+# config.json either a Steam Web API key or a SinfulShadows API key, and
+# steam.json the library those fetch. claims.json is drop history - not secret,
+# but still nobody else's business.
 config.json
 auth.json
 steam.json
 state.json
+claims.json
 cache/
 data/

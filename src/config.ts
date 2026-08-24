@@ -1,7 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 import type { LogLevel } from "./logger.js";
-import type { PriorityMode } from "./models/campaign.js";
+import type { LibraryPolicy, PriorityMode } from "./models/campaign.js";
+
+export type { LibraryPolicy };
 
 /**
  * How unlinked campaigns are treated.
@@ -24,6 +26,17 @@ export interface Config {
     priorityGames: string[];
     /** Games to never mine, whatever the priority mode says. */
     excludedGames: string[];
+    /**
+     * Restrict mining to games you own on Steam or named in `priorityGames`.
+     *
+     * Twitch runs campaigns for hundreds of games, and watch time spent on one you do not
+     * own and did not ask for earns a reward you will never use. Defaults to "ownedOrListed"
+     * for that reason.
+     *
+     * Has no effect until a Steam library is loaded - without one there is nothing to check
+     * ownership against, and applying it would leave nothing mineable.
+     */
+    libraryPolicy: LibraryPolicy;
     /**
      * How campaigns outside `priorityGames` are ordered against each other.
      * "priority_only" mines nothing outside the list.
@@ -128,6 +141,7 @@ export const DEFAULT_CONFIG: Config = {
     priorityGames: [],
     excludedGames: [],
     priorityMode: "ending_soonest",
+    libraryPolicy: "ownedOrListed",
     preferredChannels: [],
     blockedChannels: [],
     broadcasterLanguages: [],

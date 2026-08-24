@@ -318,6 +318,46 @@ export class Campaign {
  * How campaigns outside the explicit priority list are ordered against each other.
  * The priority list always wins; this only decides what happens below it.
  */
+/**
+ * Which campaigns are eligible to mine at all, once a Steam library is available.
+ *
+ * Separate from the unlinked-account policy: this is about owning the game, that is about
+ * whether the reward can reach you. A campaign has to pass both.
+ */
+export type LibraryPolicy = "ownedOrListed" | "all";
+
+export interface LibraryScopeOptions {
+    policy: LibraryPolicy;
+    priorityGames: string[];
+    /**
+     * Whether the user owns a game, or null when no library is loaded. Passed in so this
+     * module stays free of Steam concerns, as with {@link RankingOptions.steamScore}.
+     */
+    owns: ((gameName: string) => boolean) | null;
+}
+
+/**
+ * Whether a campaign is for a game the user actually has a claim on.
+ *
+ * Twitch runs campaigns for hundreds of games at once, and watching one you neither own nor
+ * asked for buys a reward you cannot use. Owning it on Steam counts, and so does naming it
+ * in the priority list - the escape hatch for everything Steam cannot see: an Epic or
+ * console title, or a Twitch category like "Special Events" that is not a game at all.
+ *
+ * Inert with no library loaded. There would be nothing to test ownership against, and
+ * applying the rule anyway would silently shrink mining to the priority list.
+ */
+export function isInLibraryScope(campaign: Campaign, options: LibraryScopeOptions): boolean {
+    if (options.policy !== "ownedOrListed" || !options.owns) {
+        return true;
+    }
+    const listed = options.priorityGames.some(
+        (game) =>
+            game === campaign.gameId || game.toLowerCase() === campaign.gameName.toLowerCase(),
+    );
+    return listed || options.owns(campaign.gameName);
+}
+
 export type PriorityMode =
     /** Mine nothing outside the priority list. */
     | "priority_only"
