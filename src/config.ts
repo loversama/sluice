@@ -13,6 +13,9 @@ import type { PriorityMode } from "./models/campaign.js";
  */
 export type UnlinkedPolicy = "mine" | "skip" | "ownedOrChosen";
 
+/** Where the Steam library is read from. See `Config.steam.provider`. */
+export type SteamProvider = "direct" | "sinfulshadows";
+
 export interface Config {
     /**
      * Games to mine, most wanted first. Accepts display names ("Rust") or numeric game IDs.
@@ -89,12 +92,29 @@ export interface Config {
     logLevel: LogLevel;
     steam: {
         /**
+         * Where the library is read from.
+         *
+         * "direct" uses the user's own Steam Web API key. "sinfulshadows" borrows the key
+         * held by sinfulshadows.com, which returns the Steam account linked to the
+         * SinfulShadows account the key belongs to - so no Steam key or ID is needed.
+         */
+        provider: SteamProvider;
+        /**
          * Steam Web API key from https://steamcommunity.com/dev/apikey. Required to read the
-         * library - signing in through Steam establishes identity only.
+         * library - signing in through Steam establishes identity only. "direct" only.
          */
         apiKey?: string;
-        /** 64-bit Steam ID, filled in by signing in through Steam or entered by hand. */
+        /**
+         * 64-bit Steam ID, filled in by signing in through Steam or entered by hand.
+         * "direct" only; the SinfulShadows provider derives it from the linked account.
+         */
         steamId?: string;
+        sinfulshadows: {
+            /** Key created at sinfulshadows.com under Settings -> API keys. */
+            apiKey?: string;
+            /** Overridable so the pair can be run against a local backend. */
+            baseUrl: string;
+        };
         /** Hours between library refreshes. Libraries change rarely. */
         refreshHours: number;
     };
@@ -121,7 +141,11 @@ export const DEFAULT_CONFIG: Config = {
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: true,
     logLevel: "info",
-    steam: { refreshHours: 24 },
+    steam: {
+        provider: "direct",
+        sinfulshadows: { baseUrl: "https://sinfulshadows.com" },
+        refreshHours: 24,
+    },
     notifications: {},
 };
 
@@ -145,9 +169,21 @@ export async function loadConfig(path: string): Promise<Config> {
     const config: Config = {
         ...DEFAULT_CONFIG,
         ...parsed,
-        steam: { ...DEFAULT_CONFIG.steam, ...(parsed.steam ?? {}) },
+        steam: {
+            ...DEFAULT_CONFIG.steam,
+            ...(parsed.steam ?? {}),
+            sinfulshadows: {
+                ...DEFAULT_CONFIG.steam.sinfulshadows,
+                ...(parsed.steam?.sinfulshadows ?? {}),
+            },
+        },
         notifications: { ...DEFAULT_CONFIG.notifications, ...(parsed.notifications ?? {}) },
     };
+
+    // Configs written before the SinfulShadows provider existed used a Steam key directly.
+    if (!config.steam.provider) {
+        config.steam.provider = "direct";
+    }
 
     // Older configs expressed this as a boolean; carry the intent across.
     if (parsed.priorityMode === undefined && parsed.mineUnlistedGames === false) {

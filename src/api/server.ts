@@ -38,7 +38,12 @@ export interface ServerContext {
     getSteamLibrary(): SteamLibrary | null;
     searchGames(term: string): Promise<{ id: string; name: string; boxArtURL: string | null }[]>;
     /** Store credentials and pull the library. Returns the number of games found. */
-    connectSteam(input: { apiKey?: string; steamId?: string }): Promise<number>;
+    connectSteam(input: {
+        provider?: "direct" | "sinfulshadows";
+        apiKey?: string;
+        steamId?: string;
+        sinfulshadowsApiKey?: string;
+    }): Promise<number>;
     refreshSteam(): Promise<number>;
     disconnectSteam(): Promise<void>;
 }
@@ -263,21 +268,46 @@ export class ApiServer {
         if (path === "/api/steam" && method === "GET") {
             const library = this.context.getSteamLibrary();
             const config = this.context.getConfig();
+            const provider = config.steam.provider;
+            const connected =
+                provider === "sinfulshadows"
+                    ? Boolean(config.steam.sinfulshadows.apiKey)
+                    : Boolean(config.steam.steamId && config.steam.apiKey);
             return sendJson(response, 200, {
-                connected: Boolean(config.steam.steamId && config.steam.apiKey),
+                provider,
+                connected,
                 hasApiKey: Boolean(config.steam.apiKey),
+                hasSinfulShadowsKey: Boolean(config.steam.sinfulshadows.apiKey),
+                sinfulshadowsBaseUrl: config.steam.sinfulshadows.baseUrl,
                 steamId: config.steam.steamId ?? null,
                 personaName: library?.personaName ?? null,
                 gameCount: library?.size ?? 0,
+                // Which signal the "recently played" ranking can use - a library read through
+                // a shared key carries no last-played timestamps.
+                recencySignal: library?.recencySignal ?? null,
+                stale: library?.stale ?? false,
                 fetchedAt: library?.fetchedAt ? new Date(library.fetchedAt).toISOString() : null,
             });
         }
 
         if (path === "/api/steam/connect" && method === "POST") {
-            const body = (await readBody(request)) as { apiKey?: string; steamId?: string };
+            const body = (await readBody(request)) as {
+                provider?: "direct" | "sinfulshadows";
+                apiKey?: string;
+                steamId?: string;
+                sinfulshadowsApiKey?: string;
+            };
             // A masked key means "keep the stored one".
             const apiKey = isMasked(body.apiKey) ? undefined : body.apiKey;
-            const count = await this.context.connectSteam({ apiKey, steamId: body.steamId });
+            const sinfulshadowsApiKey = isMasked(body.sinfulshadowsApiKey)
+                ? undefined
+                : body.sinfulshadowsApiKey;
+            const count = await this.context.connectSteam({
+                provider: body.provider,
+                apiKey,
+                steamId: body.steamId,
+                sinfulshadowsApiKey,
+            });
             return sendJson(response, 200, { ok: true, gameCount: count });
         }
 
@@ -366,6 +396,9 @@ export class ApiServer {
         }
         if (merged.steam && isMasked(merged.steam.apiKey)) {
             merged.steam.apiKey = current.steam.apiKey;
+        }
+        if (merged.steam?.sinfulshadows && isMasked(merged.steam.sinfulshadows.apiKey)) {
+            merged.steam.sinfulshadows.apiKey = current.steam.sinfulshadows?.apiKey;
         }
         if (merged.campaignRefreshMinutes < 5) {
             merged.campaignRefreshMinutes = 5;

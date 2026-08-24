@@ -3,7 +3,8 @@ import { dirname } from "node:path";
 
 import logger from "../logger.js";
 import { findBestMatch } from "./matching.js";
-import type { OwnedGame, SteamClient } from "./client.js";
+import type { OwnedGame } from "./client.js";
+import type { LibraryProvider } from "./provider.js";
 
 export interface StoredLibrary {
     steamId: string;
@@ -11,7 +12,19 @@ export interface StoredLibrary {
     /** Unix ms of the last successful fetch. */
     fetchedAt: number;
     games: OwnedGame[];
+    /** True when the data came from a provider's cache rather than live from Steam. */
+    stale?: boolean;
 }
+
+/**
+ * Which field the "recently played" ranking can actually use.
+ *
+ * Steam only fills in a last-played timestamp when the querying API key belongs to the
+ * account being queried, so a library read through a shared key has none. Two-week playtime
+ * is returned either way, and total playtime always exists - so the mode degrades rather
+ * than collapsing into "owned or not".
+ */
+export type RecencyBasis = "lastPlayed" | "playtimeRecent" | "playtimeForever";
 
 /**
  * The user's Steam library, cached on disk and matched against Twitch category names.
@@ -26,6 +39,31 @@ export class SteamLibrary {
     steamId = "";
     personaName = "";
     fetchedAt = 0;
+    stale = false;
+
+    private recencyBasis: RecencyBasis = "lastPlayed";
+
+    /** Which signal `score(.., "recent")` is currently ranking on. */
+    get recencySignal(): RecencyBasis {
+        return this.recencyBasis;
+    }
+
+    /**
+     * Pick the best recency signal the data actually supports.
+     *
+     * Mixing them would be worse than picking one: a unix timestamp and a minute count are
+     * not comparable, so a library where only some games carry a timestamp must still rank
+     * on a single field.
+     */
+    private chooseRecencyBasis(): void {
+        if (this.games.some((game) => game.lastPlayed > 0)) {
+            this.recencyBasis = "lastPlayed";
+        } else if (this.games.some((game) => game.playtimeRecent > 0)) {
+            this.recencyBasis = "playtimeRecent";
+        } else {
+            this.recencyBasis = "playtimeForever";
+        }
+    }
 
     get isLoaded(): boolean {
         return this.games.length > 0;
@@ -46,7 +84,9 @@ export class SteamLibrary {
             this.personaName = stored.personaName;
             this.fetchedAt = stored.fetchedAt;
             this.games = stored.games ?? [];
+            this.stale = stored.stale ?? false;
             this.matchCache.clear();
+            this.chooseRecencyBasis();
             logger.debug(`Loaded ${this.games.length} Steam games from cache`);
             return true;
         } catch {
@@ -61,30 +101,30 @@ export class SteamLibrary {
             personaName: this.personaName,
             fetchedAt: this.fetchedAt,
             games: this.games,
+            stale: this.stale,
         };
         await writeFile(path, JSON.stringify(stored, null, 2));
     }
 
-    /** Pull the library from Steam and replace what we hold. */
-    async refresh(client: SteamClient, steamId: string): Promise<number> {
-        const games = await client.getOwnedGames(steamId);
-        if (games.length === 0) {
-            // Steam returns an empty list for a private profile, indistinguishable from
-            // owning nothing - so say what to check rather than reporting zero games.
-            throw new Error(
-                "Steam returned no games. Set 'Game details' to Public in your Steam privacy " +
-                    "settings, and check the API key belongs to this account.",
-            );
-        }
-        const profile = await client.getProfile(steamId).catch(() => null);
+    /** Pull the library from whichever provider is configured and replace what we hold. */
+    async refresh(provider: LibraryProvider): Promise<number> {
+        const snapshot = await provider.fetchLibrary();
 
-        this.games = games;
-        this.steamId = steamId;
-        this.personaName = profile?.personaName ?? this.personaName;
-        this.fetchedAt = Date.now();
+        this.games = snapshot.games;
+        this.steamId = snapshot.steamId;
+        this.personaName = snapshot.personaName || this.personaName;
+        // The provider's timestamp, not now: cached data must look as old as it is, so the
+        // next cycle retries instead of resting on it for a full refresh interval.
+        this.fetchedAt = snapshot.fetchedAt;
+        this.stale = snapshot.stale ?? false;
         this.matchCache.clear();
-        logger.info(`Steam library: ${games.length} games for ${this.personaName || steamId}`);
-        return games.length;
+        this.chooseRecencyBasis();
+
+        const via = `via ${provider.label}${snapshot.stale ? ", cached" : ""}`;
+        logger.info(
+            `Steam library: ${this.games.length} games for ${this.personaName || this.steamId} (${via})`,
+        );
+        return this.games.length;
     }
 
     /** The owned game corresponding to a Twitch category, or null if not owned. */
@@ -114,9 +154,15 @@ export class SteamLibrary {
             return 0;
         }
         if (by === "recent") {
-            // Fall back to total playtime when a game has never been launched, so owned but
-            // unplayed titles still sort above unowned ones.
-            return game.lastPlayed > 0 ? game.lastPlayed : 1;
+            // Fall back to 1 for a game with no signal at all, so an owned but unplayed title
+            // still sorts above an unowned one.
+            const value =
+                this.recencyBasis === "lastPlayed"
+                    ? game.lastPlayed
+                    : this.recencyBasis === "playtimeRecent"
+                      ? game.playtimeRecent
+                      : game.playtimeForever;
+            return value > 0 ? value : 1;
         }
         return game.playtimeForever > 0 ? game.playtimeForever : 1;
     }

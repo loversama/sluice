@@ -13,9 +13,15 @@ import { AuthExpiredError, StaleQueryHashError, TwitchGql } from "./twitch/gql.j
 import { ApiServer, type DeviceCodeInfo, type ServerContext } from "./api/server.js";
 import { serializeCampaign } from "./api/serialize.js";
 import { SteamClient, resolveSteamId } from "./steam/client.js";
+import { VERSION } from "./version.js";
+import {
+    DirectSteamProvider,
+    SinfulShadowsProvider,
+    LibraryError,
+    type LibraryProvider,
+} from "./steam/provider.js";
 import { SteamLibrary } from "./steam/library.js";
 
-const VERSION = "0.3.0";
 
 const HELP = `
 Twitch Drops Bot - browserless Twitch drop miner
@@ -90,8 +96,15 @@ async function main(): Promise<void> {
     const steamLibrary = new SteamLibrary();
     await steamLibrary.load(steamPath);
 
-    /** Pull the library from Steam, using whatever credentials the config holds. */
-    const refreshSteam = async (): Promise<number> => {
+    /** Build the configured library provider, or explain what is still missing. */
+    const buildSteamProvider = (): LibraryProvider => {
+        if (config.steam.provider === "sinfulshadows") {
+            const { apiKey, baseUrl } = config.steam.sinfulshadows;
+            if (!apiKey) {
+                throw new Error("No SinfulShadows API key configured.");
+            }
+            return new SinfulShadowsProvider(apiKey, baseUrl);
+        }
         const { apiKey, steamId } = config.steam;
         if (!apiKey) {
             throw new Error("No Steam API key configured.");
@@ -99,9 +112,40 @@ async function main(): Promise<void> {
         if (!steamId) {
             throw new Error("No Steam account connected.");
         }
-        const count = await steamLibrary.refresh(new SteamClient(apiKey), steamId);
-        await steamLibrary.save(steamPath);
-        return count;
+        return new DirectSteamProvider(new SteamClient(apiKey), steamId);
+    };
+
+    /**
+     * A rejected SinfulShadows key is worth telling the user about once, not on every
+     * refresh cycle - the library keeps working from cache in the meantime.
+     */
+    let warnedKeyRejected = false;
+
+    /** Pull the library from the configured provider. */
+    const refreshSteam = async (): Promise<number> => {
+        const provider = buildSteamProvider();
+        try {
+            const count = await steamLibrary.refresh(provider);
+            await steamLibrary.save(steamPath);
+            warnedKeyRejected = false;
+            return count;
+        } catch (error) {
+            if (error instanceof LibraryError && error.code === "key_invalid" && !warnedKeyRejected) {
+                warnedKeyRejected = true;
+                await notifier
+                    .send({
+                        title: "SinfulShadows key rejected",
+                        lines: [
+                            error.message,
+                            `Mining continues on the cached library (${steamLibrary.size} games).`,
+                        ],
+                        url: error.actionUrl ?? null,
+                        kind: "warning",
+                    })
+                    .catch(() => {});
+            }
+            throw error;
+        }
     };
 
     const context: ServerContext = {
@@ -130,6 +174,34 @@ async function main(): Promise<void> {
         getSteamLibrary: () => (steamLibrary.isLoaded ? steamLibrary : null),
         searchGames: (term: string) => gqlForSearch.searchGames(term),
         connectSteam: async (input) => {
+            // The SinfulShadows path needs one credential and nothing else: the Steam account
+            // comes from whatever the key's owner linked on the site.
+            if (input.provider === "sinfulshadows") {
+                const apiKey = input.sinfulshadowsApiKey ?? config.steam.sinfulshadows.apiKey;
+                if (!apiKey) {
+                    throw new Error("No SinfulShadows API key given.");
+                }
+                const baseUrl = config.steam.sinfulshadows.baseUrl;
+                // Verify before saving, so a typo is reported rather than stored.
+                const identity = await new SinfulShadowsProvider(apiKey, baseUrl).verify();
+                await context.setConfig({
+                    ...config,
+                    steam: {
+                        ...config.steam,
+                        provider: "sinfulshadows",
+                        sinfulshadows: { ...config.steam.sinfulshadows, apiKey },
+                    },
+                });
+                if (!identity.steamLinked) {
+                    throw new Error(
+                        "Key accepted, but no Steam account is linked to it. Link Steam at " +
+                            `${baseUrl}/settings/connections, then refresh.`,
+                    );
+                }
+                warnedKeyRejected = false;
+                return refreshSteam();
+            }
+
             const apiKey = input.apiKey ?? config.steam.apiKey;
             // Identity first: a profile URL resolves through Steam's community XML view,
             // which needs no key, so the account can be attached before one is supplied.
@@ -141,7 +213,7 @@ async function main(): Promise<void> {
             }
             await context.setConfig({
                 ...config,
-                steam: { ...config.steam, apiKey, steamId },
+                steam: { ...config.steam, provider: "direct", apiKey, steamId },
             });
             // Reading the library is the part that genuinely requires a key.
             if (!apiKey) {
@@ -156,7 +228,13 @@ async function main(): Promise<void> {
         disconnectSteam: async () => {
             await context.setConfig({
                 ...config,
-                steam: { ...config.steam, apiKey: undefined, steamId: undefined },
+                steam: {
+                    ...config.steam,
+                    provider: "direct",
+                    apiKey: undefined,
+                    steamId: undefined,
+                    sinfulshadows: { ...config.steam.sinfulshadows, apiKey: undefined },
+                },
             });
         },
     };
@@ -213,7 +291,11 @@ async function main(): Promise<void> {
     miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
 
     // Refresh the Steam library if it is configured and the cache has gone stale.
-    if (config.steam.apiKey && config.steam.steamId) {
+    const steamConfigured =
+        config.steam.provider === "sinfulshadows"
+            ? Boolean(config.steam.sinfulshadows.apiKey)
+            : Boolean(config.steam.apiKey && config.steam.steamId);
+    if (steamConfigured) {
         const ageHours = (Date.now() - steamLibrary.fetchedAt) / 3_600_000;
         if (!steamLibrary.isLoaded || ageHours >= config.steam.refreshHours) {
             try {

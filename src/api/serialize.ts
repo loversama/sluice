@@ -108,7 +108,14 @@ export function maskConfig(config: Config): Config {
     const mask = (value: string | undefined) => (value ? "********" : "");
     return {
         ...config,
-        steam: { ...config.steam, apiKey: mask(config.steam.apiKey) },
+        steam: {
+            ...config.steam,
+            apiKey: mask(config.steam.apiKey),
+            sinfulshadows: {
+                ...config.steam.sinfulshadows,
+                apiKey: mask(config.steam.sinfulshadows?.apiKey),
+            },
+        },
         notifications: {
             ...(config.notifications.telegram && {
                 telegram: {

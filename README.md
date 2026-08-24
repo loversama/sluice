@@ -111,20 +111,41 @@ Your `priorityGames` list always wins. `priorityMode` decides the order of every
 Connecting Steam lets the bot rank campaigns by the games you actually own and play, and
 shows which Twitch accounts are worth linking.
 
-Two things are needed, both on the Settings page:
+There are two ways to connect, chosen on the Settings page.
+
+#### Through SinfulShadows (no Steam key needed)
+
+If you have a [sinfulshadows.com](https://sinfulshadows.com) account, it can read the library
+on your behalf using the key the site already holds:
+
+1. Link Steam on the site, under **Settings -> Linked Accounts**.
+2. Create a key under **Settings -> API keys**, and paste it into the bot.
+
+The key is shown once and stored hashed; revoke it there if a machine is lost. It only ever
+reads the Steam account *you* linked - the endpoint takes no Steam ID, so a key cannot be
+pointed at anyone else's library. Config: `steam.provider = "sinfulshadows"` and
+`steam.sinfulshadows.apiKey`.
+
+#### With your own Steam Web API key
 
 1. **Your Steam account** - either "Sign in through Steam" (OpenID), or paste a profile URL
    or 17-digit Steam ID.
-2. **A Steam Web API key**, from <https://steamcommunity.com/dev/apikey>. This is
-   unavoidable: signing in proves who you are but grants no access to the library. Your
-   profile's "Game details" must also be set to Public, or Steam returns an empty list.
+2. **A Steam Web API key**, from <https://steamcommunity.com/dev/apikey>. Signing in proves
+   who you are but grants no access to the library. Your profile's "Game details" must also
+   be set to Public, or Steam returns an empty list.
 
-The library is cached in `steam.json` and refreshed every `steam.refreshHours` (default 24),
-since libraries change rarely.
+Either way the library is cached in `steam.json` and refreshed every `steam.refreshHours`
+(default 24), since libraries change rarely. If the provider is unreachable the cached copy
+keeps being used, and mining continues.
 
-**A limitation worth knowing:** Steam exposes no purchase or "date added to library" field -
-`GetOwnedGames` returns playtime and last-played only. `steam_recent` therefore ranks by when
-you last *played* a game, which is the closest signal Valve makes available.
+**Two limitations worth knowing:**
+
+- Steam exposes no purchase or "date added to library" field - `GetOwnedGames` returns
+  playtime and last-played only. `steam_recent` therefore ranks by when you last *played* a
+  game, which is the closest signal Valve makes available.
+- Steam only fills in that last-played time when the querying key belongs to the account
+  being queried. Read through SinfulShadows it is always absent, so `steam_recent` falls back
+  to two-week playtime, then to total playtime. The Settings page says which is in use.
 
 Game titles are matched between Steam and Twitch by normalising both (stripping trademark
 symbols, edition suffixes and punctuation) and comparing word sets. Sequel numbering is
