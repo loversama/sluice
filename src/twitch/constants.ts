@@ -177,3 +177,16 @@ export const QUERIES = {
 } as const satisfies Record<string, PersistedQuery>;
 
 export type QueryName = keyof typeof QUERIES;
+
+/**
+ * Twitch categories whose campaigns are earned on any live channel, not only on channels
+ * listed under that category.
+ *
+ * "Special Events" (509663) is the one that matters in practice: an esports campaign like
+ * EWC lists the participating channels in its allow-list, but those channels stream the
+ * game being played, not the Special Events category. Filtering candidates by category
+ * rejects every one of them and the campaign can never be mined.
+ *
+ * Mirrors DevilXD's SPECIAL_GAME_IDS.
+ */
+export const SPECIAL_CATEGORY_IDS = new Set(["509663", "509672"]);

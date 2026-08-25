@@ -835,8 +835,14 @@ export class Miner extends EventEmitter {
             if (!info?.stream) {
                 continue;
             }
-            // A preferred channel only helps if they are playing the campaign's game.
-            if (info.broadcastSettings?.game?.id !== campaign.gameId) {
+            // A preferred channel only helps if they are playing the campaign's game -
+            // except under a category earned anywhere, where the campaign names its
+            // channels outright and they stream whatever they are actually playing. An
+            // esports campaign's channels are never in the "Special Events" category.
+            if (
+                !campaign.isSpecialCategory &&
+                info.broadcastSettings?.game?.id !== campaign.gameId
+            ) {
                 continue;
             }
             const channel = new Channel(info.id, login.toLowerCase(), login, this.auth, this.gql);
@@ -1826,13 +1832,16 @@ export class Miner extends EventEmitter {
             // concurrent campaigns, not just between tiers of one.
             const ambiguous = ambiguousBenefitNames(next.values());
             for (const campaign of next.values()) {
-                const startedAt = campaign.startAt.getTime();
                 for (const drop of campaign.drops) {
                     if (drop.isClaimed || drop.data.benefitEdges.length === 0) {
                         continue;
                     }
-                    // Every reward in the drop must be owned, and granted no earlier than
-                    // the campaign began - the same reward can recur across seasons.
+                    // Bound the award to this drop's own window, not merely to some point
+                    // after the campaign opened. A reward granted by a neighbouring tier,
+                    // or by a rerun of the same campaign, falls outside it and no longer
+                    // counts as proof this drop was collected. Matches DevilXD.
+                    const openedAt = drop.startAt.getTime();
+                    const closedAt = drop.endAt.getTime();
                     const owned = drop.data.benefitEdges.every((edge) => {
                         const name = edge.benefit.name?.toLowerCase() ?? "";
                         // Matching by name is a fallback for when benefit IDs do not line
@@ -1843,7 +1852,7 @@ export class Miner extends EventEmitter {
                         const awarded =
                             ownedBenefits.get(edge.benefit.id) ??
                             (ambiguous.has(name) ? undefined : ownedBenefits.get(name));
-                        return awarded !== undefined && awarded >= startedAt;
+                        return awarded !== undefined && awarded >= openedAt && awarded < closedAt;
                     });
                     if (owned) {
                         drop.update({

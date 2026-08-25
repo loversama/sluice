@@ -1,4 +1,5 @@
 import type { DropCampaign, TimeBasedDrop } from "../twitch/types.js";
+import { SPECIAL_CATEGORY_IDS } from "../twitch/constants.js";
 
 /**
  * One timed drop within a campaign, tracking our progress toward it.
@@ -193,6 +194,16 @@ export class Campaign {
      * itself, so they arrive with or without a game account link - warning about linking
      * would be wrong, and skipping them as "unlinked" would discard a reward that works.
      */
+    /**
+     * True when this campaign's category is one Twitch earns anywhere.
+     *
+     * Its channels are then not required to be streaming the campaign's own category - see
+     * SPECIAL_CATEGORY_IDS.
+     */
+    get isSpecialCategory(): boolean {
+        return SPECIAL_CATEGORY_IDS.has(this.gameId);
+    }
+
     get isTwitchNativeReward(): boolean {
         const benefits = this.drops.flatMap((drop) => drop.data.benefitEdges);
         if (benefits.length === 0) {
