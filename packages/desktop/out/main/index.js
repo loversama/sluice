@@ -195,6 +195,86 @@ async function importFromDockerData(win) {
     return { imported: false, message: `Import failed: ${message}` };
   }
 }
+const CHECK_INTERVAL_MS = 15 * 60 * 1e3;
+const RETRY_AFTER_MS = 5 * 60 * 1e3;
+class AutoUpdate {
+  constructor(bus) {
+    this.bus = bus;
+  }
+  bus;
+  checkTimer = null;
+  retryTimer = null;
+  updater = null;
+  lastStatus = { status: "idle" };
+  get status() {
+    return this.lastStatus;
+  }
+  publish(status) {
+    this.lastStatus = status;
+    this.bus.emit("update", status);
+  }
+  start(updater) {
+    this.updater = updater;
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true;
+    updater.on("checking-for-update", () => this.publish({ status: "checking" }));
+    updater.on(
+      "update-available",
+      (info) => this.publish({ status: "available", version: info?.version ?? "" })
+    );
+    updater.on("update-not-available", () => this.publish({ status: "idle" }));
+    updater.on(
+      "download-progress",
+      (progress) => this.publish({ status: "downloading", percent: Math.round(progress?.percent ?? 0) })
+    );
+    updater.on("update-downloaded", (info) => {
+      logger.info(`Update ${info?.version ?? ""} downloaded; it will install on quit.`);
+      this.publish({ status: "ready", version: info?.version ?? "" });
+    });
+    updater.on("error", (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      const transient = message.includes("latest.yml") || message.includes("404") || message.includes("ENOTFOUND") || message.includes("ECONNRESET") || message.includes("net::ERR");
+      if (transient) {
+        logger.debug(`Update check deferred: ${message}`);
+        this.publish({ status: "idle" });
+        this.retryTimer?.refresh() ?? (this.retryTimer = setTimeout(() => this.check(), RETRY_AFTER_MS));
+        this.retryTimer?.unref();
+        return;
+      }
+      logger.warn(`Update check failed: ${message}`);
+      this.publish({ status: "error", message });
+    });
+    this.check();
+    this.checkTimer = setInterval(() => this.check(), CHECK_INTERVAL_MS);
+    this.checkTimer.unref();
+  }
+  check() {
+    try {
+      void this.updater?.checkForUpdates();
+    } catch (error) {
+      logger.debug("Update check threw:", error);
+    }
+  }
+  /** Restart into the new version now, rather than waiting for the next quit. */
+  installNow() {
+    try {
+      this.updater?.quitAndInstall();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.publish({ status: "error", message });
+    }
+  }
+  stop() {
+    if (this.checkTimer) {
+      clearInterval(this.checkTimer);
+      this.checkTimer = null;
+    }
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+  }
+}
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -259,6 +339,12 @@ if (!app.requestSingleInstanceLock()) {
       await shell.openPath(logDirectory(app.getPath("userData")));
     });
     ipcMain.handle("desktop:import-docker", () => importFromDockerData(win));
+    ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
+    ipcMain.handle("desktop:check-updates", () => updates?.check());
+    ipcMain.handle("desktop:install-update", () => {
+      reallyQuitting = true;
+      updates?.installNow();
+    });
   };
   let win = null;
   let handle = null;
@@ -267,6 +353,7 @@ if (!app.requestSingleInstanceLock()) {
   let quitting = false;
   let reallyQuitting = false;
   let warnedAboutTray = false;
+  let updates = null;
   app.on("second-instance", () => {
     if (win) {
       if (win.isMinimized()) {
@@ -317,8 +404,13 @@ if (!app.requestSingleInstanceLock()) {
       setLogLevel(handle.context.getConfig().logLevel);
       server = new ApiServer(handle.context, resolveWebDist());
       port = await server.listen("127.0.0.1", 0);
+      updates = new AutoUpdate(handle.bus);
       registerIpc();
       handle.start();
+      if (app.isPackaged) {
+        const { autoUpdater } = await import("electron-updater");
+        updates.start(autoUpdater);
+      }
       try {
         createTray({
           getWindow: () => win,
@@ -380,6 +472,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     event.preventDefault();
     destroyTray();
+    updates?.stop();
     void Promise.resolve(handle?.stop()).catch(() => void 0).finally(() => {
       server?.close();
       app.exit(0);

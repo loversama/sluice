@@ -24,6 +24,10 @@ const bridge = {
     openLogsFolder: (): Promise<void> => ipcRenderer.invoke("desktop:open-logs"),
     importFromDocker: (): Promise<{ imported: boolean; message: string }> =>
         ipcRenderer.invoke("desktop:import-docker"),
+    updateStatus: (): Promise<{ status: string; version?: string; percent?: number }> =>
+        ipcRenderer.invoke("desktop:update-status"),
+    checkForUpdates: (): Promise<void> => ipcRenderer.invoke("desktop:check-updates"),
+    installUpdate: (): Promise<void> => ipcRenderer.invoke("desktop:install-update"),
 };
 
 contextBridge.exposeInMainWorld("desktopBridge", bridge);

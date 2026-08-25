@@ -10,6 +10,7 @@ import { resolveWebDist } from "./resolve-web-dist.js";
 import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
 import { createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { importFromDockerData } from "./import-docker.js";
+import { AutoUpdate } from "./auto-update.js";
 
 /**
  * Only one copy may run.
@@ -30,6 +31,8 @@ if (!app.requestSingleInstanceLock()) {
     /** Set only by an explicit Quit, so closing the window can mean "hide" instead. */
     let reallyQuitting = false;
     let warnedAboutTray = false;
+    /** Built once the app handle exists, so update state rides the dashboard's own stream. */
+    let updates: AutoUpdate | null = null;
 
     app.on("second-instance", () => {
         if (win) {
@@ -166,8 +169,18 @@ if (!app.requestSingleInstanceLock()) {
             // keeps the server's Origin and Host checks satisfied without loosening them.
             port = await server.listen("127.0.0.1", 0);
 
+            // The bus is already the dashboard's SSE stream, so update state reaches the
+            // UI without a second channel.
+            updates = new AutoUpdate(handle.bus);
             registerIpc();
             handle.start();
+
+            // Only a packaged build can update itself; in development this would report
+            // failures against a version that was never released.
+            if (app.isPackaged) {
+                const { autoUpdater } = await import("electron-updater");
+                updates.start(autoUpdater as never);
+            }
 
             // A tray is a nicety; a window is the app. On a desktop with no system tray -
             // some Linux sessions, and any headless environment - Tray construction throws,
@@ -238,6 +251,13 @@ if (!app.requestSingleInstanceLock()) {
             await shell.openPath(logDirectory(app.getPath("userData")));
         });
         ipcMain.handle("desktop:import-docker", () => importFromDockerData(win));
+        ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
+        ipcMain.handle("desktop:check-updates", () => updates?.check());
+        ipcMain.handle("desktop:install-update", () => {
+            // Restarting mid-session ends a mining session, so it is never done unasked.
+            reallyQuitting = true;
+            updates?.installNow();
+        });
     }
 
     app.on("activate", () => {
@@ -260,6 +280,7 @@ if (!app.requestSingleInstanceLock()) {
         // parked in a sleep for a refresh interval, and nobody should watch a window hang
         // for twenty minutes because they clicked close.
         destroyTray();
+        updates?.stop();
         void Promise.resolve(handle?.stop())
             .catch(() => undefined)
             .finally(() => {

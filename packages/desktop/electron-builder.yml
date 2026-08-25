@@ -1,0 +1,52 @@
+appId: dev.loversama.twitchdropsbot
+productName: Twitch Drops Bot
+copyright: Copyright © 2026
+
+directories:
+  output: release/${version}
+  buildResources: resources
+
+files:
+  - "out/**/*"
+  - "!out/**/*.map"
+
+# The dashboard is the same build the container serves. Shipped outside the asar so the
+# server reads it with ordinary file APIs, exactly as it does under Docker.
+extraResources:
+  - from: "../../web/dist"
+    to: "web"
+  - from: "resources/icon.ico"
+    to: "icon.ico"
+
+asar: true
+compression: maximum
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  # Per-user, no elevation. Hearth asks for administrator because it installs a Windows
+  # service; this mines drops and has no business holding that.
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Twitch Drops Bot
+  deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+  owner: loversama
+  repo: twitch-drops-bot
+  # Public on purpose. A private repo means the app needs a token to fetch its own updates,
+  # and the only way to give it one is to bake it into the installer - which ships a
+  # credential to every user. Updates matter here more than most: Twitch rotates the
+  # GraphQL hashes without warning, and an update is the only way to get the fix out.
+  private: false
+  vPrefixedTagName: true
+  releaseType: release
