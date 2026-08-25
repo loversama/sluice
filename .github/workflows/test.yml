@@ -42,9 +42,13 @@ jobs:
         run: docker build -t sluice:ci .
       - name: It should at least start and answer
         run: |
-          docker run -d --name sluice-ci -p 127.0.0.1:4400:4400 \
-            -v "$PWD/ci-data:/data" sluice:ci
-          for i in $(seq 1 30); do
+          # No bind mount: Docker would create the directory owned by root, and the
+          # image runs as an unprivileged user that then cannot write its config - which
+          # looks like the app failing rather than the mount being wrong. The image already
+          # provides /data with the right ownership.
+          docker run -d --name sluice-ci -p 127.0.0.1:4400:4400 sluice:ci
+          # Signing in is a device-code flow against Twitch, so first start is not instant.
+          for i in $(seq 1 60); do
             if curl -sf -m 2 http://127.0.0.1:4400/ >/dev/null; then
               echo "Dashboard answered after ${i}s."
               exit 0
