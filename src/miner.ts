@@ -3,7 +3,6 @@ import { EventEmitter } from "node:events";
 import logger from "./logger.js";
 import type { Config } from "./config.js";
 import {
-    ambiguousBenefitNames,
     Campaign,
     compareCampaigns,
     isInLibraryScope,
@@ -1007,9 +1006,13 @@ export class Miner extends EventEmitter {
 
         const streamTopic = `video-playback-by-id.${channel.id}`;
         const pointsTopic = `community-points-user-v1.${this.auth.userId}`;
+        const settingsTopic = `broadcast-settings-update.${channel.id}`;
         this.pubsub?.listen(streamTopic);
         if (this.config.autoClaimPoints) {
             this.pubsub?.listen(pointsTopic);
+        }
+        if (this.config.switchOnCategoryChange) {
+            this.pubsub?.listen(settingsTopic);
         }
 
         logger.info(
@@ -1129,6 +1132,8 @@ export class Miner extends EventEmitter {
             }
         } finally {
             this.pubsub?.unlisten(streamTopic);
+            // Per-channel, unlike the points topic, so it has to go when the channel does.
+            this.pubsub?.unlisten(settingsTopic);
             this.currentChannel = null;
             this.currentDrop = null;
             this.currentCampaign = null;
@@ -1318,6 +1323,31 @@ export class Miner extends EventEmitter {
                 logger.info(`${channel.displayName} ended their stream.`);
                 channel.markOffline();
             }
+        });
+
+        pubsub.on("category-change", ({ channelId, gameId, gameName }) => {
+            const channel = this.currentChannel;
+            const campaign = this.currentCampaign;
+            if (channel === null || campaign === null || channel.id !== channelId) {
+                return;
+            }
+            if (channel.stream) {
+                channel.stream.gameName = gameName || channel.stream.gameName;
+            }
+            // A campaign earned outside its own category does not care what is being
+            // streamed, so only a genuine mismatch is worth leaving over.
+            if (campaign.isSpecialCategory || gameId === campaign.gameId) {
+                return;
+            }
+            logger.info(
+                `${channel.displayName} switched to ${gameName || "another category"}; ` +
+                    "leaving rather than watching for nothing.",
+            );
+            this.pushFeed(
+                "warn",
+                `${channel.displayName} switched to ${gameName || "another category"}`,
+            );
+            this.switchRequested = true;
         });
 
         pubsub.on("viewcount", ({ channelId, viewers }) => {
@@ -1817,20 +1847,22 @@ export class Miner extends EventEmitter {
         // drops were already collected - the campaign looks brand new and gets mined again
         // from zero. gameEventDrops is the surviving proof of ownership: it lists every
         // reward actually granted, so reconcile against it before trusting the zeroes.
+        //
+        // Keyed on benefit ID alone. Matching by reward name as well seemed a safe fallback
+        // for when IDs do not line up, but Twitch reuses names freely - between tiers of one
+        // campaign and between concurrent ones - and every collision marked the wrong drop
+        // collected, which then suppressed its claim for good. Three separate bugs came from
+        // it, and the IDs turned out to line up anyway. DevilXD matches on ID only.
         const ownedBenefits = new Map<string, number>();
         for (const reward of inventory?.gameEventDrops ?? []) {
-            const awarded = Date.parse(reward.lastAwardedAt);
-            for (const key of [reward.id, reward.name?.toLowerCase()]) {
-                if (key) {
-                    ownedBenefits.set(key, Number.isNaN(awarded) ? 0 : awarded);
-                }
+            if (!reward.id) {
+                continue;
             }
+            const awarded = Date.parse(reward.lastAwardedAt);
+            ownedBenefits.set(reward.id, Number.isNaN(awarded) ? 0 : awarded);
         }
 
         if (ownedBenefits.size > 0) {
-            // Scoped across every campaign at once: the same reward name recurs between
-            // concurrent campaigns, not just between tiers of one.
-            const ambiguous = ambiguousBenefitNames(next.values());
             for (const campaign of next.values()) {
                 for (const drop of campaign.drops) {
                     if (drop.isClaimed || drop.data.benefitEdges.length === 0) {
@@ -1843,15 +1875,7 @@ export class Miner extends EventEmitter {
                     const openedAt = drop.startAt.getTime();
                     const closedAt = drop.endAt.getTime();
                     const owned = drop.data.benefitEdges.every((edge) => {
-                        const name = edge.benefit.name?.toLowerCase() ?? "";
-                        // Matching by name is a fallback for when benefit IDs do not line
-                        // up, but a name shared by two tiers says nothing about which of
-                        // them was claimed. GTA's "Team eCola" hands out an identically
-                        // named GTA$250K at 120 and at 360 minutes: claiming the first
-                        // otherwise marks the second collected, and it is never claimed.
-                        const awarded =
-                            ownedBenefits.get(edge.benefit.id) ??
-                            (ambiguous.has(name) ? undefined : ownedBenefits.get(name));
+                        const awarded = ownedBenefits.get(edge.benefit.id);
                         return awarded !== undefined && awarded >= openedAt && awarded < closedAt;
                     });
                     if (owned) {

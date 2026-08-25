@@ -12,6 +12,7 @@ const form = reactive({
     autoClaimPoints: true,
     unlinkedPolicy: "mine",
     libraryPolicy: "ownedOrListed",
+    switchOnCategoryChange: false,
     holdClaimsWhenUnlinked: false,
     unlinkedExpiryWarningHours: 12,
     warnUnlinkedAccounts: true,
@@ -67,6 +68,7 @@ watch(
             autoClaimPoints: config.autoClaimPoints,
             unlinkedPolicy: config.unlinkedPolicy ?? "mine",
             libraryPolicy: config.libraryPolicy ?? "ownedOrListed",
+            switchOnCategoryChange: config.switchOnCategoryChange ?? false,
             holdClaimsWhenUnlinked: config.holdClaimsWhenUnlinked,
             unlinkedExpiryWarningHours: config.unlinkedExpiryWarningHours,
             warnUnlinkedAccounts: config.warnUnlinkedAccounts,
@@ -116,6 +118,7 @@ async function save() {
             autoClaimPoints: form.autoClaimPoints,
             unlinkedPolicy: form.unlinkedPolicy,
             libraryPolicy: form.libraryPolicy,
+            switchOnCategoryChange: form.switchOnCategoryChange,
             holdClaimsWhenUnlinked: form.holdClaimsWhenUnlinked,
             unlinkedExpiryWarningHours: Number(form.unlinkedExpiryWarningHours),
             warnUnlinkedAccounts: form.warnUnlinkedAccounts,
@@ -252,6 +255,19 @@ const inputStyle = {
             <label class="flex items-center justify-between gap-4">
                 <span class="text-[13px]">Claim channel points bonuses</span>
                 <el-switch v-model="form.autoClaimPoints" />
+            </label>
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Leave instantly on a category change</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Watch time stops counting when a streamer switches to a category the
+                        campaign does not cover. This is already noticed either way &mdash; the
+                        drop stops progressing and the channel is dropped after about fifteen
+                        minutes. Turning this on subscribes to the change and reacts at once,
+                        at the cost of one extra subscription per channel watched.
+                    </span>
+                </span>
+                <el-switch v-model="form.switchOnCategoryChange" />
             </label>
         </section>
 

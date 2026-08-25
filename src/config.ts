@@ -62,6 +62,17 @@ export interface Config {
      * Campaigns are sometimes extended, so this defaults to on.
      */
     attemptImpossibleCampaigns: boolean;
+    /**
+     * Leave a channel the moment it switches to a category the campaign does not cover.
+     *
+     * Watch time only counts while the streamer is in the campaign's category, so a mid-
+     * stream switch earns nothing. That is already caught without this: the drop stops
+     * progressing and the stall watchdog moves on after about fifteen minutes. Subscribing
+     * to the change makes it immediate, at the cost of a second PubSub topic for every
+     * channel watched, so it is off by default and worth turning on only if those fifteen
+     * minutes matter more than the extra subscription.
+     */
+    switchOnCategoryChange: boolean;
     /** Claim drops automatically once they are ready. */
     autoClaimDrops: boolean;
     /** Claim channel points bonuses while watching. */
@@ -147,6 +158,7 @@ export const DEFAULT_CONFIG: Config = {
     broadcasterLanguages: [],
     campaignRefreshMinutes: 20,
     attemptImpossibleCampaigns: true,
+    switchOnCategoryChange: false,
     autoClaimDrops: true,
     autoClaimPoints: true,
     warnUnlinkedAccounts: true,

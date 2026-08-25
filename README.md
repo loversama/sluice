@@ -85,6 +85,7 @@ there is no 2FA prompt to scrape. To sign out, run with `--logout`.
 | `preferredChannels` | `[]` | Try these channels before searching the directory. |
 | `campaignRefreshMinutes` | `20` | Minutes between campaign refreshes (minimum 5). |
 | `attemptImpossibleCampaigns` | `true` | Work on campaigns that look too short to finish — they often get extended. |
+| `switchOnCategoryChange` | `false` | Leave a channel the instant it switches to a category the campaign does not cover. Off by default: the stall watchdog already catches this within ~15 minutes, and enabling it costs a PubSub subscription per watched channel. |
 | `autoClaimDrops` | `true` | Claim drops as soon as they are ready. |
 | `autoClaimPoints` | `true` | Claim channel points bonuses while watching. |
 | `warnUnlinkedAccounts` | `true` | Warn when rewards will not reach the game because accounts are not linked. |

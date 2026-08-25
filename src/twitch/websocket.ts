@@ -24,6 +24,8 @@ export interface PubSubEvents {
     "stream-up": [{ channelId: string }];
     "stream-down": [{ channelId: string }];
     viewcount: [{ channelId: string; viewers: number }];
+    /** The channel changed category mid-stream; watch time may no longer count. */
+    "category-change": [{ channelId: string; gameId: string; gameName: string }];
     "points-claim-available": [{ channelId: string; claimId: string }];
     /** A drop reward landed; the inventory is now stale. */
     "reward-notification": [{ notificationId: string }];
@@ -225,6 +227,17 @@ class PubSubSocket extends EventEmitter {
                         viewers: Number(message["viewers"] ?? 0),
                     });
                 }
+                return;
+
+            case "broadcast-settings-update":
+                // Fired when a streamer edits their title, tags or category mid-stream.
+                // Only the category matters here: watch time stops counting the moment the
+                // channel leaves the campaign's own category.
+                this.emit("category-change", {
+                    channelId: targetId,
+                    gameId: String(message["game_id"] ?? ""),
+                    gameName: String(message["game"] ?? ""),
+                });
                 return;
 
             case "onsite-notifications":

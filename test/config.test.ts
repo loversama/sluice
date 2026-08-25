@@ -81,3 +81,15 @@ describe("secret masking", () => {
         expect(isMasked(undefined)).toBe(false);
     });
 });
+
+describe("category-change switching", () => {
+    it("stays off unless asked for, so the stall watchdog remains the default", async () => {
+        const config = await loadConfig(await tempConfig({ priorityGames: [] }));
+        expect(config.switchOnCategoryChange).toBe(false);
+    });
+
+    it("honours an explicit opt-in", async () => {
+        const config = await loadConfig(await tempConfig({ switchOnCategoryChange: true }));
+        expect(config.switchOnCategoryChange).toBe(true);
+    });
+});

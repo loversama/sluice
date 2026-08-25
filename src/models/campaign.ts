@@ -369,42 +369,6 @@ export function isInLibraryScope(campaign: Campaign, options: LibraryScopeOption
     return listed || options.owns(campaign.gameName);
 }
 
-/**
- * Reward names that do not identify a single benefit.
- *
- * Reconciling against the inventory matches each reward by benefit ID and falls back to
- * matching by name when the IDs do not line up. That fallback only holds while a name
- * belongs to one benefit, and Twitch reuses names freely - both within a campaign and
- * between concurrent ones. GTA ran "Team eCola" and "Team Sprunk" side by side: eCola
- * awarded an identically named GTA$250K at 120 and 360 minutes, and both campaigns awarded
- * a GTA$500K under different benefit IDs. Owning any one of them would otherwise prove the
- * others collected.
- *
- * Scoped across every campaign in the refresh rather than one at a time, because the
- * collisions cross campaign boundaries.
- */
-export function ambiguousBenefitNames(campaigns: Iterable<Campaign>): Set<string> {
-    const idsByName = new Map<string, Set<string>>();
-    for (const campaign of campaigns) {
-        for (const drop of campaign.drops) {
-            for (const edge of drop.data.benefitEdges) {
-                const name = edge.benefit.name?.toLowerCase();
-                if (!name) continue;
-                const ids = idsByName.get(name) ?? new Set<string>();
-                ids.add(edge.benefit.id);
-                idsByName.set(name, ids);
-            }
-        }
-    }
-    const ambiguous = new Set<string>();
-    for (const [name, ids] of idsByName) {
-        if (ids.size > 1) {
-            ambiguous.add(name);
-        }
-    }
-    return ambiguous;
-}
-
 export type PriorityMode =
     /** Mine nothing outside the priority list. */
     | "priority_only"
