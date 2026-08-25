@@ -214,6 +214,28 @@ async function disconnectSteam() {
     ssApiKey.value = "";
     ElMessage.info("Steam disconnected.");
 }
+const signingOut = ref(false);
+async function signOut() {
+    const name = store.auth.user?.displayName ?? "this account";
+    const ok = window.confirm(
+        `Sign out of ${name}?\n\n` +
+            "The token is revoked with Twitch and the bot restarts to the login screen. " +
+            "Your claimed drops, settings and Steam library are kept, and come back when " +
+            "you sign in again.",
+    );
+    if (!ok) return;
+    signingOut.value = true;
+    try {
+        await fetch("/api/auth/logout", { method: "POST" });
+        ElMessage.success("Signed out. Restarting...");
+        // The daemon exits and the container brings it back at the login screen.
+        setTimeout(() => window.location.reload(), 3000);
+    } catch (error) {
+        signingOut.value = false;
+        ElMessage.error(error.message);
+    }
+}
+
 async function test() {
     testing.value = true;
     try {
@@ -269,6 +291,31 @@ const inputStyle = {
                 </span>
                 <el-switch v-model="form.switchOnCategoryChange" />
             </label>
+        </section>
+
+        <section class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Twitch account
+            </h2>
+            <div class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
+                <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium">
+                        {{ store.auth.user?.displayName || "Not signed in" }}
+                    </p>
+                    <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Signing out revokes the token with Twitch. Your drops, settings and
+                        Steam library are kept for when you come back.
+                    </p>
+                </div>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+                    :style="{ color: 'var(--danger)' }"
+                    :disabled="signingOut"
+                    @click="signOut"
+                >
+                    {{ signingOut ? "Signing out..." : "Sign out" }}
+                </button>
+            </div>
         </section>
 
         <section class="card p-4 space-y-4 break-inside-avoid mb-4">

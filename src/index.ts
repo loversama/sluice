@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -71,8 +72,12 @@ async function main(): Promise<void> {
         return;
     }
 
-    const configPath = resolve(values.config!);
+    let configPath = resolve(values.config!);
     const authPath = resolve(values.auth!);
+    // Everything but the credentials themselves lives under a per-account directory beside
+    // them, so signing out keeps a user's drop history and settings, and a second account
+    // starts clean instead of inheriting the first one's.
+    const dataDir = dirname(authPath);
 
     let config = await loadConfig(configPath);
     setLogLevel((values.log as LogLevel) ?? config.logLevel);
@@ -92,7 +97,9 @@ async function main(): Promise<void> {
     let authStatus: "pending" | "ok" = "pending";
     let deviceCode: DeviceCodeInfo | null = null;
 
-    const steamPath = resolve(values.steam!);
+    let steamPath = resolve(values.steam!);
+    let statePath = resolve(values.state!);
+    let claimsPath = resolve(values.claims!);
     const steamLibrary = new SteamLibrary();
     await steamLibrary.load(steamPath);
 
@@ -224,6 +231,25 @@ async function main(): Promise<void> {
             }
             return refreshSteam();
         },
+        logout: async () => {
+            logger.info("Signing out by request.");
+            // Revoke first: deleting the file alone leaves the token live on Twitch, still
+            // listed among the account's authorised connections.
+            const revoked = await auth.revoke();
+            await rm(authPath, { force: true });
+            // Only the credentials go. The account's directory - drop history, settings,
+            // Steam library - is left untouched so signing back in restores it.
+            logger.info(
+                revoked
+                    ? "Token revoked and credentials removed."
+                    : "Credentials removed; Twitch did not confirm the revocation.",
+            );
+            miner?.stop();
+            // The device-code flow runs once, at startup, so the way back to it is a
+            // restart. Docker brings the container straight back to the login screen.
+            setTimeout(() => process.exit(0), 250);
+            return { revoked };
+        },
         refreshSteam,
         disconnectSteam: async () => {
             await context.setConfig({
@@ -279,6 +305,38 @@ async function main(): Promise<void> {
         await auth.save(authPath);
     }
 
+    // Now that we know who is signed in, move to that account's own directory. The flat
+    // files from before this existed are adopted once, so an upgrade keeps its history.
+    {
+        const userDir = join(dataDir, "users", auth.userId);
+        await mkdir(userDir, { recursive: true });
+        const adopt = async (legacy: string, owned: string): Promise<string> => {
+            const hasOwn = await readFile(owned).then(
+                () => true,
+                () => false,
+            );
+            if (!hasOwn) {
+                const legacyContents = await readFile(legacy, "utf8").catch(() => null);
+                if (legacyContents !== null) {
+                    await writeFile(owned, legacyContents);
+                    logger.info(`Adopted ${basename(legacy)} for ${auth.login}.`);
+                }
+            }
+            return owned;
+        };
+        configPath = await adopt(configPath, join(userDir, "config.json"));
+        steamPath = await adopt(steamPath, join(userDir, "steam.json"));
+        statePath = await adopt(statePath, join(userDir, "state.json"));
+        claimsPath = await adopt(claimsPath, join(userDir, "claims.json"));
+
+        // Re-read through the account's own copies: a returning user has settings and a
+        // library of their own, and the pre-login load only ever saw the defaults.
+        config = await loadConfig(configPath);
+        notifier = new NotifierGroup(config);
+        await steamLibrary.load(steamPath);
+        logger.info(`Data for ${auth.login}: ${userDir}`);
+    }
+
     authStatus = "ok";
     deviceCode = null;
     bus.emit("auth", { status: "ok", user: { id: auth.userId, displayName: auth.login } });
@@ -286,8 +344,8 @@ async function main(): Promise<void> {
     const gql = new TwitchGql(auth);
     miner = new Miner(auth, gql, config);
     // Restored before mining starts, so a restart does not re-send alerts already sent.
-    await miner.loadPersistedState(resolve(values.state!));
-    await miner.loadClaimHistory(resolve(values.claims!));
+    await miner.loadPersistedState(statePath);
+    await miner.loadClaimHistory(claimsPath);
     miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
 
     // Refresh the Steam library if it is configured and the cache has gone stale.

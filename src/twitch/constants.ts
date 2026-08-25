@@ -79,6 +79,7 @@ export const GQL_URL = "https://gql.twitch.tv/gql";
 export const PUBSUB_URL = "wss://pubsub-edge.twitch.tv/v1";
 export const OAUTH_DEVICE_URL = "https://id.twitch.tv/oauth2/device";
 export const OAUTH_TOKEN_URL = "https://id.twitch.tv/oauth2/token";
+export const OAUTH_REVOKE_URL = "https://id.twitch.tv/oauth2/revoke";
 export const OAUTH_VALIDATE_URL = "https://id.twitch.tv/oauth2/validate";
 export const USHER_URL = "https://usher.ttvnw.net/api/channel/hls";
 

@@ -44,6 +44,8 @@ export interface ServerContext {
         steamId?: string;
         sinfulshadowsApiKey?: string;
     }): Promise<number>;
+    /** Revoke the Twitch token, drop the credentials, and restart into the login screen. */
+    logout(): Promise<{ revoked: boolean }>;
     refreshSteam(): Promise<number>;
     disconnectSteam(): Promise<void>;
 }
@@ -288,6 +290,11 @@ export class ApiServer {
                 stale: library?.stale ?? false,
                 fetchedAt: library?.fetchedAt ? new Date(library.fetchedAt).toISOString() : null,
             });
+        }
+
+        if (path === "/api/auth/logout" && method === "POST") {
+            const result = await this.context.logout();
+            return sendJson(response, 200, { ok: true, ...result });
         }
 
         if (path === "/api/steam/connect" && method === "POST") {

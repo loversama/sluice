@@ -9,6 +9,7 @@ import {
     DEFAULT_CLIENT,
     OAUTH_DEVICE_URL,
     OAUTH_TOKEN_URL,
+    OAUTH_REVOKE_URL,
     OAUTH_VALIDATE_URL,
     randomAndroidUserAgent,
     type ClientInfo,
@@ -160,6 +161,52 @@ export class AuthState {
         this.userId = data.user_id;
         this.login = data.login;
         return true;
+    }
+
+    /**
+     * Tell Twitch to forget this token, then forget it here.
+     *
+     * Deleting the credential file alone would leave the token live on Twitch's side until
+     * it expired on its own - still able to read the account, still listed among the user's
+     * authorised connections. Revoking is the part that actually ends the session.
+     *
+     * Returns false if Twitch refused; the local state is cleared either way, since the
+     * caller has already decided to sign out.
+     */
+    async revoke(): Promise<boolean> {
+        const token = this.accessToken;
+        if (!token) {
+            this.clear();
+            return true;
+        }
+        let revoked = false;
+        try {
+            const response = await request(OAUTH_REVOKE_URL, {
+                method: "POST",
+                headers: { "content-type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    client_id: this.client.clientId,
+                    token,
+                }).toString(),
+            });
+            await response.body.dump();
+            revoked = response.statusCode === 200;
+            if (!revoked) {
+                logger.warn(`Twitch refused to revoke the token (${response.statusCode}).`);
+            }
+        } catch (error) {
+            logger.warn(`Could not reach Twitch to revoke the token: ${(error as Error).message}`);
+        }
+        this.clear();
+        return revoked;
+    }
+
+    /** Drop every credential held in memory. */
+    clear(): void {
+        this.accessToken = "";
+        this.refreshToken = undefined;
+        this.userId = "";
+        this.login = "";
     }
 
     /**
