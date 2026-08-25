@@ -102,7 +102,72 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+/** Loopback names a browser can legitimately reach this server by. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
+
+/** The hostname a request claims it reached us by, without the port. */
+export function hostnameOf(value: string): string {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed.startsWith("[")) {
+        return trimmed.slice(0, trimmed.indexOf("]") + 1);
+    }
+    const colon = trimmed.lastIndexOf(":");
+    return colon === -1 ? trimmed : trimmed.slice(0, colon);
+}
+
+/**
+ * Whether a Host header names somewhere this server is actually served from.
+ *
+ * Binding to loopback is not on its own a defence. A hostile page can point a domain it
+ * controls at 127.0.0.1, wait for the browser's DNS cache to turn over, and from then on its
+ * scripts are same-origin with whatever is listening there - free to read replies, not merely
+ * send requests. Pinning the Host closes that for the price of a string compare.
+ */
+export function isKnownHost(
+    hostHeader: string | undefined,
+    options: { boundHost: string; allowedHosts: readonly string[] },
+): boolean {
+    if (!hostHeader) {
+        // HTTP/1.1 requires it; its absence is either broken or deliberate.
+        return false;
+    }
+    const host = hostnameOf(hostHeader);
+    if (LOOPBACK_HOSTS.has(host) || host === options.boundHost.toLowerCase()) {
+        return true;
+    }
+    return options.allowedHosts.some((allowed) => allowed.trim().toLowerCase() === host);
+}
+
+/**
+ * Whether a browser is sending this from a page on some other origin.
+ *
+ * A form post needs no preflight, so any site you happen to visit could otherwise reach a
+ * POST here - signing you out and revoking your Twitch token without a line of script running
+ * on your dashboard. Browsers attach Origin to these; a missing one means the request did not
+ * come from a page, which is how curl and the CLI still work.
+ */
+export function isCrossOrigin(
+    originHeader: string | undefined,
+    hostHeader: string | undefined,
+): boolean {
+    if (!originHeader) {
+        return false;
+    }
+    if (originHeader === "null") {
+        // A sandboxed or file:// page. Opaque, so never same-origin with us.
+        return true;
+    }
+    try {
+        return new URL(originHeader).host.toLowerCase() !== (hostHeader ?? "").toLowerCase();
+    } catch {
+        return true;
+    }
+}
+
 export class ApiServer {
+    /** Address we were told to bind, accepted as a Host alongside the loopback names. */
+    private boundHost = "127.0.0.1";
+
     private readonly server = createServer((request, response) => {
         this.handle(request, response).catch((error) => {
             logger.debug("API request failed:", error);
@@ -126,6 +191,7 @@ export class ApiServer {
     }
 
     listen(host: string, port: number): Promise<void> {
+        this.boundHost = host.toLowerCase();
         return new Promise((resolvePromise, rejectPromise) => {
             this.server.once("error", rejectPromise);
             this.server.listen(port, host, () => {
@@ -173,6 +239,30 @@ export class ApiServer {
     private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
         const url = new URL(request.url ?? "/", "http://localhost");
         const path = url.pathname;
+
+        if (!isKnownHost(request.headers.host, {
+            boundHost: this.boundHost,
+            allowedHosts: this.context.getConfig().allowedHosts,
+        })) {
+            const claimed = request.headers.host ?? "";
+            logger.warn(
+                `Refused a request addressed to "${claimed}". If you reach the dashboard ` +
+                    'by that name on purpose, add it to "allowedHosts" in your config; ' +
+                    "otherwise something is pointing that name at this machine.",
+            );
+            return sendJson(response, 421, {
+                error: `This dashboard does not answer to "${claimed}".`,
+                hint: 'Add it to "allowedHosts" in your config if this was deliberate.',
+            });
+        }
+
+        const method = (request.method ?? "GET").toUpperCase();
+        if (method !== "GET" && method !== "HEAD" && isCrossOrigin(request.headers.origin, request.headers.host)) {
+            logger.warn(`Refused a cross-origin ${method} from "${request.headers.origin}".`);
+            return sendJson(response, 403, {
+                error: "Cross-origin requests are not accepted.",
+            });
+        }
 
         if (path === "/api/stream") {
             return this.handleStream(request, response);

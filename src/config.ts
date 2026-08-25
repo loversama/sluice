@@ -113,6 +113,15 @@ export interface Config {
      * lighter on a machine that is only being glanced at.
      */
     allowStreamEmbed: boolean;
+    /**
+     * Extra Host header values the dashboard will answer to.
+     *
+     * Loopback names and the address it was told to bind are always accepted. Anything else
+     * is refused, which is what stops a hostile page re-pointing its own domain at
+     * 127.0.0.1 and talking to the dashboard as though it were same-origin. Add your own
+     * hostname here when serving it behind a reverse proxy.
+     */
+    allowedHosts: string[];
     logLevel: LogLevel;
     steam: {
         /**
@@ -166,6 +175,7 @@ export const DEFAULT_CONFIG: Config = {
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: true,
+    allowedHosts: [],
     logLevel: "info",
     steam: {
         provider: "direct",

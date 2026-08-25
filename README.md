@@ -89,10 +89,31 @@ there is no 2FA prompt to scrape. To sign out, run with `--logout`.
 | `autoClaimDrops` | `true` | Claim drops as soon as they are ready. |
 | `autoClaimPoints` | `true` | Claim channel points bonuses while watching. |
 | `warnUnlinkedAccounts` | `true` | Warn when rewards will not reach the game because accounts are not linked. |
+| `allowedHosts` | `[]` | Extra `Host` values the dashboard answers to. Loopback names and the bound address are always accepted; add your own hostname when serving it behind a reverse proxy. |
 | `logLevel` | `"info"` | `error`, `warn`, `info`, or `debug`. |
 | `libraryPolicy` | `"ownedOrListed"` | Restrict mining to games you own on Steam or named in `priorityGames`. `"all"` mines any game with a campaign. Inert until a Steam library is loaded. |
 | `steam` | `{}` | Steam library integration. See below. |
 | `notifications` | `{}` | Optional Telegram / Discord webhooks. |
+
+### Reaching the dashboard safely
+
+The dashboard has no login, because it is meant to be reached from the machine it runs on -
+Docker publishes it to `127.0.0.1:4400` and nowhere else. Two things are enforced anyway,
+since "only on localhost" is weaker than it sounds:
+
+- **Requests from other pages are refused.** A form post needs no preflight, so any site you
+  visited could otherwise POST to the dashboard - signing you out and revoking your Twitch
+  token without a line of script running on your own tab. Browsers attach `Origin` to those,
+  and a cross-origin one is rejected. Tools that send no `Origin`, such as curl, still work.
+- **Unknown `Host` headers are refused.** A hostile page can point a domain it controls at
+  `127.0.0.1` and, once the browser's DNS cache turns over, its scripts are same-origin with
+  whatever is listening there - able to read replies, not just send requests. Only loopback
+  names, the bound address, and anything in `allowedHosts` are answered.
+
+Neither helps against someone who can already reach the port directly. **If you want the
+dashboard from another machine, put it behind something that authenticates** - a reverse
+proxy with a password, a VPN, or an SSH tunnel - rather than publishing the port. Set
+`allowedHosts` to the hostname that proxy serves it under.
 
 ### Which games get mined
 
