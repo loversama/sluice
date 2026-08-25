@@ -2,8 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createApp, logger, setLogSink, setLogLevel, VERSION, type AppHandle } from "@tdb/core";
-import { ApiServer } from "@tdb/server";
+import { createApp, logger, setLogSink, setLogLevel, VERSION, type AppHandle } from "@sluice/core";
+import { ApiServer } from "@sluice/server";
 
 import { createFileSink, logDirectory } from "./log-file-sink.js";
 import { resolveWebDist } from "./resolve-web-dist.js";
@@ -65,7 +65,7 @@ if (!app.requestSingleInstanceLock()) {
             minHeight: 600,
             show: false,
             backgroundColor: "#0e0e10",
-            title: "Twitch Drops Bot",
+            title: "Sluice",
             webPreferences: {
                 // Built to CommonJS on purpose: a sandboxed preload cannot be an ES module,
                 // and sandboxing is worth more than matching the package's module format.
@@ -119,7 +119,7 @@ if (!app.requestSingleInstanceLock()) {
                 warnedAboutTray = true;
                 showBalloon(
                     "Still mining",
-                    "Twitch Drops Bot is in the tray. Quit from there to stop it.",
+                    "Sluice is in the tray. Quit from there to stop it.",
                 );
             }
         });
@@ -179,6 +179,19 @@ if (!app.requestSingleInstanceLock()) {
             // failures against a version that was never released.
             if (app.isPackaged) {
                 const { autoUpdater } = await import("electron-updater");
+                // The releases repository is private, so reading it needs a token. This one
+                // is read-only and scoped to that repository alone - it cannot reach the
+                // source, and it grants exactly what holding the installer already grants.
+                const token = __SLUICE_UPDATE_TOKEN__;
+                if (token) {
+                    autoUpdater.setFeedURL({
+                        provider: "github",
+                        owner: "loversama",
+                        repo: "sluice-releases",
+                        private: true,
+                        token,
+                    } as never);
+                }
                 updates.start(autoUpdater as never);
             }
 
@@ -216,7 +229,7 @@ if (!app.requestSingleInstanceLock()) {
                 setTrayStatus(
                     channel
                         ? `Mining ${channel.game ?? "a game"} on ${channel.displayName ?? "a channel"}`
-                        : "Twitch Drops Bot",
+                        : "Sluice",
                 );
             });
             handle.bus.on("auth", (payload: { status?: string }) => {
@@ -235,7 +248,7 @@ if (!app.requestSingleInstanceLock()) {
         },
         (error: unknown) => {
             dialog.showErrorBox(
-                "Twitch Drops Bot could not start",
+                "Sluice could not start",
                 error instanceof Error ? (error.stack ?? error.message) : String(error),
             );
             app.exit(1);
@@ -294,14 +307,14 @@ if (!app.requestSingleInstanceLock()) {
     process.on("unhandledRejection", (reason) => {
         const message = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
         try {
-            dialog.showErrorBox("Twitch Drops Bot hit an error", message);
+            dialog.showErrorBox("Sluice hit an error", message);
         } catch {
             // Too early for a dialog; the file sink still has it.
         }
     });
     process.on("uncaughtException", (error) => {
         try {
-            dialog.showErrorBox("Twitch Drops Bot hit an error", error.stack ?? error.message);
+            dialog.showErrorBox("Sluice hit an error", error.stack ?? error.message);
         } catch {
             // As above.
         }

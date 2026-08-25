@@ -1,5 +1,5 @@
 {
-  "name": "@tdb/desktop",
+  "name": "@sluice/desktop",
   "version": "0.3.0",
   "private": true,
   "description": "Windows desktop build: the same daemon and dashboard, without Docker.",
@@ -14,8 +14,8 @@
     "dist": "npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
-    "@tdb/core": "*",
-    "@tdb/server": "*",
+    "@sluice/core": "*",
+    "@sluice/server": "*",
     "electron-updater": "^6.6.2"
   },
   "devDependencies": {

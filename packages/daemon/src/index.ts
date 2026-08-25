@@ -2,13 +2,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { createApp, loadConfig, logger, setLogLevel, type LogLevel } from "@tdb/core";
-import { ApiServer } from "@tdb/server";
+import { createApp, loadConfig, logger, setLogLevel, type LogLevel } from "@sluice/core";
+import { ApiServer } from "@sluice/server";
 
 const HELP = `
-Twitch Drops Bot - browserless Twitch drop miner
+Sluice - browserless Twitch drop miner
 
-Usage: twitch-drops-bot [options]
+Usage: sluice [options]
 
 Options:
   -c, --config <path>   Config file (default: ./config.json)

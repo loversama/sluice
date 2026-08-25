@@ -1,4 +1,4 @@
-# Twitch Drops Bot
+# Sluice
 
 A browserless Twitch drop miner. No Chrome, no Puppeteer, no video download — it talks to
 Twitch's GraphQL API directly and reports watch time the same way the web player does.

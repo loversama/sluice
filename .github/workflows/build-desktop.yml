@@ -4,7 +4,7 @@
 # tagging is a deliberate act. The job additionally refuses to run for a tag that is not an
 # ancestor of the default branch, so a tag pushed from a side branch by accident cannot
 # publish an installer built from unreviewed code.
-name: Build Desktop App
+name: Build Sluice Desktop
 
 on:
   push:
@@ -90,13 +90,19 @@ jobs:
         working-directory: packages/desktop
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Writes to the separate releases repo, so the built-in GITHUB_TOKEN - which only
+          # covers this one - is not enough. Needs contents:write on sluice-releases.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          # Read-only, and baked into the installer so it can fetch its own updates. Scoped
+          # to sluice-releases alone: extracted from an installer, it grants the ability to
+          # download installers, which whoever extracted it already had.
+          SLUICE_UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
         run: npx electron-builder --win --publish ${{ steps.publish.outputs.flag }}
 
       - name: Keep the installer as an artifact either way
         uses: actions/upload-artifact@v4
         with:
-          name: twitch-drops-bot-windows
+          name: sluice-windows
           path: |
             packages/desktop/release/**/*.exe
             packages/desktop/release/**/*.blockmap

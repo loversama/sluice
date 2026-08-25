@@ -1,8 +1,8 @@
 services:
-    twitch-drops-bot:
+    sluice:
         build: .
-        image: twitch-drops-bot
-        container_name: twitch-drops-bot
+        image: sluice
+        container_name: sluice
         restart: unless-stopped
         ports:
             # Published to loopback only. The dashboard has no login of its own and the

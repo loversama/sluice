@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { AppHandle } from "@tdb/core";
+import type { AppHandle } from "@sluice/core";
 
 /**
  * Held at module scope on purpose: a Tray that is only referenced by a local goes away when
@@ -32,7 +32,7 @@ export function createTray(deps: TrayDeps): void {
     }
     const image = nativeImage.createFromPath(iconPath());
     tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
-    tray.setToolTip("Twitch Drops Bot");
+    tray.setToolTip("Sluice");
     tray.on("double-click", () => deps.showWindow());
 
     const render = (): void => {

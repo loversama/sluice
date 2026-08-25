@@ -1,7 +1,7 @@
 {
-  "name": "twitch-drops-bot",
-  "version": "0.1.0",
-  "description": "Browserless Twitch drops miner.",
+  "name": "sluice",
+  "version": "0.3.0",
+  "description": "Sluice - a browserless Twitch drops miner that catches what flows past.",
   "type": "module",
   "main": "packages/daemon/dist/index.js",
   "engines": {

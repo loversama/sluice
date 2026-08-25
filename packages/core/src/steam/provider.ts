@@ -117,7 +117,7 @@ export class SinfulShadowsProvider implements LibraryProvider {
                 method: "GET",
                 headers: {
                     authorization: `Bearer ${this.apiKey}`,
-                    "user-agent": `twitch-drops-bot/${VERSION}`,
+                    "user-agent": `sluice/${VERSION}`,
                     accept: "application/json",
                 },
                 headersTimeout: 15_000,

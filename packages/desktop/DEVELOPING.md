@@ -49,12 +49,12 @@ context:
 - Launching a second copy focuses the first window instead of starting another.
 - With the Docker container running, the app refuses to mine and says so - both copies on
   one account is the thing that must not happen.
-- `%APPDATA%\Twitch Drops Bot\logs\desktop.log` exists and has content. Without a console
+- `%APPDATA%\Sluice\logs\desktop.log` exists and has content. Without a console
   this is the only place diagnostics go.
 
 ## Data
 
-`%APPDATA%\Twitch Drops Bot\` - `auth.json` at the root, then
+`%APPDATA%\Sluice\` - `auth.json` at the root, then
 `users/<twitchUserId>/{config,steam,state,claims}.json`, which the core produces on its own.
 
 Do not point this at the Docker `./data` directory. They are separate installs by design;

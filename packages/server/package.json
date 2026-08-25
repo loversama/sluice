@@ -1,5 +1,5 @@
 {
-  "name": "@tdb/server",
+  "name": "@sluice/server",
   "version": "0.3.0",
   "private": true,
   "type": "module",
@@ -16,6 +16,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tdb/core": "*"
+    "@sluice/core": "*"
   }
 }

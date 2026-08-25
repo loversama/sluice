@@ -1,5 +1,5 @@
 {
-  "name": "@tdb/daemon",
+  "name": "@sluice/daemon",
   "version": "0.3.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tdb/core": "*",
-    "@tdb/server": "*"
+    "@sluice/core": "*",
+    "@sluice/server": "*"
   }
 }

@@ -14,7 +14,7 @@ import {
     type Config,
     type DeviceCodeInfo,
     type ServerContext,
-} from "@tdb/core";
+} from "@sluice/core";
 
 export type { DeviceCodeInfo, ServerContext };
 
@@ -437,7 +437,7 @@ export class ApiServer {
             await notifier.send({
                 kind: "info",
                 title: "Test notification",
-                lines: ["Twitch Drops Bot is connected and can reach you here."],
+                lines: ["Sluice is connected and can reach you here."],
             });
             return sendJson(response, 200, { ok: true });
         }
@@ -537,7 +537,7 @@ export class ApiServer {
         if (!info?.isFile()) {
             response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
             response.end(
-                "<!doctype html><meta charset=utf-8><title>Twitch Drops Bot</title>" +
+                "<!doctype html><meta charset=utf-8><title>Sluice</title>" +
                     "<body style=\"font-family:system-ui;padding:2rem;background:#0e0e12;color:#efeff4\">" +
                     "<h1>Dashboard not built</h1>" +
                     "<p>Run <code>npm run build:web</code> to build the dashboard. " +

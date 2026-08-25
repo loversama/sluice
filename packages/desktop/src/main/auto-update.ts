@@ -1,6 +1,6 @@
 import type { EventEmitter } from "node:events";
 
-import { logger } from "@tdb/core";
+import { logger } from "@sluice/core";
 
 /** How often to look, once the first check has happened. */
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;

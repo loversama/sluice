@@ -1,5 +1,5 @@
-appId: dev.loversama.twitchdropsbot
-productName: Twitch Drops Bot
+appId: dev.loversama.sluice
+productName: Sluice
 copyright: Copyright © 2026
 
 directories:
@@ -36,17 +36,20 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: Twitch Drops Bot
+  shortcutName: Sluice
   deleteAppDataOnUninstall: false
 
 publish:
   provider: github
   owner: loversama
-  repo: twitch-drops-bot
-  # Public on purpose. A private repo means the app needs a token to fetch its own updates,
-  # and the only way to give it one is to bake it into the installer - which ships a
-  # credential to every user. Updates matter here more than most: Twitch rotates the
-  # GraphQL hashes without warning, and an update is the only way to get the fix out.
-  private: false
+  repo: sluice-releases
+  # A separate, private repository holding installers and nothing else.
+  #
+  # The updater needs a token to read a private repo's releases, and the only way to give
+  # the installer one is to build it in - where anyone can extract it. GitHub has no
+  # "release assets only" permission: contents:read covers the source too. Keeping the
+  # releases apart from the source means an extracted token grants read access to
+  # installers, which is precisely what the person holding it already had.
+  private: true
   vPrefixedTagName: true
   releaseType: release

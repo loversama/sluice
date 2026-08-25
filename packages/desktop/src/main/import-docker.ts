@@ -2,7 +2,7 @@ import { app, dialog, type BrowserWindow } from "electron";
 import { cp, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { logger } from "@tdb/core";
+import { logger } from "@sluice/core";
 
 export interface ImportResult {
     imported: boolean;

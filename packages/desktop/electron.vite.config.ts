@@ -14,6 +14,12 @@ export default defineConfig({
     // built to .cjs explicitly rather than giving up sandboxing to keep the formats aligned.
     main: {
         plugins: [externalizeDepsPlugin()],
+        // Substituted at build time so the packaged app can read its own releases. Empty in
+        // development and in any build without the secret, where the updater simply stays
+        // idle rather than failing.
+        define: {
+            __SLUICE_UPDATE_TOKEN__: JSON.stringify(process.env.SLUICE_UPDATE_TOKEN ?? ""),
+        },
         build: {
             rollupOptions: {
                 input: { index: resolve(__dirname, "src/main/index.ts") },

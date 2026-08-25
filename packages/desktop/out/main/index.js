@@ -1,8 +1,8 @@
 import { app, nativeImage, Tray, Menu, dialog, BrowserWindow, ipcMain, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@tdb/core";
-import { ApiServer } from "@tdb/server";
+import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@sluice/core";
+import { ApiServer } from "@sluice/server";
 import { mkdirSync, statSync, renameSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { inspect } from "node:util";
 import { stat, readdir, cp } from "node:fs/promises";

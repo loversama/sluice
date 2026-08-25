@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { inspect } from "node:util";
 import { join } from "node:path";
 
-import { consoleSink, type LogLevel, type LogSink } from "@tdb/core";
+import { consoleSink, type LogLevel, type LogSink } from "@sluice/core";
 
 /** Past this, the current file is rotated once. Two files, no archive to manage. */
 const MAX_BYTES = 5 * 1024 * 1024;
