@@ -25,13 +25,23 @@ const progress = computed(() => {
 });
 
 const upNext = computed(() => store.upNext.slice(0, 6));
-const claims = computed(() => store.claims.slice(0, 8));
+const claims = computed(() => store.claims);
+
+/** Minutes left on the current drop, which is the number people actually watch. */
+const remaining = computed(() => {
+    const d = drop.value;
+    if (!d?.requiredMinutes) return null;
+    return Math.max(0, d.requiredMinutes - d.currentMinutes);
+});
+
+const stats = computed(() => store.stats ?? null);
 </script>
 
 <template>
     <div class="flex flex-col gap-3 p-3">
-        <!-- Now mining. The one thing worth seeing at a glance. -->
-        <section class="card p-3">
+        <!-- Now mining. Pinned, because in a window this size it is the reason the window
+             is open, and it should not scroll away behind a long claim list. -->
+        <section class="card p-3 sticky top-0 z-10" :style="{ background: 'var(--surface)' }">
             <div class="flex items-center justify-between gap-2 mb-2">
                 <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                     Now mining
@@ -74,6 +84,9 @@ const claims = computed(() => store.claims.slice(0, 8));
                             :style="{ width: `${progress}%`, background: 'var(--accent)' }"
                         />
                     </div>
+                    <p v-if="remaining !== null" class="text-[10px] mt-1" :style="{ color: 'var(--muted)' }">
+                        {{ remaining === 0 ? "Ready to claim" : `${remaining} min remaining` }}
+                    </p>
                 </template>
                 <p v-if="campaign && !campaign.isDeliverable" class="text-[10px] mt-2" :style="{ color: 'var(--warn)' }">
                     Not linked — the reward will not reach the game.
@@ -111,12 +124,23 @@ const claims = computed(() => store.claims.slice(0, 8));
             <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">Nothing queued.</p>
         </section>
 
+        <!-- Totals. One line, because at this width a stat grid is just noise. -->
+        <div
+            v-if="stats"
+            class="flex items-center justify-between px-1 text-[10px]"
+            :style="{ color: 'var(--text-2)' }"
+        >
+            <span>{{ stats.dropsAllTime }} drops</span>
+            <span>{{ stats.campaignsCompleted }} campaigns</span>
+            <span>{{ Math.round(stats.minutesEarned / 60) }}h mined</span>
+        </div>
+
         <!-- Recently claimed. The reason any of this is running. -->
         <section class="card p-3">
             <span class="text-[10px] uppercase tracking-wider block mb-2" :style="{ color: 'var(--text-2)' }">
                 Recently claimed
             </span>
-            <ul v-if="claims.length" class="flex flex-col gap-2">
+            <ul v-if="claims.length" class="flex flex-col gap-2 max-h-[40vh] overflow-y-auto -mr-1 pr-1">
                 <li v-for="claim in claims" :key="`${claim.dropId}-${claim.at}`" class="flex items-center gap-2 min-w-0">
                     <img
                         v-if="claim.rewardImageURL"

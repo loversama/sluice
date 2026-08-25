@@ -8,6 +8,14 @@ const bridge = {
   importFromDocker: () => electron.ipcRenderer.invoke("desktop:import-docker"),
   updateStatus: () => electron.ipcRenderer.invoke("desktop:update-status"),
   checkForUpdates: () => electron.ipcRenderer.invoke("desktop:check-updates"),
-  installUpdate: () => electron.ipcRenderer.invoke("desktop:install-update")
+  installUpdate: () => electron.ipcRenderer.invoke("desktop:install-update"),
+  // There is no window frame, so the page draws the controls.
+  minimize: () => electron.ipcRenderer.invoke("window:minimize"),
+  toggleMaximize: () => electron.ipcRenderer.invoke("window:toggle-maximize"),
+  close: () => electron.ipcRenderer.invoke("window:close"),
+  isMaximized: () => electron.ipcRenderer.invoke("window:is-maximized"),
+  onMaximizedChange: (fn) => {
+    electron.ipcRenderer.on("window:maximized", (_event, value) => fn(value));
+  }
 };
 electron.contextBridge.exposeInMainWorld("desktopBridge", bridge);

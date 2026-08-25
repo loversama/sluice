@@ -28,6 +28,15 @@ const bridge = {
         ipcRenderer.invoke("desktop:update-status"),
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke("desktop:check-updates"),
     installUpdate: (): Promise<void> => ipcRenderer.invoke("desktop:install-update"),
+
+    // There is no window frame, so the page draws the controls.
+    minimize: (): Promise<void> => ipcRenderer.invoke("window:minimize"),
+    toggleMaximize: (): Promise<boolean> => ipcRenderer.invoke("window:toggle-maximize"),
+    close: (): Promise<void> => ipcRenderer.invoke("window:close"),
+    isMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:is-maximized"),
+    onMaximizedChange: (fn: (maximized: boolean) => void): void => {
+        ipcRenderer.on("window:maximized", (_event, value: boolean) => fn(value));
+    },
 };
 
 contextBridge.exposeInMainWorld("desktopBridge", bridge);

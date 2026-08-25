@@ -64,6 +64,11 @@ if (!app.requestSingleInstanceLock()) {
             show: false,
             backgroundColor: "#0e0e10",
             title: "Sluice",
+            // The header is the title bar. A native one costs ~32px that the compact
+            // layout cannot spare, and leaves the app looking like two designs stacked.
+            frame: false,
+            // Traffic lights stay put on macOS; Windows and Linux get our own controls.
+            titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
             webPreferences: {
                 // Built to CommonJS on purpose: a sandboxed preload cannot be an ES module,
                 // and sandboxing is worth more than matching the package's module format.
@@ -100,6 +105,11 @@ if (!app.requestSingleInstanceLock()) {
         });
 
         win.once("ready-to-show", () => win?.show());
+        // The button's icon has to follow the real state, which a double-click on the drag
+        // region or a Windows snap can change without going through our handler.
+        const sendMaximised = () => win?.webContents.send("window:maximized", win.isMaximized());
+        win.on("maximize", sendMaximised);
+        win.on("unmaximize", sendMaximised);
         win.on("closed", () => {
             win = null;
         });
@@ -251,6 +261,20 @@ if (!app.requestSingleInstanceLock()) {
             await shell.openPath(logDirectory(app.getPath("userData")));
         });
         ipcMain.handle("desktop:import-docker", () => importFromDockerData(win));
+
+        // Window controls, since there is no frame to provide them.
+        ipcMain.handle("window:minimize", () => win?.minimize());
+        ipcMain.handle("window:toggle-maximize", () => {
+            if (!win) return false;
+            if (win.isMaximized()) {
+                win.unmaximize();
+                return false;
+            }
+            win.maximize();
+            return true;
+        });
+        ipcMain.handle("window:close", () => win?.close());
+        ipcMain.handle("window:is-maximized", () => win?.isMaximized() ?? false);
         ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
         ipcMain.handle("desktop:check-updates", () => updates?.check());
         ipcMain.handle("desktop:install-update", () => {
