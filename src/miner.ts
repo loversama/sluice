@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import logger from "./logger.js";
 import type { Config } from "./config.js";
 import {
+    ambiguousBenefitNames,
     Campaign,
     compareCampaigns,
     isInLibraryScope,
@@ -1823,6 +1824,7 @@ export class Miner extends EventEmitter {
         if (ownedBenefits.size > 0) {
             for (const campaign of next.values()) {
                 const startedAt = campaign.startAt.getTime();
+                const ambiguous = ambiguousBenefitNames(campaign);
                 for (const drop of campaign.drops) {
                     if (drop.isClaimed || drop.data.benefitEdges.length === 0) {
                         continue;
@@ -1830,9 +1832,15 @@ export class Miner extends EventEmitter {
                     // Every reward in the drop must be owned, and granted no earlier than
                     // the campaign began - the same reward can recur across seasons.
                     const owned = drop.data.benefitEdges.every((edge) => {
+                        const name = edge.benefit.name?.toLowerCase() ?? "";
+                        // Matching by name is a fallback for when benefit IDs do not line
+                        // up, but a name shared by two tiers says nothing about which of
+                        // them was claimed. GTA's "Team eCola" hands out an identically
+                        // named GTA$250K at 120 and at 360 minutes: claiming the first
+                        // otherwise marks the second collected, and it is never claimed.
                         const awarded =
                             ownedBenefits.get(edge.benefit.id) ??
-                            ownedBenefits.get(edge.benefit.name?.toLowerCase() ?? "");
+                            (ambiguous.has(name) ? undefined : ownedBenefits.get(name));
                         return awarded !== undefined && awarded >= startedAt;
                     });
                     if (owned) {
@@ -1858,6 +1866,12 @@ export class Miner extends EventEmitter {
                     drop.update(entry.self);
                     if (entry.self.isClaimed) {
                         this.claimedDropIds.add(drop.id);
+                    } else {
+                        // Inventory is authoritative, so it also has to be able to take a
+                        // claim back. Without this a wrong guess above is permanent:
+                        // claim() skips anything in this set, so the drop would sit
+                        // finished and unclaimed until the campaign expired.
+                        this.claimedDropIds.delete(drop.id);
                     }
                 }
             }

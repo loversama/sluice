@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Campaign, compareCampaigns, type RankingOptions, isInLibraryScope } from "../src/models/campaign.js";
+import { Campaign, compareCampaigns, type RankingOptions, isInLibraryScope, ambiguousBenefitNames } from "../src/models/campaign.js";
 import { iso, makeCampaign, makeDrop } from "./fixtures.js";
 
 const rank = (options: Partial<RankingOptions> = {}): RankingOptions => ({
@@ -374,5 +374,54 @@ describe("isInLibraryScope", () => {
                 owns: owned("Rust"),
             }),
         ).toBe(true);
+    });
+});
+
+describe("ambiguousBenefitNames", () => {
+    const tier = (id: string, minutes: number, rewardName: string, benefitId: string) =>
+        makeDrop({
+            id,
+            requiredMinutesWatched: minutes,
+            benefitEdges: [{ benefit: { id: benefitId, name: rewardName } }],
+        });
+
+    it("flags a reward name reused across tiers", () => {
+        // GTA's "Team eCola" really does award an identically named GTA$250K at both 120
+        // and 360 minutes, under two different benefit IDs.
+        const campaign = new Campaign(
+            makeCampaign({
+                id: "ecola",
+                drops: [
+                    tier("t1", 120, "GTA$250K", "benefit-1"),
+                    tier("t2", 240, "eCola Tracksuit", "benefit-2"),
+                    tier("t3", 360, "GTA$250K", "benefit-3"),
+                    tier("t4", 600, "GTA$500K", "benefit-4"),
+                ],
+            }),
+        );
+
+        expect(ambiguousBenefitNames(campaign)).toEqual(new Set(["gta$250k"]));
+    });
+
+    it("finds nothing when every reward is distinct", () => {
+        const campaign = new Campaign(
+            makeCampaign({
+                id: "distinct",
+                drops: [tier("t1", 60, "Helmet", "b1"), tier("t2", 120, "Rifle", "b2")],
+            }),
+        );
+
+        expect(ambiguousBenefitNames(campaign).size).toBe(0);
+    });
+
+    it("compares names case-insensitively", () => {
+        const campaign = new Campaign(
+            makeCampaign({
+                id: "case",
+                drops: [tier("t1", 60, "Gold Crate", "b1"), tier("t2", 120, "GOLD CRATE", "b2")],
+            }),
+        );
+
+        expect(ambiguousBenefitNames(campaign)).toEqual(new Set(["gold crate"]));
     });
 });

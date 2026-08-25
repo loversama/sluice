@@ -358,6 +358,30 @@ export function isInLibraryScope(campaign: Campaign, options: LibraryScopeOption
     return listed || options.owns(campaign.gameName);
 }
 
+/**
+ * Reward names that appear on more than one drop in a campaign.
+ *
+ * Reconciling against the inventory falls back to matching a reward by name when benefit
+ * IDs do not line up, but that fallback is only sound while the name identifies one drop.
+ * Tiered campaigns break it: GTA's "Team eCola" awards an identically named GTA$250K at
+ * both 120 and 360 minutes, so owning the first would otherwise prove the second collected.
+ */
+export function ambiguousBenefitNames(campaign: Campaign): Set<string> {
+    const seen = new Set<string>();
+    const ambiguous = new Set<string>();
+    for (const drop of campaign.drops) {
+        for (const edge of drop.data.benefitEdges) {
+            const name = edge.benefit.name?.toLowerCase();
+            if (!name) continue;
+            if (seen.has(name)) {
+                ambiguous.add(name);
+            }
+            seen.add(name);
+        }
+    }
+    return ambiguous;
+}
+
 export type PriorityMode =
     /** Mine nothing outside the priority list. */
     | "priority_only"
