@@ -756,8 +756,10 @@ const inputStyle = {
                         Plays the stream being mined, muted, on the dashboard. It is embedded
                         signed out &mdash; the player never receives your Twitch cookies, so it
                         watches as a guest and cannot open a second watch session on your
-                        account or interfere with mining. It does use bandwidth; the thumbnail
-                        shown by default does not.
+                        account or interfere with mining. Being a guest also means ad breaks:
+                        either an advertiser's video or Twitch's own "commercial break in
+                        progress" filler, with no supported way to detect or skip them. The
+                        thumbnail costs nothing and shows no ads.
                     </span>
                     <span
                         v-if="!canEmbedAnonymously"

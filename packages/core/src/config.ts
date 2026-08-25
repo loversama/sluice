@@ -109,11 +109,17 @@ export interface Config {
      */
     holdClaimsWhenUnlinked: boolean;
 /**
-     * Show Twitch's embedded player in the dashboard's live channel panel, muted.
+     * Play Twitch's embedded player in the dashboard, muted, instead of a thumbnail.
      *
-     * This is the ordinary public embed any site can use, pointed at the channel already
-     * being mined. Turn it off to fall back to the refreshing preview thumbnail, which is
-     * lighter on a machine that is only being glanced at.
+     * The ordinary public embed, pointed at the channel already being mined and always
+     * loaded signed out, so it watches as a guest and cannot become a second watch session
+     * on the account.
+     *
+     * Off by default, and worth leaving off. A signed-out viewer is served ad breaks like
+     * any other - either a real advertiser's video or Twitch's own "commercial break in
+     * progress" filler when nothing bid - and there is no supported way to detect or
+     * suppress them. The panel is decoration either way: mining runs on its own watch
+     * beats and never looks at this player.
      */
     allowStreamEmbed: boolean;
     /**
@@ -177,7 +183,7 @@ export const DEFAULT_CONFIG: Config = {
     unlinkedPolicy: "mine",
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
-    allowStreamEmbed: true,
+    allowStreamEmbed: false,
     allowedHosts: [],
     logLevel: "info",
     steam: {
