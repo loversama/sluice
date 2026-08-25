@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# TypeScript's incremental build state. Committing it while ignoring dist/ tells a fresh
+# clone everything is already built, so tsc skips the work and leaves nothing to import.
+*.tsbuildinfo
 *.log
 reference/
 web/node_modules/
