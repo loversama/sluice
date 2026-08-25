@@ -7,6 +7,11 @@ import logger from "./logger.js";
 import { Miner } from "./miner.js";
 import { NotifierGroup } from "./notifiers/index.js";
 import { resolveUserPaths, type LegacyPaths, type UserPaths } from "./paths.js";
+import {
+    InstanceLock,
+    instanceLockPath,
+    findConflictingInstance,
+} from "./instance-guard.js";
 import { serializeCampaign } from "./api/serialize.js";
 import { SteamLibrary } from "./steam/library.js";
 import { SteamClient, resolveSteamId } from "./steam/client.js";
@@ -42,6 +47,15 @@ export interface AppOptions {
     onLogout?(): void;
     /** Something the host may want to surface natively - a tray balloon, a dialog. */
     onProblem?(problem: { level: "warn" | "fatal"; code: string; message: string }): void;
+    /**
+     * The port this host serves its own dashboard on, so the conflict check does not
+     * mistake us for a rival.
+     *
+     * Read when the check runs rather than taken up front: the server usually binds after
+     * createApp is called, and a port captured too early would be undefined - leaving the
+     * daemon to find itself on 4400 and refuse to start.
+     */
+    getOwnPort?(): number | null;
 }
 
 export interface AppHandle {
@@ -92,6 +106,7 @@ export function createApp(options: AppOptions): AppHandle {
 
     let stopped = false;
     let logoutRequested: (() => void) | null = null;
+    const lock = new InstanceLock(instanceLockPath(dataDir));
 
     const problem = (level: "warn" | "fatal", code: string, message: string): void => {
         bus.emit("problem", { level, code, message });
@@ -300,6 +315,31 @@ export function createApp(options: AppOptions): AppHandle {
         await steamLibrary.load(paths.steam);
         logger.info(`Data for ${auth.login}: ${paths.dir}`);
 
+        // Two copies mining one account contradict each other's watch sessions and write
+        // the same files. Both ways that can happen are checked before doing any of it.
+        const heldBy = await lock.acquire({ userId: auth.userId, login: auth.login });
+        if (heldBy) {
+            const message =
+                `Another copy of the bot (pid ${heldBy.heldBy.pid}) is already using ` +
+                `${dataDir}. Close it before starting this one.`;
+            logger.error(message);
+            problem("fatal", "already-running", message);
+            return false;
+        }
+        const rival = await findConflictingInstance(auth.userId, {
+            ignorePort: options.getOwnPort?.() ?? undefined,
+        });
+        if (rival) {
+            const message =
+                `Another copy of the bot is already mining this account on port ${rival.port} - ` +
+                "probably the Docker container. Mining twice on one account makes Twitch " +
+                "credit neither session reliably. Stop the other one, then try again.";
+            logger.error(message);
+            problem("fatal", "already-mining", message);
+            await lock.release();
+            return false;
+        }
+
         authStatus = "ok";
         deviceCode = null;
         bus.emit("auth", { status: "ok", user: { id: auth.userId, displayName: auth.login } });
@@ -411,6 +451,7 @@ export function createApp(options: AppOptions): AppHandle {
             stopped = true;
             miner?.stop();
             unwire?.();
+            await lock.release();
             // Persistence is written eagerly at every mutation, so there is nothing to
             // flush here beyond letting an in-flight write land.
             await new Promise((r) => setTimeout(r, 250).unref());

@@ -76,6 +76,7 @@ async function main(): Promise<void> {
         },
         forceLogin: values.logout,
         dryRun: values["dry-run"],
+        getOwnPort: () => boundPort,
         onDeviceCode: ({ code, url }) => {
             console.log("\n" + "=".repeat(58));
             console.log("  Authorize this bot with your Twitch account:");
@@ -92,12 +93,13 @@ async function main(): Promise<void> {
         },
     });
 
+    let boundPort: number | null = null;
     let server: ApiServer | null = null;
     if (values.web) {
         const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
         server = new ApiServer(app.context, staticDir);
         const { host, port } = parseAddress(values["web-addr"]!);
-        await server.listen(host, port);
+        boundPort = await server.listen(host, port);
     }
 
     if (values["dry-run"]) {

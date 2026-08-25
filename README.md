@@ -95,6 +95,25 @@ there is no 2FA prompt to scrape. To sign out, run with `--logout`.
 | `steam` | `{}` | Steam library integration. See below. |
 | `notifications` | `{}` | Optional Telegram / Discord webhooks. |
 
+### Running only one copy at a time
+
+Mining one Twitch account from two places at once is actively harmful: the two watch
+sessions contradict each other, Twitch credits neither reliably, and both write the same
+progress files. Two things now make that hard to do by accident.
+
+An `instance.lock` beside the data directory stops a second process using the same files.
+It carries a heartbeat, so a copy that was killed rather than closed does not lock you out
+- the claim is taken over once it stops being refreshed.
+
+A container and a desktop app cannot see each other's files at all, so that case is caught
+differently: before mining, the bot asks whoever is already serving a dashboard on this
+machine which account they are signed in as. If it is the same account, it refuses and says
+where the other copy is answering. Nothing listening, a different program, or a different
+account are all left alone.
+
+Either way it stops before mining rather than after, and the dashboard stays up to explain
+itself.
+
 ### Reaching the dashboard safely
 
 The dashboard has no login, because it is meant to be reached from the machine it runs on -

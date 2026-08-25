@@ -88,11 +88,27 @@ async function makeApp() {
     return createApp({ dataDir });
 }
 
-/** Let the microtask queue and any zero-delay timers drain. */
+/**
+ * Wait for a condition rather than a fixed number of ticks.
+ *
+ * Starting a session does real asynchronous work - reading files, and asking whether
+ * another instance is already mining this account - so any tick count is a guess that
+ * eventually becomes wrong.
+ */
+async function until(condition: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (condition()) return;
+        await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error(`Timed out waiting for: ${what}`);
+}
+
+/** Let anything already resolved settle, without depending on how much there is. */
 const settle = async () => {
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 10; i += 1) {
         await Promise.resolve();
-        await new Promise((r) => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 5));
     }
 };
 
@@ -106,9 +122,8 @@ describe("the session loop", () => {
     it("builds one miner and reports itself signed in", async () => {
         const app = await makeApp();
         app.start();
-        await settle();
+        await until(() => minersBuilt.length === 1, "the first miner");
 
-        expect(minersBuilt).toHaveLength(1);
         expect(app.context.getAuthStatus()).toBe("ok");
         await app.stop();
     });
@@ -116,14 +131,12 @@ describe("the session loop", () => {
     it("starts a fresh session after a logout, in the same process", async () => {
         const app = await makeApp();
         app.start();
-        await settle();
-        expect(minersBuilt).toHaveLength(1);
+        await until(() => minersBuilt.length === 1, "the first miner");
 
         await app.context.logout();
-        await settle();
+        await until(() => minersBuilt.length === 2, "a second miner after logout");
 
         // A second miner means the loop came back around rather than the process dying.
-        expect(minersBuilt).toHaveLength(2);
         expect(minersBuilt[0]!.stopped).toBe(true);
         await app.stop();
     });
@@ -133,10 +146,10 @@ describe("the session loop", () => {
         // would see a different device on every sign-in.
         const app = await makeApp();
         app.start();
-        await settle();
+        await until(() => minersBuilt.length === 1, "the first miner");
 
         await app.context.logout();
-        await settle();
+        await until(() => minersBuilt.length === 2, "a second miner after logout");
 
         expect(authsBuilt).toHaveLength(1);
         await app.stop();
@@ -145,10 +158,10 @@ describe("the session loop", () => {
     it("revokes the token on the way out", async () => {
         const app = await makeApp();
         app.start();
-        await settle();
+        await until(() => minersBuilt.length === 1, "the first miner");
 
         await app.context.logout();
-        await settle();
+        await until(() => authsBuilt[0]!.revoked === 1, "the token to be revoked");
 
         expect(authsBuilt[0]!.revoked).toBe(1);
         await app.stop();
@@ -163,7 +176,7 @@ describe("the session loop", () => {
         app.bus.on("problem", (p) => problems.push(p));
 
         app.start();
-        await settle();
+        await until(() => problems.length > 0, "a problem to be reported");
 
         expect(minersBuilt).toHaveLength(1);
         expect(problems).toContainEqual(
@@ -176,7 +189,7 @@ describe("the session loop", () => {
         nextStart = () => Promise.resolve();
         const app = await makeApp();
         app.start();
-        await settle();
+        await until(() => minersBuilt.length === 1, "the first miner");
         await app.stop();
         const built = minersBuilt.length;
         await settle();
