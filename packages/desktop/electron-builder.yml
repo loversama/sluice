@@ -43,13 +43,14 @@ publish:
   provider: github
   owner: loversama
   repo: sluice-releases
-  # A separate, private repository holding installers and nothing else.
+  # A separate, public repository holding installers and nothing else. The source stays
+  # private in loversama/sluice.
   #
-  # The updater needs a token to read a private repo's releases, and the only way to give
-  # the installer one is to build it in - where anyone can extract it. GitHub has no
-  # "release assets only" permission: contents:read covers the source too. Keeping the
-  # releases apart from the source means an extracted token grants read access to
-  # installers, which is precisely what the person holding it already had.
-  private: true
+  # Public because the alternative is worse. Reading a private repo's releases needs a
+  # token, and the only way to give the installer one is to build it in, where anyone can
+  # extract it - and GitHub has no "release assets only" permission, so such a token can
+  # always read something. A public repo of installers hands out exactly what an installer
+  # already is, with no credential to leak, expire, or rotate.
+  private: false
   vPrefixedTagName: true
   releaseType: release

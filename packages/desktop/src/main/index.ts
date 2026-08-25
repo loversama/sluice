@@ -174,19 +174,8 @@ if (!app.requestSingleInstanceLock()) {
             // failures against a version that was never released.
             if (app.isPackaged) {
                 const { autoUpdater } = await import("electron-updater");
-                // The releases repository is private, so reading it needs a token. This one
-                // is read-only and scoped to that repository alone - it cannot reach the
-                // source, and it grants exactly what holding the installer already grants.
-                const token = __SLUICE_UPDATE_TOKEN__;
-                if (token) {
-                    autoUpdater.setFeedURL({
-                        provider: "github",
-                        owner: "loversama",
-                        repo: "sluice-releases",
-                        private: true,
-                        token,
-                    } as never);
-                }
+                // No credential: the releases repository is public, so the updater reads
+                // it anonymously. Nothing to embed, leak, expire or rotate.
                 updates.start(autoUpdater as never);
             }
 

@@ -93,10 +93,6 @@ jobs:
           # Writes to the separate releases repo, so the built-in GITHUB_TOKEN - which only
           # covers this one - is not enough. Needs contents:write on sluice-releases.
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          # Read-only, and baked into the installer so it can fetch its own updates. Scoped
-          # to sluice-releases alone: extracted from an installer, it grants the ability to
-          # download installers, which whoever extracted it already had.
-          SLUICE_UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
         run: npx electron-builder --win --publish ${{ steps.publish.outputs.flag }}
 
       - name: Keep the installer as an artifact either way

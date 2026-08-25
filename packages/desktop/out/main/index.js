@@ -54,6 +54,18 @@ function resolveWebDist() {
   }
   return join(process.resourcesPath, "web");
 }
+function isOwnUrl(url, port) {
+  if (!port) {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "http:" && parsed.host === `127.0.0.1:${port}`;
+}
 const DEFAULTS = {
   runAtLogin: false,
   closeToTray: true
@@ -95,7 +107,7 @@ function createTray(deps) {
   }
   const image = nativeImage.createFromPath(iconPath());
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
-  tray.setToolTip("Twitch Drops Bot");
+  tray.setToolTip("Sluice");
   tray.on("double-click", () => deps.showWindow());
   const render2 = () => {
     const miner = deps.getHandle()?.context.getMiner() ?? null;
@@ -286,7 +298,7 @@ if (!app.requestSingleInstanceLock()) {
       minHeight: 600,
       show: false,
       backgroundColor: "#0e0e10",
-      title: "Twitch Drops Bot",
+      title: "Sluice",
       webPreferences: {
         // Built to CommonJS on purpose: a sandboxed preload cannot be an ES module,
         // and sandboxing is worth more than matching the package's module format.
@@ -326,7 +338,7 @@ if (!app.requestSingleInstanceLock()) {
         warnedAboutTray = true;
         showBalloon(
           "Still mining",
-          "Twitch Drops Bot is in the tray. Quit from there to stop it."
+          "Sluice is in the tray. Quit from there to stop it."
         );
       }
     });
@@ -363,13 +375,7 @@ if (!app.requestSingleInstanceLock()) {
       win.focus();
     }
   });
-  const isOurs = (url) => {
-    try {
-      return new URL(url).host === `127.0.0.1:${port}`;
-    } catch {
-      return false;
-    }
-  };
+  const isOurs = (url) => isOwnUrl(url, port);
   const openExternally = (url) => {
     void shell.openExternal(url);
   };
@@ -437,7 +443,7 @@ if (!app.requestSingleInstanceLock()) {
       handle.bus.on("watching", (payload) => {
         const channel = payload?.channel;
         setTrayStatus(
-          channel ? `Mining ${channel.game ?? "a game"} on ${channel.displayName ?? "a channel"}` : "Twitch Drops Bot"
+          channel ? `Mining ${channel.game ?? "a game"} on ${channel.displayName ?? "a channel"}` : "Sluice"
         );
       });
       handle.bus.on("auth", (payload) => {
@@ -452,7 +458,7 @@ if (!app.requestSingleInstanceLock()) {
     },
     (error) => {
       dialog.showErrorBox(
-        "Twitch Drops Bot could not start",
+        "Sluice could not start",
         error instanceof Error ? error.stack ?? error.message : String(error)
       );
       app.exit(1);
@@ -481,13 +487,13 @@ if (!app.requestSingleInstanceLock()) {
   process.on("unhandledRejection", (reason) => {
     const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
     try {
-      dialog.showErrorBox("Twitch Drops Bot hit an error", message);
+      dialog.showErrorBox("Sluice hit an error", message);
     } catch {
     }
   });
   process.on("uncaughtException", (error) => {
     try {
-      dialog.showErrorBox("Twitch Drops Bot hit an error", error.stack ?? error.message);
+      dialog.showErrorBox("Sluice hit an error", error.stack ?? error.message);
     } catch {
     }
     app.exit(1);
