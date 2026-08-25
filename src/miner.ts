@@ -1822,9 +1822,11 @@ export class Miner extends EventEmitter {
         }
 
         if (ownedBenefits.size > 0) {
+            // Scoped across every campaign at once: the same reward name recurs between
+            // concurrent campaigns, not just between tiers of one.
+            const ambiguous = ambiguousBenefitNames(next.values());
             for (const campaign of next.values()) {
                 const startedAt = campaign.startAt.getTime();
-                const ambiguous = ambiguousBenefitNames(campaign);
                 for (const drop of campaign.drops) {
                     if (drop.isClaimed || drop.data.benefitEdges.length === 0) {
                         continue;

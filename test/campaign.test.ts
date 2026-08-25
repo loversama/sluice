@@ -385,22 +385,66 @@ describe("ambiguousBenefitNames", () => {
             benefitEdges: [{ benefit: { id: benefitId, name: rewardName } }],
         });
 
-    it("flags a reward name reused across tiers", () => {
-        // GTA's "Team eCola" really does award an identically named GTA$250K at both 120
-        // and 360 minutes, under two different benefit IDs.
-        const campaign = new Campaign(
+    const ecola = () =>
+        new Campaign(
             makeCampaign({
                 id: "ecola",
                 drops: [
-                    tier("t1", 120, "GTA$250K", "benefit-1"),
-                    tier("t2", 240, "eCola Tracksuit", "benefit-2"),
-                    tier("t3", 360, "GTA$250K", "benefit-3"),
-                    tier("t4", 600, "GTA$500K", "benefit-4"),
+                    tier("t1", 120, "GTA$250K", "benefit-ecola-250a"),
+                    tier("t2", 240, "eCola Tracksuit", "benefit-ecola-suit"),
+                    tier("t3", 360, "GTA$250K", "benefit-ecola-250b"),
+                    tier("t4", 600, "GTA$500K", "benefit-ecola-500"),
                 ],
             }),
         );
 
-        expect(ambiguousBenefitNames(campaign)).toEqual(new Set(["gta$250k"]));
+    const sprunk = () =>
+        new Campaign(
+            makeCampaign({
+                id: "sprunk",
+                drops: [
+                    tier("s1", 120, "GTA$250K", "benefit-sprunk-250a"),
+                    tier("s2", 240, "Sprunk Sweatsuit", "benefit-sprunk-suit"),
+                    tier("s3", 360, "GTA$250K", "benefit-sprunk-250b"),
+                    tier("s4", 600, "GTA$500K", "benefit-sprunk-500"),
+                ],
+            }),
+        );
+
+    it("flags a reward name reused across tiers of one campaign", () => {
+        // "Team eCola" really does award an identically named GTA$250K at both 120 and 360
+        // minutes, under two different benefit IDs.
+        expect(ambiguousBenefitNames([ecola()])).toEqual(
+            new Set(["gta$250k"]),
+        );
+    });
+
+    it("flags a reward name reused across concurrent campaigns", () => {
+        // The case the per-campaign check missed: eCola and Sprunk ran side by side, each
+        // awarding its own GTA$500K. Claiming one marked the other collected.
+        const names = ambiguousBenefitNames([ecola(), sprunk()]);
+        expect(names.has("gta$500k")).toBe(true);
+        expect(names.has("gta$250k")).toBe(true);
+    });
+
+    it("leaves a name unique to one benefit alone", () => {
+        // The fallback has to keep working, or a fully claimed campaign is mined again
+        // from zero.
+        const names = ambiguousBenefitNames([ecola(), sprunk()]);
+        expect(names.has("ecola tracksuit")).toBe(false);
+        expect(names.has("sprunk sweatsuit")).toBe(false);
+    });
+
+    it("does not flag the same benefit seen twice", () => {
+        // One benefit legitimately appearing on two drops is not ambiguous - the ID still
+        // identifies it.
+        const campaign = new Campaign(
+            makeCampaign({
+                id: "repeat",
+                drops: [tier("r1", 60, "Crate", "benefit-crate"), tier("r2", 120, "Crate", "benefit-crate")],
+            }),
+        );
+        expect(ambiguousBenefitNames([campaign]).size).toBe(0);
     });
 
     it("finds nothing when every reward is distinct", () => {
@@ -410,8 +454,7 @@ describe("ambiguousBenefitNames", () => {
                 drops: [tier("t1", 60, "Helmet", "b1"), tier("t2", 120, "Rifle", "b2")],
             }),
         );
-
-        expect(ambiguousBenefitNames(campaign).size).toBe(0);
+        expect(ambiguousBenefitNames([campaign]).size).toBe(0);
     });
 
     it("compares names case-insensitively", () => {
@@ -421,7 +464,6 @@ describe("ambiguousBenefitNames", () => {
                 drops: [tier("t1", 60, "Gold Crate", "b1"), tier("t2", 120, "GOLD CRATE", "b2")],
             }),
         );
-
-        expect(ambiguousBenefitNames(campaign)).toEqual(new Set(["gold crate"]));
+        expect(ambiguousBenefitNames([campaign])).toEqual(new Set(["gold crate"]));
     });
 });
