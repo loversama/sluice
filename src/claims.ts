@@ -1,4 +1,6 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+
+import { writeFileAtomic } from "./atomic-write.js";
 import { dirname } from "node:path";
 
 import logger from "./logger.js";
@@ -34,8 +36,7 @@ export async function loadClaims(path: string): Promise<ClaimHistory> {
 
 export async function saveClaims(path: string, history: ClaimHistory): Promise<void> {
     try {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(
+        await writeFileAtomic(
             path,
             JSON.stringify(
                 {

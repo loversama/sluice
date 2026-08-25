@@ -207,6 +207,8 @@ export class Miner extends EventEmitter {
     private claimHistory: ClaimHistory = { claims: [], completedCampaignIds: [] };
     private steam: SteamLibrary | null = null;
     private boundaryTimer: NodeJS.Timeout | null = null;
+    /** Held so a config change can re-arm it, and so stop() can actually cancel it. */
+    private refreshTimer: NodeJS.Timeout | null = null;
     /** Watch beats accepted since Twitch last confirmed progress. */
     private unconfirmedBeats = 0;
     /**
@@ -538,8 +540,15 @@ export class Miner extends EventEmitter {
      * priority edits take effect without a restart.
      */
     applyConfig(config: Config): void {
+        const previousInterval = this.config.campaignRefreshMinutes;
         this.config = config;
         this.pushFeed("info", "Configuration updated");
+
+        // A pending tick was scheduled against the old interval, so shortening it would
+        // otherwise not take effect until after one more wait at the old length.
+        if (config.campaignRefreshMinutes !== previousInterval && !this.stopping) {
+            this.rearmCampaignRefresh();
+        }
 
         // Re-rank straight away. Editing priorities and then watching the bot carry on with
         // the old campaign for another refresh interval reads as the setting not working.
@@ -610,6 +619,14 @@ export class Miner extends EventEmitter {
         if (this.boundaryTimer) {
             clearTimeout(this.boundaryTimer);
             this.boundaryTimer = null;
+        }
+        // Guarded rather than cancelled, this kept the whole Miner - its campaigns, claim
+        // history and feed - reachable from a pending closure for a full refresh interval
+        // after every stop. Harmless in a container that is about to exit; not in a desktop
+        // app that stops and starts a session without the process going anywhere.
+        if (this.refreshTimer) {
+            clearTimeout(this.refreshTimer);
+            this.refreshTimer = null;
         }
         this.pubsub?.close();
         this.pubsub = null;
@@ -1389,9 +1406,21 @@ export class Miner extends EventEmitter {
         return null;
     }
 
+    /** Cancel the pending refresh and schedule a fresh one on the current interval. */
+    private rearmCampaignRefresh(): void {
+        if (this.refreshTimer) {
+            clearTimeout(this.refreshTimer);
+            this.refreshTimer = null;
+        }
+        this.scheduleCampaignRefresh();
+    }
+
     private scheduleCampaignRefresh(): void {
-        const interval = this.config.campaignRefreshMinutes * 60_000;
-        this.nextRefreshAt = Date.now() + interval;
+        // Read from config on every tick rather than capturing it once. Captured, the
+        // interval could never change without restarting the process: editing it in
+        // Settings updated the file and the countdown and left the actual cadence alone.
+        const interval = () => this.config.campaignRefreshMinutes * 60_000;
+        this.nextRefreshAt = Date.now() + interval();
         const tick = async () => {
             if (this.stopping) {
                 return;
@@ -1407,11 +1436,13 @@ export class Miner extends EventEmitter {
             } catch (error) {
                 logger.error("Campaign refresh failed:", error);
             } finally {
-                this.nextRefreshAt = Date.now() + interval;
-                setTimeout(tick, interval).unref();
+                this.nextRefreshAt = Date.now() + interval();
+                this.refreshTimer = setTimeout(tick, interval());
+                this.refreshTimer.unref();
             }
         };
-        setTimeout(tick, interval).unref();
+        this.refreshTimer = setTimeout(tick, interval());
+        this.refreshTimer.unref();
     }
 
     /**

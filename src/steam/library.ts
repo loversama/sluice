@@ -1,5 +1,6 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+
+import { writeFileAtomic } from "../atomic-write.js";
 
 import logger from "../logger.js";
 import { findBestMatch } from "./matching.js";
@@ -121,7 +122,6 @@ export class SteamLibrary {
     }
 
     async save(path: string): Promise<void> {
-        await mkdir(dirname(path), { recursive: true });
         const stored: StoredLibrary = {
             steamId: this.steamId,
             personaName: this.personaName,
@@ -129,7 +129,7 @@ export class SteamLibrary {
             games: this.games,
             stale: this.stale,
         };
-        await writeFile(path, JSON.stringify(stored, null, 2));
+        await writeFileAtomic(path, JSON.stringify(stored, null, 2));
     }
 
     /** Pull the library from whichever provider is configured and replace what we hold. */

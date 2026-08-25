@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+
+import { writeFileAtomic } from "../atomic-write.js";
 
 import { request } from "undici";
 
@@ -108,9 +109,10 @@ export class AuthState {
     }
 
     async save(path: string): Promise<void> {
-        await mkdir(dirname(path), { recursive: true });
-        // Mode 0600: this file grants full access to the Twitch account.
-        await writeFile(path, JSON.stringify(this.toJSON(), null, 2), { mode: 0o600 });
+        // Mode 0600: this file grants full access to the Twitch account. Honoured on
+        // POSIX and quietly ignored on Windows, where the per-user ACL on the data
+        // directory is what actually protects it.
+        await writeFileAtomic(path, JSON.stringify(this.toJSON(), null, 2), { mode: 0o600 });
         logger.debug(`Saved credentials to ${path}`);
     }
 

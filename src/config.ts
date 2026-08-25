@@ -1,4 +1,7 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
+
+import { writeFileAtomic } from "./atomic-write.js";
+import logger from "./logger.js";
 
 import type { LogLevel } from "./logger.js";
 import type { LibraryPolicy, PriorityMode } from "./models/campaign.js";
@@ -191,7 +194,7 @@ export async function loadConfig(path: string): Promise<Config> {
     try {
         raw = await readFile(path, "utf8");
     } catch {
-        await writeFile(path, `${JSON.stringify(DEFAULT_CONFIG, null, 4)}\n`);
+        await writeFileAtomic(path, `${JSON.stringify(DEFAULT_CONFIG, null, 4)}\n`);
         return { ...DEFAULT_CONFIG };
     }
 
@@ -199,7 +202,17 @@ export async function loadConfig(path: string): Promise<Config> {
     try {
         parsed = JSON.parse(raw) as Partial<Config>;
     } catch (error) {
-        throw new Error(`${path} is not valid JSON: ${(error as Error).message}`);
+        // A half-written config used to be fatal, which meant a machine losing power
+        // mid-save would not start again - no dashboard, and on the desktop build no
+        // message either. The settings are recoverable by hand and worth keeping, so the
+        // file is set aside rather than deleted, and startup continues on defaults.
+        const quarantine = `${path}.corrupt-${Date.now()}`;
+        await rename(path, quarantine).catch(() => {});
+        logger.warn(
+            `${path} is not valid JSON (${(error as Error).message}). Moved it to ` +
+                `${quarantine} and started from defaults.`,
+        );
+        return { ...DEFAULT_CONFIG };
     }
 
     const config: Config = {
@@ -236,5 +249,5 @@ export async function loadConfig(path: string): Promise<Config> {
 
 /** Persist config back to disk after an API edit. */
 export async function saveConfig(path: string, config: Config): Promise<void> {
-    await writeFile(path, `${JSON.stringify(config, null, 4)}\n`);
+    await writeFileAtomic(path, `${JSON.stringify(config, null, 4)}\n`);
 }

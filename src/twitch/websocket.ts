@@ -65,6 +65,14 @@ class PubSubSocket extends EventEmitter {
     private pongTimer: NodeJS.Timeout | null = null;
     private reconnectDelay = 1000;
     private closing = false;
+    /**
+     * The pending reconnect, if the socket dropped and we mean to come back.
+     *
+     * It has to be held rather than fired and forgotten: close() has to be able to cancel
+     * it, or a socket closed during the backoff window reopens afterwards and starts
+     * feeding events to whatever used to own it.
+     */
+    private reconnectTimer: NodeJS.Timeout | null = null;
 
     readonly topics = new Set<string>();
 
@@ -85,7 +93,12 @@ class PubSubSocket extends EventEmitter {
         if (this.socket) {
             return;
         }
-        this.closing = false;
+        // Once closed, stay closed. This used to clear `closing` unconditionally, so a
+        // reconnect scheduled before close() ran would undo it and resurrect the socket -
+        // complete with its old topics, still wired to a pool its owner had discarded.
+        if (this.closing) {
+            return;
+        }
         const socket = new WebSocket(PUBSUB_URL);
         this.socket = socket;
 
@@ -116,18 +129,32 @@ class PubSubSocket extends EventEmitter {
                 return;
             }
             logger.debug(`PubSub socket closed, reconnecting in ${this.reconnectDelay}ms`);
-            setTimeout(() => this.connect(), this.reconnectDelay);
+            this.reconnectTimer = setTimeout(() => {
+                this.reconnectTimer = null;
+                this.connect();
+            }, this.reconnectDelay);
+            this.reconnectTimer.unref();
             // Back off up to 60s so a Twitch-side outage does not turn into a hot loop.
             this.reconnectDelay = Math.min(this.reconnectDelay * 2, 60_000);
         });
     }
 
+    /** Shut the socket down for good: no reconnect, no retained topics. */
     close(): void {
         this.closing = true;
         this.clearTimers();
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         this.socket?.close();
         this.socket = null;
+        // Held only so a reconnect can re-subscribe. Keeping them after close means a
+        // resurrected socket would silently restore someone else's subscriptions.
+        this.topics.clear();
+        this.removeAllListeners();
     }
+
 
     listen(topic: string): void {
         if (this.topics.has(topic)) {

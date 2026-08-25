@@ -93,3 +93,30 @@ describe("category-change switching", () => {
         expect(config.switchOnCategoryChange).toBe(true);
     });
 });
+
+describe("a corrupt config file", () => {
+    it("starts from defaults instead of refusing to boot", async () => {
+        // A machine that lost power mid-save used to leave the daemon unable to start at
+        // all - and on the desktop build that would be a window that never appears.
+        const dir = await mkdtemp(join(tmpdir(), "tdb-"));
+        const path = join(dir, "config.json");
+        await writeFile(path, '{"priorityGames": ["Rust"');
+
+        const config = await loadConfig(path);
+
+        expect(config.priorityMode).toBe(DEFAULT_CONFIG.priorityMode);
+        expect(config.priorityGames).toEqual([]);
+    });
+
+    it("sets the unreadable file aside rather than destroying it", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "tdb-"));
+        const path = join(dir, "config.json");
+        await writeFile(path, "{ broken");
+
+        await loadConfig(path);
+
+        const { readdir } = await import("node:fs/promises");
+        const left = await readdir(dir);
+        expect(left.some((name) => name.startsWith("config.json.corrupt-"))).toBe(true);
+    });
+});

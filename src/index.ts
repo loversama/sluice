@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { basename, dirname, join, resolve } from "node:path";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
+
+import { writeFileAtomic } from "./atomic-write.js";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -339,7 +341,7 @@ async function main(): Promise<void> {
             if (!hasOwn && mayAdopt) {
                 const legacyContents = await readFile(legacy, "utf8").catch(() => null);
                 if (legacyContents !== null) {
-                    await writeFile(owned, legacyContents);
+                    await writeFileAtomic(owned, legacyContents);
                     adoptedAnything = true;
                     logger.info(`Adopted ${basename(legacy)} for ${auth.login}.`);
                 }
@@ -362,7 +364,7 @@ async function main(): Promise<void> {
             return legacy !== null && legacy === owned;
         };
         if (alreadyClaimed === null && (adoptedAnything || (await inheritedEarlier()))) {
-            await writeFile(claimMarker, `${auth.userId}\n`);
+            await writeFileAtomic(claimMarker, `${auth.userId}\n`);
             logger.debug(`Legacy files recorded as belonging to ${auth.login}.`);
         }
 
@@ -554,6 +556,21 @@ async function main(): Promise<void> {
     };
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+    // Node terminates on an unhandled rejection, and would do so having printed nothing
+    // useful. Under Docker the restart policy turns that into a recovery; the point of
+    // catching it is to leave a reason behind first. The desktop build registers its own
+    // handlers instead, because there is no supervisor there to restart anything.
+    process.on("unhandledRejection", (reason) => {
+        logger.error("Unhandled promise rejection:", reason);
+        logger.error("Exiting; the container will restart.");
+        process.exit(1);
+    });
+    process.on("uncaughtException", (error) => {
+        logger.error("Uncaught exception:", error);
+        logger.error("Exiting; the container will restart.");
+        process.exit(1);
+    });
 
     try {
         await miner.start();
