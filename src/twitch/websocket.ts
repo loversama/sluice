@@ -32,6 +32,30 @@ export interface PubSubEvents {
 }
 
 /**
+ * Events the pool republishes from its sockets.
+ *
+ * This list used to be written out inline at the point of use, and adding an event to
+ * PubSubEvents without adding it here compiled perfectly and simply never fired -
+ * "category-change" shipped that way, so switchOnCategoryChange subscribed to the topic,
+ * paid for it, and did nothing. The assertion below makes that a build error instead.
+ */
+const FORWARDED_EVENTS = [
+    "drop-progress",
+    "drop-claim",
+    "stream-up",
+    "stream-down",
+    "viewcount",
+    "category-change",
+    "points-claim-available",
+    "reward-notification",
+] as const;
+
+/** Resolves to `never` when every declared event is forwarded, and to the offender when not. */
+type UnforwardedEvent = Exclude<keyof PubSubEvents, (typeof FORWARDED_EVENTS)[number]>;
+const _everyEventIsForwarded: UnforwardedEvent extends never ? true : UnforwardedEvent = true;
+void _everyEventIsForwarded;
+
+/**
  * One PubSub connection. Twitch limits how many topics a single socket may hold, so
  * {@link PubSubPool} owns several of these and spreads topics across them.
  */
@@ -336,15 +360,7 @@ export class PubSubPool extends EventEmitter {
         }
         const socket = new PubSubSocket(this.getAuthToken);
         // Forward every event so consumers subscribe to the pool, not individual sockets.
-        for (const event of [
-            "drop-progress",
-            "drop-claim",
-            "stream-up",
-            "stream-down",
-            "viewcount",
-            "points-claim-available",
-            "reward-notification",
-        ] as const) {
+        for (const event of FORWARDED_EVENTS) {
             socket.on(event, (payload) => this.emit(event, payload));
         }
         socket.connect();

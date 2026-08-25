@@ -310,15 +310,37 @@ async function main(): Promise<void> {
     {
         const userDir = join(dataDir, "users", auth.userId);
         await mkdir(userDir, { recursive: true });
+
+        // Whoever signs in first inherits the pre-per-user files; nobody after them does.
+        // Without this the flat files are copied into every account that ever signs in,
+        // because the "do I already have my own?" test is per directory - handing a second
+        // account the first one's drop history, Steam library, and a config.json carrying
+        // their Steam, SinfulShadows, Telegram and Discord credentials in clear text.
+        // The marker is kept rather than deleting the originals, so an older build still
+        // finds its files where it left them.
+        const claimMarker = join(dataDir, "users", ".adopted");
+        const alreadyClaimed = await readFile(claimMarker, "utf8").then(
+            (contents) => contents.trim(),
+            () => null,
+        );
+        const mayAdopt = alreadyClaimed === null || alreadyClaimed === auth.userId;
+        if (!mayAdopt) {
+            logger.debug(
+                `Legacy files already belong to user ${alreadyClaimed}; starting ${auth.login} clean.`,
+            );
+        }
+
+        let adoptedAnything = false;
         const adopt = async (legacy: string, owned: string): Promise<string> => {
             const hasOwn = await readFile(owned).then(
                 () => true,
                 () => false,
             );
-            if (!hasOwn) {
+            if (!hasOwn && mayAdopt) {
                 const legacyContents = await readFile(legacy, "utf8").catch(() => null);
                 if (legacyContents !== null) {
                     await writeFile(owned, legacyContents);
+                    adoptedAnything = true;
                     logger.info(`Adopted ${basename(legacy)} for ${auth.login}.`);
                 }
             }
@@ -328,6 +350,21 @@ async function main(): Promise<void> {
         steamPath = await adopt(steamPath, join(userDir, "steam.json"));
         statePath = await adopt(statePath, join(userDir, "state.json"));
         claimsPath = await adopt(claimsPath, join(userDir, "claims.json"));
+
+        // An install that adopted before this marker existed has no claim on record, which
+        // would let the next account inherit the flat files after all. Identical content is
+        // proof this account is the one that took them, so record it retrospectively.
+        const inheritedEarlier = async (): Promise<boolean> => {
+            const [legacy, owned] = await Promise.all([
+                readFile(resolve(values.config!), "utf8").catch(() => null),
+                readFile(configPath, "utf8").catch(() => null),
+            ]);
+            return legacy !== null && legacy === owned;
+        };
+        if (alreadyClaimed === null && (adoptedAnything || (await inheritedEarlier()))) {
+            await writeFile(claimMarker, `${auth.userId}\n`);
+            logger.debug(`Legacy files recorded as belonging to ${auth.login}.`);
+        }
 
         // Re-read through the account's own copies: a returning user has settings and a
         // library of their own, and the pre-login load only ever saw the defaults.
