@@ -1,10 +1,11 @@
-import { app, dialog, BrowserWindow, shell } from "electron";
-import { consoleSink, setLogSink, createApp, setLogLevel } from "@tdb/core";
-import { ApiServer } from "@tdb/server";
-import { mkdirSync, statSync, renameSync, appendFileSync } from "node:fs";
-import { inspect } from "node:util";
+import { app, nativeImage, Tray, Menu, dialog, BrowserWindow, ipcMain, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@tdb/core";
+import { ApiServer } from "@tdb/server";
+import { mkdirSync, statSync, renameSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { inspect } from "node:util";
+import { stat, readdir, cp } from "node:fs/promises";
 const MAX_BYTES = 5 * 1024 * 1024;
 const ANSI = /\x1b\[[0-9;]*m/g;
 function render(value) {
@@ -53,6 +54,147 @@ function resolveWebDist() {
   }
   return join(process.resourcesPath, "web");
 }
+const DEFAULTS = {
+  runAtLogin: false,
+  closeToTray: true
+};
+function file() {
+  return join(app.getPath("userData"), "desktop.json");
+}
+function readDesktopSettings() {
+  try {
+    return { ...DEFAULTS, ...JSON.parse(readFileSync(file(), "utf8")) };
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+function writeDesktopSettings(next) {
+  const merged = { ...readDesktopSettings(), ...next };
+  try {
+    writeFileSync(file(), `${JSON.stringify(merged, null, 2)}
+`);
+  } catch {
+  }
+  applyLoginItem(merged.runAtLogin);
+  return merged;
+}
+function applyLoginItem(enabled) {
+  if (process.platform === "linux") {
+    return;
+  }
+  app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"] });
+}
+let tray = null;
+function iconPath() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return app.isPackaged ? join(process.resourcesPath, "icon.ico") : join(here, "..", "..", "resources", "icon.ico");
+}
+function createTray(deps) {
+  if (tray) {
+    return;
+  }
+  const image = nativeImage.createFromPath(iconPath());
+  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
+  tray.setToolTip("Twitch Drops Bot");
+  tray.on("double-click", () => deps.showWindow());
+  const render2 = () => {
+    const miner = deps.getHandle()?.context.getMiner() ?? null;
+    const paused = miner?.isPaused ?? false;
+    tray?.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: "Open dashboard", click: () => deps.showWindow() },
+        { type: "separator" },
+        {
+          label: paused ? "Resume mining" : "Pause mining",
+          enabled: miner !== null,
+          click: () => {
+            if (paused) {
+              miner?.resume();
+            } else {
+              miner?.pause();
+            }
+            render2();
+          }
+        },
+        { type: "separator" },
+        { label: "Quit", click: () => deps.quit() }
+      ])
+    );
+  };
+  render2();
+  const bus = deps.getHandle()?.bus;
+  bus?.on("watching", render2);
+  bus?.on("auth", render2);
+}
+function setTrayStatus(text) {
+  tray?.setToolTip(text.length > 120 ? `${text.slice(0, 117)}...` : text);
+}
+function showBalloon(title, content) {
+  try {
+    tray?.displayBalloon({ title, content });
+  } catch {
+  }
+}
+function destroyTray() {
+  tray?.destroy();
+  tray = null;
+}
+async function importFromDockerData(win) {
+  const picked = await dialog.showOpenDialog(win ?? void 0, {
+    title: "Choose the bot's data folder",
+    message: "Pick the 'data' folder used by the Docker container.",
+    properties: ["openDirectory"],
+    buttonLabel: "Import"
+  });
+  if (picked.canceled || !picked.filePaths[0]) {
+    return { imported: false, message: "Import cancelled." };
+  }
+  const source = picked.filePaths[0];
+  const looksRight = await stat(join(source, "auth.json")).then(
+    () => true,
+    async () => readdir(join(source, "users")).then(
+      (entries) => entries.length > 0,
+      () => false
+    )
+  );
+  if (!looksRight) {
+    return {
+      imported: false,
+      message: "That folder does not look like a bot data directory - expected auth.json or a users folder inside it."
+    };
+  }
+  const confirmed = await dialog.showMessageBox(win ?? void 0, {
+    type: "warning",
+    buttons: ["Import", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    title: "Stop the container first",
+    message: "Is the Docker container stopped?",
+    detail: "Both copies mining the same account at once makes Twitch credit neither reliably. Nothing is written back to the folder you picked, so you can start the container again afterwards - but not at the same time as this app."
+  });
+  if (confirmed.response !== 0) {
+    return { imported: false, message: "Import cancelled." };
+  }
+  const target = app.getPath("userData");
+  try {
+    await cp(join(source, "auth.json"), join(target, "auth.json"), { force: true }).catch(
+      () => void 0
+    );
+    await cp(join(source, "users"), join(target, "users"), {
+      recursive: true,
+      force: true
+    }).catch(() => void 0);
+    logger.info(`Imported data from ${source}`);
+    return {
+      imported: true,
+      message: "Imported. Restart the app to sign in with the imported account."
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`Import failed: ${message}`);
+    return { imported: false, message: `Import failed: ${message}` };
+  }
+}
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -66,10 +208,9 @@ if (!app.requestSingleInstanceLock()) {
       backgroundColor: "#0e0e10",
       title: "Twitch Drops Bot",
       webPreferences: {
-        // No preload script. The dashboard is an ordinary web app talking to our
-        // own server over HTTP; it needs nothing from Node, and an empty preload
-        // would only force a choice between sandboxing and module format. When
-        // something genuinely native is needed, add one then and decide there.
+        // Built to CommonJS on purpose: a sandboxed preload cannot be an ES module,
+        // and sandboxing is worth more than matching the package's module format.
+        preload: join(dirname(fileURLToPath(import.meta.url)), "..", "preload", "index.cjs"),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true
@@ -95,13 +236,37 @@ if (!app.requestSingleInstanceLock()) {
     win.on("closed", () => {
       win = null;
     });
+    win.on("close", (event) => {
+      if (reallyQuitting || !readDesktopSettings().closeToTray) {
+        return;
+      }
+      event.preventDefault();
+      win?.hide();
+      if (!warnedAboutTray) {
+        warnedAboutTray = true;
+        showBalloon(
+          "Still mining",
+          "Twitch Drops Bot is in the tray. Quit from there to stop it."
+        );
+      }
+    });
     void win.loadURL(`http://127.0.0.1:${port}/`);
+  }, registerIpc = function() {
+    ipcMain.handle("desktop:version", () => VERSION);
+    ipcMain.handle("desktop:get-settings", () => readDesktopSettings());
+    ipcMain.handle("desktop:set-settings", (_event, next) => writeDesktopSettings(next));
+    ipcMain.handle("desktop:open-logs", async () => {
+      await shell.openPath(logDirectory(app.getPath("userData")));
+    });
+    ipcMain.handle("desktop:import-docker", () => importFromDockerData(win));
   };
   let win = null;
   let handle = null;
   let server = null;
   let port = 0;
   let quitting = false;
+  let reallyQuitting = false;
+  let warnedAboutTray = false;
   app.on("second-instance", () => {
     if (win) {
       if (win.isMinimized()) {
@@ -137,6 +302,9 @@ if (!app.requestSingleInstanceLock()) {
           win?.focus();
         },
         onProblem: (problem) => {
+          if (problem.level === "fatal") {
+            showBalloon("Mining stopped", problem.message);
+          }
           if (problem.level === "fatal" && win) {
             dialog.showMessageBox(win, {
               type: "warning",
@@ -149,8 +317,46 @@ if (!app.requestSingleInstanceLock()) {
       setLogLevel(handle.context.getConfig().logLevel);
       server = new ApiServer(handle.context, resolveWebDist());
       port = await server.listen("127.0.0.1", 0);
+      registerIpc();
       handle.start();
-      createWindow();
+      try {
+        createTray({
+          getWindow: () => win,
+          showWindow: () => {
+            if (!win) {
+              createWindow();
+              return;
+            }
+            if (win.isMinimized()) {
+              win.restore();
+            }
+            win.show();
+            win.focus();
+          },
+          getHandle: () => handle,
+          quit: () => {
+            reallyQuitting = true;
+            app.quit();
+          }
+        });
+      } catch (error) {
+        logger.warn(`No system tray available: ${error.message}`);
+      }
+      handle.bus.on("watching", (payload) => {
+        const channel = payload?.channel;
+        setTrayStatus(
+          channel ? `Mining ${channel.game ?? "a game"} on ${channel.displayName ?? "a channel"}` : "Twitch Drops Bot"
+        );
+      });
+      handle.bus.on("auth", (payload) => {
+        if (payload?.status === "pending") {
+          setTrayStatus("Waiting for you to sign in");
+        }
+      });
+      applyLoginItem(readDesktopSettings().runAtLogin);
+      if (!process.argv.includes("--hidden")) {
+        createWindow();
+      }
     },
     (error) => {
       dialog.showErrorBox(
@@ -166,7 +372,6 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   app.on("window-all-closed", () => {
-    app.quit();
   });
   app.on("will-quit", (event) => {
     if (quitting) {
@@ -174,6 +379,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     quitting = true;
     event.preventDefault();
+    destroyTray();
     void Promise.resolve(handle?.stop()).catch(() => void 0).finally(() => {
       server?.close();
       app.exit(0);

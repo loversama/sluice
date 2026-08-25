@@ -214,6 +214,49 @@ async function disconnectSteam() {
     ssApiKey.value = "";
     ElMessage.info("Steam disconnected.");
 }
+/**
+ * Present only in the desktop build, which injects it from its preload script. The Docker
+ * build has no such object, so the card below simply never renders - no build flag, no
+ * environment check, nothing to keep in sync.
+ */
+const desktop = window.desktopBridge ?? null;
+const desktopSettings = ref({ runAtLogin: false, closeToTray: true });
+const desktopVersion = ref("");
+const importing = ref(false);
+
+onMounted(async () => {
+    if (!desktop) return;
+    try {
+        desktopSettings.value = await desktop.getSettings();
+        desktopVersion.value = await desktop.version();
+    } catch {
+        // A missing bridge method is not worth breaking the page over.
+    }
+});
+
+async function saveDesktop(next) {
+    if (!desktop) return;
+    try {
+        desktopSettings.value = await desktop.setSettings(next);
+    } catch (error) {
+        ElMessage.error(error.message);
+    }
+}
+
+async function importFromDocker() {
+    if (!desktop) return;
+    importing.value = true;
+    try {
+        const result = await desktop.importFromDocker();
+        if (result.imported) ElMessage.success(result.message);
+        else ElMessage.info(result.message);
+    } catch (error) {
+        ElMessage.error(error.message);
+    } finally {
+        importing.value = false;
+    }
+}
+
 const signingOut = ref(false);
 async function signOut() {
     const name = store.auth.user?.displayName ?? "this account";
@@ -291,6 +334,71 @@ const inputStyle = {
                 </span>
                 <el-switch v-model="form.switchOnCategoryChange" />
             </label>
+        </section>
+
+        <section v-if="desktop" class="card p-4 space-y-4 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Desktop app
+            </h2>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Start with Windows</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Starts hidden in the tray, so mining resumes without a window
+                        appearing.
+                    </span>
+                </span>
+                <el-switch
+                    :model-value="desktopSettings.runAtLogin"
+                    @update:model-value="(v) => saveDesktop({ runAtLogin: v })"
+                />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Close to tray</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Closing the window keeps mining. Turn this off and the close button
+                        quits instead.
+                    </span>
+                </span>
+                <el-switch
+                    :model-value="desktopSettings.closeToTray"
+                    @update:model-value="(v) => saveDesktop({ closeToTray: v })"
+                />
+            </label>
+
+            <div class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Import from a Docker install</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Copies credentials and drop history across. Stop the container
+                        first &mdash; both mining one account is what corrupts progress.
+                    </span>
+                </span>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                    :disabled="importing"
+                    @click="importFromDocker"
+                >
+                    {{ importing ? "Importing..." : "Choose folder" }}
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between gap-4">
+                <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                    Desktop build {{ desktopVersion }}
+                </span>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                    @click="desktop.openLogsFolder()"
+                >
+                    Open logs
+                </button>
+            </div>
         </section>
 
         <section class="card p-4 space-y-3 break-inside-avoid mb-4">

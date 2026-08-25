@@ -1,11 +1,15 @@
-import { app, BrowserWindow, dialog, shell } from "electron";
-import { join } from "node:path";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { createApp, setLogSink, setLogLevel, type AppHandle } from "@tdb/core";
+import { createApp, logger, setLogSink, setLogLevel, VERSION, type AppHandle } from "@tdb/core";
 import { ApiServer } from "@tdb/server";
 
 import { createFileSink, logDirectory } from "./log-file-sink.js";
 import { resolveWebDist } from "./resolve-web-dist.js";
+import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
+import { createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
+import { importFromDockerData } from "./import-docker.js";
 
 /**
  * Only one copy may run.
@@ -23,6 +27,9 @@ if (!app.requestSingleInstanceLock()) {
     let server: ApiServer | null = null;
     let port = 0;
     let quitting = false;
+    /** Set only by an explicit Quit, so closing the window can mean "hide" instead. */
+    let reallyQuitting = false;
+    let warnedAboutTray = false;
 
     app.on("second-instance", () => {
         if (win) {
@@ -57,10 +64,9 @@ if (!app.requestSingleInstanceLock()) {
             backgroundColor: "#0e0e10",
             title: "Twitch Drops Bot",
             webPreferences: {
-                // No preload script. The dashboard is an ordinary web app talking to our
-                // own server over HTTP; it needs nothing from Node, and an empty preload
-                // would only force a choice between sandboxing and module format. When
-                // something genuinely native is needed, add one then and decide there.
+                // Built to CommonJS on purpose: a sandboxed preload cannot be an ES module,
+                // and sandboxing is worth more than matching the package's module format.
+                preload: join(dirname(fileURLToPath(import.meta.url)), "..", "preload", "index.cjs"),
                 contextIsolation: true,
                 nodeIntegration: false,
                 sandbox: true,
@@ -97,6 +103,24 @@ if (!app.requestSingleInstanceLock()) {
             win = null;
         });
 
+        // The whole point of the app is to keep mining while you get on with something
+        // else, so closing the window hides it. Said out loud the first time, because an
+        // app that appears to exit and carries on running is otherwise alarming.
+        win.on("close", (event) => {
+            if (reallyQuitting || !readDesktopSettings().closeToTray) {
+                return;
+            }
+            event.preventDefault();
+            win?.hide();
+            if (!warnedAboutTray) {
+                warnedAboutTray = true;
+                showBalloon(
+                    "Still mining",
+                    "Twitch Drops Bot is in the tray. Quit from there to stop it.",
+                );
+            }
+        });
+
         void win.loadURL(`http://127.0.0.1:${port}/`);
     }
 
@@ -118,6 +142,11 @@ if (!app.requestSingleInstanceLock()) {
                     win?.focus();
                 },
                 onProblem: (problem) => {
+                    if (problem.level === "fatal") {
+                        // The window is usually hidden, so the balloon is what actually
+                        // reaches the user when mining stops.
+                        showBalloon("Mining stopped", problem.message);
+                    }
                     if (problem.level === "fatal" && win) {
                         // The dashboard shows this too; the dialog is for when the window
                         // is behind something else and mining has silently stopped.
@@ -137,10 +166,59 @@ if (!app.requestSingleInstanceLock()) {
             // keeps the server's Origin and Host checks satisfied without loosening them.
             port = await server.listen("127.0.0.1", 0);
 
+            registerIpc();
             handle.start();
-            // Not gated on being signed in: the server is up, and the dashboard's own
-            // device-code screen is what the user should be looking at while they log in.
-            createWindow();
+
+            // A tray is a nicety; a window is the app. On a desktop with no system tray -
+            // some Linux sessions, and any headless environment - Tray construction throws,
+            // and letting that escape would mean no window either.
+            try {
+                createTray({
+                    getWindow: () => win,
+                    showWindow: () => {
+                        if (!win) {
+                            createWindow();
+                            return;
+                        }
+                        if (win.isMinimized()) {
+                            win.restore();
+                        }
+                        win.show();
+                        win.focus();
+                    },
+                    getHandle: () => handle,
+                    quit: () => {
+                        reallyQuitting = true;
+                        app.quit();
+                    },
+                });
+            } catch (error) {
+                logger.warn(`No system tray available: ${(error as Error).message}`);
+            }
+
+            // Keep the tooltip honest: it is the only status anyone sees while the window
+            // is hidden, which is most of the time.
+            handle.bus.on("watching", (payload: { channel?: { displayName?: string; game?: string } }) => {
+                const channel = payload?.channel;
+                setTrayStatus(
+                    channel
+                        ? `Mining ${channel.game ?? "a game"} on ${channel.displayName ?? "a channel"}`
+                        : "Twitch Drops Bot",
+                );
+            });
+            handle.bus.on("auth", (payload: { status?: string }) => {
+                if (payload?.status === "pending") {
+                    setTrayStatus("Waiting for you to sign in");
+                }
+            });
+
+            applyLoginItem(readDesktopSettings().runAtLogin);
+
+            // Started hidden by the login item; otherwise show the window. Not gated on
+            // being signed in - the dashboard's own device-code screen does that waiting.
+            if (!process.argv.includes("--hidden")) {
+                createWindow();
+            }
         },
         (error: unknown) => {
             dialog.showErrorBox(
@@ -151,17 +229,26 @@ if (!app.requestSingleInstanceLock()) {
         },
     );
 
+    /** The whole native surface the dashboard can reach, and nothing beyond it. */
+    function registerIpc(): void {
+        ipcMain.handle("desktop:version", () => VERSION);
+        ipcMain.handle("desktop:get-settings", () => readDesktopSettings());
+        ipcMain.handle("desktop:set-settings", (_event, next) => writeDesktopSettings(next));
+        ipcMain.handle("desktop:open-logs", async () => {
+            await shell.openPath(logDirectory(app.getPath("userData")));
+        });
+        ipcMain.handle("desktop:import-docker", () => importFromDockerData(win));
+    }
+
     app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0 && port) {
             createWindow();
         }
     });
 
-    app.on("window-all-closed", () => {
-        // Phase 5 turns this into minimise-to-tray. Until then, closing the window means
-        // quitting, which is at least honest about whether mining is still happening.
-        app.quit();
-    });
+    // Deliberately not quitting: the tray is what keeps the app alive with no window, and
+    // Quit there is the only thing that ends it.
+    app.on("window-all-closed", () => {});
 
     app.on("will-quit", (event) => {
         if (quitting) {
@@ -172,6 +259,7 @@ if (!app.requestSingleInstanceLock()) {
         // Bounded, and deliberately not a wait for the miner to unwind: its loop can be
         // parked in a sleep for a refresh interval, and nobody should watch a window hang
         // for twenty minutes because they clicked close.
+        destroyTray();
         void Promise.resolve(handle?.stop())
             .catch(() => undefined)
             .finally(() => {
