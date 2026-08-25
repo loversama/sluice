@@ -190,12 +190,21 @@ export class ApiServer {
         }
     }
 
-    listen(host: string, port: number): Promise<void> {
+    /**
+     * Start listening, resolving with the port actually bound.
+     *
+     * The port matters to the caller now: passing 0 asks the OS for a free one, which is
+     * how the desktop build avoids colliding with a running container - and it then has to
+     * know which port to point a window at.
+     */
+    listen(host: string, port: number): Promise<number> {
         this.boundHost = host.toLowerCase();
         return new Promise((resolvePromise, rejectPromise) => {
             this.server.once("error", rejectPromise);
             this.server.listen(port, host, () => {
-                logger.info(`Dashboard listening on http://${host}:${port}`);
+                const address = this.server.address();
+                const actual = typeof address === "object" && address ? address.port : port;
+                logger.info(`Dashboard listening on http://${host}:${actual}`);
                 if (host !== "127.0.0.1" && host !== "localhost") {
                     // In a container, binding wide is required for the port to work at all -
                     // exposure is decided by the port mapping, so the blunt warning would be
@@ -212,7 +221,7 @@ export class ApiServer {
                         );
                     }
                 }
-                resolvePromise();
+                resolvePromise(actual);
             });
         });
     }
