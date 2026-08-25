@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { hostnameOf, isCrossOrigin, isKnownHost } from "../packages/server/src/server.js";
+import { ApiServer, hostnameOf, isCrossOrigin, isKnownHost } from "../packages/server/src/server.js";
+import { DEFAULT_CONFIG } from "../packages/core/src/config.js";
 
 const local = { boundHost: "127.0.0.1", allowedHosts: [] as string[] };
 
@@ -75,5 +76,57 @@ describe("isCrossOrigin", () => {
 
     it("treats an unparseable Origin as cross-origin", () => {
         expect(isCrossOrigin("not a url", "127.0.0.1:4400")).toBe(true);
+    });
+});
+
+describe("listen", () => {
+    /** The bare minimum an ApiServer needs to answer at all. */
+    function context() {
+        const { EventEmitter } = require("node:events") as typeof import("node:events");
+        return {
+            auth: {} as never,
+            version: "test",
+            startedAt: Date.now(),
+            bus: new EventEmitter(),
+            getAuthStatus: () => "pending" as const,
+            getDeviceCode: () => null,
+            getMiner: () => null,
+            getConfig: () => DEFAULT_CONFIG,
+            setConfig: async () => {},
+            getNotifier: () => ({ send: async () => {} }) as never,
+            getSteamLibrary: () => null,
+            searchGames: async () => [],
+            connectSteam: async () => 0,
+            logout: async () => ({ revoked: true }),
+            refreshSteam: async () => 0,
+            disconnectSteam: async () => {},
+        };
+    }
+
+    it("reports the port it was actually given", async () => {
+        // The desktop build asks for 0 so the OS picks a free one - which is what keeps it
+        // from colliding with a running container - and then has to know where to point a
+        // window. Returning void made that impossible.
+        const server = new ApiServer(context() as never, "/nonexistent");
+        const port = await server.listen("127.0.0.1", 0);
+        try {
+            expect(port).toBeGreaterThan(0);
+            expect(port).not.toBe(0);
+        } finally {
+            server.close();
+        }
+    });
+
+    it("gives out a different port each time, so two copies can coexist", async () => {
+        const a = new ApiServer(context() as never, "/nonexistent");
+        const b = new ApiServer(context() as never, "/nonexistent");
+        const portA = await a.listen("127.0.0.1", 0);
+        const portB = await b.listen("127.0.0.1", 0);
+        try {
+            expect(portA).not.toBe(portB);
+        } finally {
+            a.close();
+            b.close();
+        }
     });
 });

@@ -1,0 +1,59 @@
+# Runs on every push and pull request. The Docker build is here on purpose: the desktop
+# work must never break the distribution people are already running, and a build that
+# fails is the fastest way to find out that it has.
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+      - name: Typecheck the workspace
+        run: npx tsc -b
+      - name: Unit tests
+        run: npm test
+
+      - name: Build the dashboard
+        run: npm run build:web
+      - name: Build the desktop bundles
+        run: npm --prefix packages/desktop run build
+
+  docker:
+    # The gate that matters: the container is what is in use today.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t sluice:ci .
+      - name: It should at least start and answer
+        run: |
+          docker run -d --name sluice-ci -p 127.0.0.1:4400:4400 \
+            -v "$PWD/ci-data:/data" sluice:ci
+          for i in $(seq 1 30); do
+            if curl -sf -m 2 http://127.0.0.1:4400/ >/dev/null; then
+              echo "Dashboard answered after ${i}s."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::The dashboard never came up."
+          docker logs sluice-ci
+          exit 1
+      - name: Logs, whatever happened
+        if: always()
+        run: docker logs sluice-ci 2>&1 | tail -40

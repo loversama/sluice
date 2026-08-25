@@ -7,6 +7,7 @@ import { ApiServer } from "@sluice/server";
 
 import { createFileSink, logDirectory } from "./log-file-sink.js";
 import { resolveWebDist } from "./resolve-web-dist.js";
+import { isOwnUrl } from "./navigation.js";
 import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
 import { createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { importFromDockerData } from "./import-docker.js";
@@ -45,13 +46,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     /** True for pages we serve ourselves; everything else belongs in the real browser. */
-    const isOurs = (url: string): boolean => {
-        try {
-            return new URL(url).host === `127.0.0.1:${port}`;
-        } catch {
-            return false;
-        }
-    };
+    const isOurs = (url: string): boolean => isOwnUrl(url, port);
 
     const openExternally = (url: string): void => {
         void shell.openExternal(url);

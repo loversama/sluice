@@ -11,7 +11,8 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "pack": "electron-builder --win --publish never",
-    "dist": "npm run build && electron-builder --win --publish always"
+    "dist": "npm run build && electron-builder --win --publish always",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@sluice/core": "*",
