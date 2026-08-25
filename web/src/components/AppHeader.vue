@@ -21,6 +21,9 @@ function isActive(to) {
 
 /** One line describing what the bot is doing, short enough for a narrow window. */
 const activity = computed(() => {
+    // Before the first snapshot lands there is nothing to report, and "Idle" would be a
+    // guess presented as fact - the miner may well already be working.
+    if (!store.loaded) return "Connecting\u2026";
     if (store.daemon?.paused) return "Paused";
     const channel = store.mining?.channel;
     if (!channel) return "Idle";

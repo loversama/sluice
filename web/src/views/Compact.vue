@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
 import { formatRelative } from "@/lib/format.js";
+import Skeleton from "@/components/Skeleton.vue";
 
 /**
  * The dashboard for a window narrow enough to sit down the side of a screen.
@@ -35,6 +36,13 @@ const remaining = computed(() => {
 });
 
 const stats = computed(() => store.stats ?? null);
+
+/**
+ * True while the first snapshot is still on its way. Signing in and fetching campaigns can
+ * take ten seconds, and "nothing being mined" is a lie during that window - it is not that
+ * there is nothing, it is that we do not know yet.
+ */
+const loading = computed(() => !store.loaded);
 </script>
 
 <template>
@@ -93,6 +101,15 @@ const stats = computed(() => store.stats ?? null);
                 </p>
             </template>
 
+            <template v-else-if="loading">
+                <Skeleton width="60%" height="14px" />
+                <Skeleton width="40%" height="10px" class="mt-1.5" />
+                <Skeleton width="100%" height="6px" class="mt-3" />
+                <p class="text-[10px] mt-2" :style="{ color: 'var(--muted)' }">
+                    Connecting to Twitch&hellip;
+                </p>
+            </template>
+
             <p v-else class="text-[12px] py-2" :style="{ color: 'var(--text-2)' }">
                 Nothing being mined right now.
             </p>
@@ -121,12 +138,21 @@ const stats = computed(() => store.stats ?? null);
                     >○</span>
                 </li>
             </ul>
+            <div v-else-if="loading" class="flex flex-col gap-2">
+                <Skeleton v-for="n in 3" :key="n" :width="`${88 - n * 12}%`" height="11px" />
+            </div>
             <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">Nothing queued.</p>
         </section>
 
         <!-- Totals. One line, because at this width a stat grid is just noise. -->
         <div
-            v-if="stats"
+            v-if="loading"
+            class="flex items-center justify-between px-1"
+        >
+            <Skeleton v-for="n in 3" :key="n" width="52px" height="9px" />
+        </div>
+        <div
+            v-else-if="stats"
             class="flex items-center justify-between px-1 text-[10px]"
             :style="{ color: 'var(--text-2)' }"
         >
@@ -160,6 +186,15 @@ const stats = computed(() => store.stats ?? null);
                     </span>
                 </li>
             </ul>
+            <div v-else-if="loading" class="flex flex-col gap-2.5">
+                <div v-for="n in 3" :key="n" class="flex items-center gap-2">
+                    <Skeleton width="24px" height="24px" />
+                    <div class="flex-1 flex flex-col gap-1">
+                        <Skeleton :width="`${75 - n * 8}%`" height="10px" />
+                        <Skeleton :width="`${50 - n * 6}%`" height="8px" />
+                    </div>
+                </div>
+            </div>
             <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">No drops claimed yet.</p>
         </section>
     </div>

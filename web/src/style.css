@@ -143,3 +143,36 @@ html::-webkit-scrollbar-corner {
         transition-duration: 0.001ms !important;
     }
 }
+
+/* Loading placeholders.
+   The daemon can take ten seconds to sign in and fetch campaigns, and blank panels for
+   that long read as broken rather than busy. A shape in roughly the right place says the
+   layout is settled and only the numbers are missing. */
+@keyframes skeleton-sweep {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+.skeleton {
+    border-radius: 6px;
+    background: linear-gradient(
+        90deg,
+        var(--surface-2) 0%,
+        color-mix(in srgb, var(--surface-2) 55%, var(--text-2)) 50%,
+        var(--surface-2) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+/* Motion is the point of a skeleton, but not at the cost of making someone unwell. */
+@media (prefers-reduced-motion: reduce) {
+    .skeleton {
+        animation: none;
+        background: var(--surface-2);
+    }
+}
