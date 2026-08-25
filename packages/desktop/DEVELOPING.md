@@ -19,7 +19,16 @@ ss -tnp | grep :<port>     # an ESTAB from the renderer process is the SSE strea
 ```
 
 For anything involving the desktop session itself, use PowerShell against the same working
-copy:
+copy. There is a script at the repository root that does the whole sequence:
+
+```powershell
+.\run-desktop.ps1            # install, build, launch
+.\run-desktop.ps1 -SkipInstall -SkipWeb   # quicker, once nothing has changed
+```
+
+It offers to stop the Docker container first, because the two refuse to mine the same
+account at once and the app would otherwise look broken rather than careful. Or do it by
+hand:
 
 ```powershell
 npm install                    # from the repo root, once
