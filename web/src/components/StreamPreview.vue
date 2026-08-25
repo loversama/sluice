@@ -2,14 +2,14 @@
 import { computed, onUnmounted, ref } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { playerEmbedUrl, previewImageUrl, supportsAnonymousEmbed } from "@/lib/embed.js";
 
 /**
- * The video surface for the channel being mined: a live preview image by default, the real
- * player when the user has allowed it.
+ * The video surface for the channel being mined: a live thumbnail by default, the real
+ * player when the user has asked for it.
  *
- * Extracted so the full dashboard and the narrow one cannot drift apart on the two details
- * that are easy to get wrong - the CDN path Twitch publishes previews at, and the nonce
- * that stops the browser serving a ten-minute-old frame forever.
+ * The player is always embedded anonymously - see lib/embed.js. It must never run as the
+ * signed-in user, because that registers a second watch session and can stall the miner.
  */
 const props = defineProps({
     channel: { type: Object, required: true },
@@ -30,28 +30,27 @@ const nonce = ref(Date.now());
 const timer = setInterval(() => (nonce.value = Date.now()), 30_000);
 onUnmounted(() => clearInterval(timer));
 
+const previewUrl = computed(() => previewImageUrl(props.channel.login, nonce.value));
+const embedUrl = computed(() => playerEmbedUrl(props.channel.login, window.location.hostname));
+
+const anonymous = supportsAnonymousEmbed();
+
 /**
- * Twitch publishes a live preview per channel at a predictable path. It costs the account
- * nothing - unlike the player, which would open a competing watch session.
+ * Three things have to hold before the player runs: the user asked for it, it is switched
+ * on, and this engine can load it without credentials. The last is not negotiable.
  */
-const previewUrl = computed(
-    () =>
-        `https://static-cdn.jtvnw.net/previews-ttv/live_user_${props.channel.login}-640x360.jpg?v=${nonce.value}`,
-);
-
-const embedUrl = computed(() => {
-    const parent = window.location.hostname;
-    return `https://player.twitch.tv/?channel=${props.channel.login}&parent=${parent}&muted=true&autoplay=true`;
-});
-
-/** The player runs in this browser with your Twitch cookies, so it is opt-in in settings. */
-const showPlayer = computed(() => playing.value && store.allowStreamEmbed);
+const showPlayer = computed(() => playing.value && store.allowStreamEmbed && anonymous);
 </script>
 
 <template>
     <div class="relative aspect-video overflow-hidden" :style="{ background: 'var(--surface-2)' }">
+        <!--
+            credentialless keeps the player signed out. Without it this frame would carry the
+            user's twitch.tv cookies and open a second watch session on their account.
+        -->
         <iframe
             v-if="showPlayer"
+            credentialless
             :src="embedUrl"
             class="absolute inset-0 w-full h-full"
             allow="autoplay; fullscreen"
@@ -64,7 +63,7 @@ const showPlayer = computed(() => playing.value && store.allowStreamEmbed);
                 class="absolute inset-0 w-full h-full object-cover"
             />
             <button
-                v-if="store.allowStreamEmbed && !compact"
+                v-if="store.allowStreamEmbed && anonymous && !compact"
                 class="absolute inset-0 grid place-items-center"
                 @click="playing = true"
             >

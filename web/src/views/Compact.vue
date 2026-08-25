@@ -1,12 +1,13 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import draggable from "vuedraggable";
 
 import { useMinerStore } from "@/stores/miner.js";
 import { useViewport } from "@/lib/viewport.js";
 import { formatRelative } from "@/lib/format.js";
 import { nextPriorityGames } from "@/lib/ranking.js";
+import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import Skeleton from "@/components/Skeleton.vue";
 import StreamPreview from "@/components/StreamPreview.vue";
 
@@ -104,27 +105,14 @@ const playing = ref(true);
 const live = computed(() => store.allowStreamEmbed);
 
 /**
- * Switching to the live player is a real decision, not a display preference: it runs in
- * this browser with your Twitch cookies and can open a second watch session, which is the
- * documented way to make a miner report false progress. So the first time it is asked for
- * here, it is asked for properly - after that the toggle is immediate.
+ * The player only ever runs signed out, which this engine has to be able to do. Where it
+ * cannot, the choice is withdrawn rather than silently downgraded - a credentialed player
+ * would open a second watch session and can stall the miner.
  */
-async function setLive(value) {
-    if (value === store.allowStreamEmbed) return;
+const anonymous = supportsAnonymousEmbed();
 
-    if (value) {
-        try {
-            await ElMessageBox.confirm(
-                "The player runs in this browser and sends your Twitch cookies, so it can " +
-                    "open a second watch session on your account - which can make the miner " +
-                    "report false progress and stall. The thumbnail carries none of that risk.",
-                "Play the live stream here?",
-                { confirmButtonText: "Play it anyway", cancelButtonText: "Keep the thumbnail" },
-            );
-        } catch {
-            return; // Dismissed - leave the setting alone.
-        }
-    }
+async function setLive(value) {
+    if (value === store.allowStreamEmbed || (value && !anonymous)) return;
 
     try {
         await store.saveConfig({ allowStreamEmbed: value });
@@ -295,11 +283,14 @@ function move(index, delta) {
                     :style="
                         live === option.value
                             ? { background: 'var(--surface)', color: 'var(--text)' }
-                            : { color: 'var(--muted)' }
+                            : { color: 'var(--muted)', opacity: option.value && !anonymous ? 0.4 : 1 }
                     "
+                    :disabled="option.value && !anonymous"
                     :title="
                         option.value
-                            ? 'Play the stream here, muted. Runs in this browser with your Twitch cookies.'
+                            ? anonymous
+                                ? 'Play the stream here, muted, signed out. Does not touch your Twitch session.'
+                                : 'This browser cannot embed the player signed out, so it is not offered.'
                             : 'Thumbnail from Twitch, refreshed every 30s. No watch session.'
                     "
                     @click="setLive(option.value)"

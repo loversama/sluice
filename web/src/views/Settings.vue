@@ -3,6 +3,7 @@ import { onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import { formatRelative } from "@/lib/format.js";
 
 const store = useMinerStore();
@@ -27,6 +28,12 @@ const form = reactive({
     telegramChatId: "",
     discordWebhookUrl: "",
 });
+
+/**
+ * The player is only ever embedded signed out. Where the engine cannot do that, the setting
+ * is withdrawn rather than quietly downgraded - see lib/embed.js.
+ */
+const canEmbedAnonymously = supportsAnonymousEmbed();
 
 const newChannel = ref("");
 const newBlocked = ref("");
@@ -746,14 +753,23 @@ const inputStyle = {
                 <span>
                     <span class="text-[13px]">Allow the live stream player</span>
                     <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Adds a play button to the dashboard's channel panel. The player runs in
-                        this browser and sends your Twitch cookies, so it can open a second
-                        watch session on your account &mdash; which is the documented way to
-                        make a miner report false progress and stall. The preview thumbnail
-                        shown by default carries none of that risk.
+                        Plays the stream being mined, muted, on the dashboard. It is embedded
+                        signed out &mdash; the player never receives your Twitch cookies, so it
+                        watches as a guest and cannot open a second watch session on your
+                        account or interfere with mining. It does use bandwidth; the thumbnail
+                        shown by default does not.
+                    </span>
+                    <span
+                        v-if="!canEmbedAnonymously"
+                        class="block text-[11px] mt-1"
+                        :style="{ color: 'var(--warn)' }"
+                    >
+                        Unavailable in this browser: it cannot embed the player signed out, and
+                        a signed-in player would risk stalling the miner. Chrome, Edge and the
+                        desktop app support it.
                     </span>
                 </span>
-                <el-switch v-model="form.allowStreamEmbed" />
+                <el-switch v-model="form.allowStreamEmbed" :disabled="!canEmbedAnonymously" />
             </label>
 
             <label class="flex items-center justify-between gap-4">

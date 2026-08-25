@@ -3,8 +3,12 @@ import { computed, ref } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
 import StreamPreview from "@/components/StreamPreview.vue";
+import { supportsAnonymousEmbed } from "@/lib/embed.js";
 
 const store = useMinerStore();
+
+/** No player where it cannot be embedded signed out - see lib/embed.js. */
+const anonymous = supportsAnonymousEmbed();
 
 const collapsed = ref(false);
 /** The player is the point of the panel, so it leads; preview is the fallback. */
@@ -34,7 +38,7 @@ const watchingFor = computed(() => {
                 &mdash; the stream currently being mined
             </span>
             <button
-                v-if="store.allowStreamEmbed"
+                v-if="store.allowStreamEmbed && anonymous"
                 class="text-[11px] hover:underline shrink-0"
                 :style="{ color: 'var(--text-2)' }"
                 @click="playing = !playing"
@@ -85,6 +89,9 @@ const watchingFor = computed(() => {
                     :style="{ color: 'var(--muted)' }"
                 >
                     Preview image, refreshed every 30s.
+                </p>
+                <p v-else class="text-[10px] pt-1" :style="{ color: 'var(--muted)' }">
+                    Playing signed out, so it cannot affect what is being mined.
                 </p>
             </div>
         </template>
