@@ -243,3 +243,80 @@ describe("SinfulShadowsProvider", () => {
         expect(requestMock.mock.calls[0][0]).toContain("/api/v1/me");
     });
 });
+
+describe("SteamLibrary.load isolation between accounts", () => {
+    async function loadedLibrary(): Promise<SteamLibrary> {
+        const library = new SteamLibrary();
+        await library.refresh(
+            providerReturning({
+                steamId: "111",
+                personaName: "UserA",
+                games: [
+                    game({ appid: 1, name: "Rust", playtimeForever: 500 }),
+                    game({ appid: 2, name: "Factorio", playtimeForever: 900 }),
+                ],
+            }),
+        );
+        return library;
+    }
+
+    it("forgets the previous account when the new one has no cache", async () => {
+        // Signing in as a second account whose library was never fetched must not inherit
+        // the first account's games: they drive ownership gating and playtime ranking.
+        const library = await loadedLibrary();
+        expect(library.size).toBe(2);
+
+        const missing = join(await mkdtemp(join(tmpdir(), "tdb-")), "steam.json");
+        await expect(library.load(missing)).resolves.toBe(false);
+
+        expect(library.size).toBe(0);
+        expect(library.isLoaded).toBe(false);
+        expect(library.owns("Rust")).toBe(false);
+        expect(library.score("Rust", "playtime")).toBe(0);
+        expect(library.steamId).toBe("");
+        expect(library.personaName).toBe("");
+    });
+
+    it("forgets the previous account when the new cache is corrupt", async () => {
+        const library = await loadedLibrary();
+        const dir = await mkdtemp(join(tmpdir(), "tdb-"));
+        const corrupt = join(dir, "steam.json");
+        await writeFile(corrupt, "{ not json");
+
+        await expect(library.load(corrupt)).resolves.toBe(false);
+        expect(library.size).toBe(0);
+    });
+
+    it("does not answer from a stale match cache after clearing", async () => {
+        const library = await loadedLibrary();
+        // Prime the memoised matcher before the switch.
+        expect(library.owns("Rust")).toBe(true);
+
+        library.clear();
+
+        expect(library.match("Rust")).toBeNull();
+        expect(library.recencySignal).toBe("lastPlayed");
+    });
+
+    it("replaces one account's library with another's on a successful load", async () => {
+        const library = await loadedLibrary();
+        const dir = await mkdtemp(join(tmpdir(), "tdb-"));
+        const path = join(dir, "steam.json");
+        await writeFile(
+            path,
+            JSON.stringify({
+                steamId: "222",
+                personaName: "UserB",
+                fetchedAt: 1_700_000_000_000,
+                games: [game({ appid: 3, name: "Terraria", playtimeForever: 10 })],
+            }),
+        );
+
+        await expect(library.load(path)).resolves.toBe(true);
+
+        expect(library.personaName).toBe("UserB");
+        expect(library.owns("Terraria")).toBe(true);
+        expect(library.owns("Rust")).toBe(false);
+        expect(library.size).toBe(1);
+    });
+});

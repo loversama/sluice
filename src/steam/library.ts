@@ -77,7 +77,33 @@ export class SteamLibrary {
         return this.games;
     }
 
+    /**
+     * Forget the library entirely.
+     *
+     * Every derived value has to go with it: a stale match cache would keep answering for
+     * games that are no longer owned, and the recency basis was chosen from data that is
+     * no longer here.
+     */
+    clear(): void {
+        this.games = [];
+        this.steamId = "";
+        this.personaName = "";
+        this.fetchedAt = 0;
+        this.stale = false;
+        this.matchCache.clear();
+        this.recencyBasis = "lastPlayed";
+    }
+
+    /**
+     * Replace what we hold with what is on disk, or with nothing if that fails.
+     *
+     * Clearing first is the point. This used to return false and leave the previous
+     * contents in place, so signing in as a second account whose library had never been
+     * fetched kept the first account's games - silently driving ownership gating and
+     * playtime ranking from a library belonging to someone else.
+     */
     async load(path: string): Promise<boolean> {
+        this.clear();
         try {
             const stored = JSON.parse(await readFile(path, "utf8")) as StoredLibrary;
             this.steamId = stored.steamId;
