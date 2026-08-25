@@ -379,8 +379,20 @@ export function createApp(options: AppOptions): AppHandle {
 
     /** Sign in, then mine until something ends the session. */
     async function runSession(forceLogin: boolean): Promise<SessionOutcome> {
-        if (!(await prepareSession(forceLogin))) {
-            return "stopped";
+        // Signing in touches the network before any of the mining code runs, and a name
+        // lookup that fails while the machine is waking up or a container is being rebuilt
+        // used to throw straight past the loop and end it - leaving the process alive,
+        // serving a dashboard, and mining nothing until somebody noticed. Anything that
+        // goes wrong before the miner exists is a crash like any other: back off and try
+        // again.
+        try {
+            if (!(await prepareSession(forceLogin))) {
+                return "stopped";
+            }
+        } catch (error) {
+            logger.warn(`Could not start a session: ${(error as Error).message}`);
+            problem("warn", "session-start", (error as Error).message);
+            return "crashed";
         }
         const active = miner;
         if (!active) {
@@ -442,9 +454,11 @@ export function createApp(options: AppOptions): AppHandle {
         bus,
         context,
         start(): void {
+            // The loop is meant to be the thing that survives; if it ever throws its way
+            // out, say so loudly rather than going quiet with the dashboard still up.
             void loop().catch((error) => {
-                logger.error("Session loop failed:", error);
-                problem("fatal", "generic", (error as Error).message);
+                logger.error("Session loop stopped unexpectedly:", error);
+                problem("fatal", "loop-failed", (error as Error).message);
             });
         },
         async stop(): Promise<void> {

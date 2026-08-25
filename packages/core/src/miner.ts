@@ -61,6 +61,14 @@ const MAX_TRACKED_CHANNELS = 150;
 /** Streamers running an untagged campaign almost always say so in the title. */
 const DROPS_IN_TITLE = /\bdrops?\b/i;
 
+/**
+ * How much claim history to hold in memory.
+ *
+ * Matches the on-disk cap, so the two views agree. Anything older is still in the file;
+ * nothing that reads this needs more than the recent run.
+ */
+const MAX_IN_MEMORY_CLAIMS = 1000;
+
 function mentionsDrops(channel: Channel): boolean {
     return DROPS_IN_TITLE.test(channel.stream?.title ?? "");
 }
@@ -160,7 +168,17 @@ export class Miner extends EventEmitter {
     private campaigns = new Map<string, Campaign>();
     private readonly slugCache = new Map<string, string>();
     /** Channel login -> time it becomes eligible again after a failure. */
+    /**
+     * Channels and campaigns to leave alone until a timestamp passes.
+     *
+     * Pruned as it is read rather than merely consulted: entries were only ever added, one
+     * per channel ever benched and one per campaign ever passed over, and campaign IDs turn
+     * over constantly. A container restarted every deploy never noticed; a desktop app left
+     * running for months would.
+     */
     private readonly channelCooldowns = new Map<string, number>();
+    /** Cleared whenever a claim lands or campaigns change; see getClaimStats. */
+    private claimStats: ClaimStats | null = null;
     private readonly claimedDropIds = new Set<string>();
     /** Drops Twitch refused to claim, so a doomed claim is not retried every refresh. */
     private readonly failedClaimIds = new Set<string>();
@@ -248,6 +266,7 @@ export class Miner extends EventEmitter {
 
     /** Restore the durable record of what has been earned. */
     async loadClaimHistory(path: string): Promise<void> {
+        this.claimStats = null;
         this.claimsPath = path;
         this.claimHistory = await loadClaims(path);
         // Seed the in-memory view so a fresh process still shows recent claims.
@@ -266,7 +285,18 @@ export class Miner extends EventEmitter {
     }
 
     /** Lifetime totals for the dashboard. */
+    /**
+     * Lifetime totals for the dashboard.
+     *
+     * Memoised because the dashboard asks on every poll and the answer only changes when a
+     * drop is claimed or campaigns are refreshed - both of which clear it. Recomputing it
+     * meant walking the whole claim history several times a minute, for a number that had
+     * not moved.
+     */
     getClaimStats(): ClaimStats {
+        if (this.claimStats) {
+            return this.claimStats;
+        }
         const required = new Map<string, number>();
         const deliverable = new Map<string, boolean>();
         for (const campaign of this.campaigns.values()) {
@@ -275,7 +305,8 @@ export class Miner extends EventEmitter {
                 required.set(drop.id, drop.requiredMinutes);
             }
         }
-        return summarise(this.claimHistory, required, deliverable);
+        this.claimStats = summarise(this.claimHistory, required, deliverable);
+        return this.claimStats;
     }
 
     /**
@@ -574,6 +605,9 @@ export class Miner extends EventEmitter {
 
     /** Active campaigns with work left, in the order they would be mined. */
     getMineableCampaigns(): Campaign[] {
+        // Also a sweep point: the dashboard polls this steadily, so expired cooldowns are
+        // cleared even while mining is paused and selectCampaigns is not running.
+        this.pruneCooldowns(Date.now());
         return this.getCampaigns()
             .filter((campaign) => campaign.isActive && !campaign.isCompleted)
             .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
@@ -695,6 +729,7 @@ export class Miner extends EventEmitter {
     /** Every campaign worth trying, best first. */
     private selectCampaigns(): Campaign[] {
         const now = Date.now();
+        this.pruneCooldowns(now);
         const candidates = [...this.campaigns.values()].filter((campaign) => {
             if (!campaign.isActive || campaign.isCompleted) {
                 return false;
@@ -770,6 +805,20 @@ export class Miner extends EventEmitter {
             default:
                 return true;
         }
+    }
+
+    /** Drop cooldowns that have expired. Cheap, and the only thing that ever removes them. */
+    private pruneCooldowns(now: number): void {
+        for (const [key, until] of this.channelCooldowns) {
+            if (until <= now) {
+                this.channelCooldowns.delete(key);
+            }
+        }
+    }
+
+    /** How many cooldowns are being held. Exposed so a test can prove they do not pile up. */
+    get cooldownCount(): number {
+        return this.channelCooldowns.size;
     }
 
     private matchesGame(game: string, campaign: Campaign): boolean {
@@ -1220,6 +1269,12 @@ export class Miner extends EventEmitter {
     }
 
     private async claim(drop: Drop, campaign: Campaign): Promise<void> {
+        // A stopped miner must not still be claiming. Nothing about a claim is unsafe on
+        // its own, but it writes the claim file - and after a sign-out the session that
+        // replaced this one owns that file.
+        if (this.stopping) {
+            return;
+        }
         if (this.claimedDropIds.has(drop.id) || this.failedClaimIds.has(drop.id)) {
             return;
         }
@@ -1272,6 +1327,17 @@ export class Miner extends EventEmitter {
                     this.recentClaims.shift();
                 }
                 this.claimHistory.claims.push(this.recentClaims.at(-1)!);
+                // Kept to the same bound the file is written with. The array used to grow
+                // without limit while the file stayed capped, so a long-running process
+                // held history it would never save - and getClaimStats walks all of it on
+                // every dashboard poll.
+                if (this.claimHistory.claims.length > MAX_IN_MEMORY_CLAIMS) {
+                    this.claimHistory.claims.splice(
+                        0,
+                        this.claimHistory.claims.length - MAX_IN_MEMORY_CLAIMS,
+                    );
+                }
+                this.claimStats = null;
                 this.persistClaims();
                 this.pushFeed("info", `Claimed ${drop.rewardNames} (${campaign.gameName})`);
                 this.emit("drop-claimed", { drop, campaign });
@@ -1863,6 +1929,14 @@ export class Miner extends EventEmitter {
             .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
 
         for (const campaign of interesting) {
+            // One request per campaign, sequentially, over however many are active - which
+            // can be minutes of work. Without a check here, stopping or signing out waited
+            // for all of it, and an abandoned session carried on spending requests against
+            // an account its successor was already using.
+            if (this.stopping) {
+                logger.debug("Campaign refresh abandoned: stopping.");
+                return;
+            }
             try {
                 const details = await this.gql.getCampaignDetails(campaign.id);
                 if (details) {
@@ -1944,6 +2018,9 @@ export class Miner extends EventEmitter {
         }
 
         this.campaigns = next;
+        // The stats read required minutes and deliverability from the campaigns, so a
+        // refresh can change the answer even when no drop was claimed.
+        this.claimStats = null;
         this.backfillClaimRecords();
         this.reconcileCompletions();
         this.rebindWatchedObjects(next);
@@ -1969,6 +2046,9 @@ export class Miner extends EventEmitter {
         if (this.config.autoClaimDrops && !this.dryRun) {
             for (const campaign of next.values()) {
                 for (const drop of campaign.claimableDrops) {
+                    if (this.stopping) {
+                        return;
+                    }
                     await this.claim(drop, campaign);
                 }
             }

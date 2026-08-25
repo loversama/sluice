@@ -40,6 +40,8 @@ class FakeMiner extends EventEmitter {
     async runDryRun(): Promise<void> {}
 }
 
+let authLoadFails = false;
+
 class FakeAuth {
     userId = "42";
     login = "tester";
@@ -49,6 +51,12 @@ class FakeAuth {
         authsBuilt.push(this);
     }
     async load(): Promise<boolean> {
+        if (authLoadFails) {
+            authLoadFails = false; // fail once, then recover
+            throw Object.assign(new Error("getaddrinfo EAI_AGAIN id.twitch.tv"), {
+                code: "EAI_AGAIN",
+            });
+        }
         return true;
     }
     async validate(): Promise<boolean> {
@@ -116,6 +124,7 @@ describe("the session loop", () => {
     beforeEach(() => {
         minersBuilt.length = 0;
         authsBuilt.length = 0;
+        authLoadFails = false;
         nextStart = () => new Promise<void>(() => {});
     });
 
@@ -203,5 +212,25 @@ describe("the session loop", () => {
         expect(app.context.getAuthStatus()).toBe("pending");
         expect(app.context.getMiner()).toBeNull();
         expect(app.bus).toBeInstanceOf(EventEmitter);
+    });
+
+    it("recovers from a network failure while signing in", async () => {
+        // A name lookup that fails while the machine is waking up, or a container is being
+        // rebuilt, used to throw past the loop and end it - leaving the process up, the
+        // dashboard served, and nothing mining until somebody noticed.
+        authLoadFails = true;
+        const app = await makeApp();
+        const problems: unknown[] = [];
+        app.bus.on("problem", (p) => problems.push(p));
+
+        app.start();
+        await until(() => problems.length > 0, "the failure to be reported");
+
+        expect(problems).toContainEqual(
+            expect.objectContaining({ code: "session-start" }),
+        );
+        // And it is not fatal: the loop is still alive and will try again.
+        expect(problems.every((p: any) => p.level !== "fatal")).toBe(true);
+        await app.stop();
     });
 });
