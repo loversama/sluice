@@ -26,6 +26,14 @@ watch(sidebarCollapsed, (value) =>
 const hasSidebar = computed(() => !isCompact.value);
 
 /**
+ * Settings sits apart from the rest. The other four are places you move between while
+ * using the app; settings is somewhere you go to change it and then leave, so it belongs
+ * at the bottom rather than in the run of them.
+ */
+const primaryNav = computed(() => NAV.filter((item) => item.to !== "/settings"));
+const settingsNav = computed(() => NAV.find((item) => item.to === "/settings"));
+
+/**
  * In a narrow window the dashboard is replaced by a stacked one rather than reflowed.
  * The full dashboard needs width for the tier ladder, the live channel and the activity
  * feed; squeezing those to 350px makes three unreadable things instead of dropping to the
@@ -132,7 +140,7 @@ onUnmounted(() => store.disconnect());
                 }"
             >
                 <RouterLink
-                    v-for="item in NAV"
+                    v-for="item in primaryNav"
                     :key="item.to"
                     :to="item.to"
                     class="flex items-center gap-3 mx-2 rounded-lg text-[13px] transition-colors"
@@ -145,6 +153,25 @@ onUnmounted(() => store.disconnect());
                 >
                     <span class="text-[15px] w-5 text-center shrink-0">{{ item.icon }}</span>
                     <span v-if="!sidebarCollapsed" class="truncate">{{ item.label }}</span>
+                </RouterLink>
+
+                <!-- The rule is its own element rather than a border on the link, so it
+                     stays put instead of moving with the hover and active states. -->
+                <div class="mt-auto mx-3 mb-1" :style="{ borderTop: '1px solid var(--border)' }" />
+
+                <RouterLink
+                    v-if="settingsNav"
+                    :to="settingsNav.to"
+                    class="flex items-center gap-3 mx-2 mb-1 rounded-lg text-[13px] transition-colors"
+                    :class="sidebarCollapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2'"
+                    :title="sidebarCollapsed ? settingsNav.label : undefined"
+                    :style="{
+                        background: isActive(settingsNav.to) ? 'var(--surface-2)' : 'transparent',
+                        color: isActive(settingsNav.to) ? 'var(--text)' : 'var(--text-2)',
+                    }"
+                >
+                    <span class="text-[15px] w-5 text-center shrink-0">{{ settingsNav.icon }}</span>
+                    <span v-if="!sidebarCollapsed" class="truncate">{{ settingsNav.label }}</span>
                 </RouterLink>
             </nav>
 
