@@ -11,15 +11,33 @@
  * assertions here are about a server answering, not about pixels.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..", "..");
 const electron = join(root, "node_modules", "electron", "dist", "electron");
+
+// The repository often lives on a Windows drive shared with WSL, and whichever platform
+// last ran npm install owns node_modules. Running this against the other platform's binary
+// fails in a way that looks like the app is broken, so say what actually happened.
+if (!existsSync(electron)) {
+    const windows = existsSync(join(root, "node_modules", "electron", "dist", "electron.exe"));
+    console.error(
+        windows
+            ? "Electron here is a Windows build, so this cannot run it from Linux.\n" +
+                  "Run the smoke test from PowerShell, or reinstall for Linux with npm install."
+            : "No Electron binary found. Run npm install first.",
+    );
+    process.exit(existsSync(join(root, "node_modules", "electron")) ? 0 : 1);
+}
 const entry = join(here, "..", "out", "main", "index.js");
 
-const headless = !process.env.DISPLAY || process.env.SMOKE_HEADLESS === "1";
+// Prefer xvfb-run wherever it exists. WSLg sets DISPLAY, but launching Electron straight
+// at it is unreliable, and a smoke test that cannot start the app tells you nothing about
+// the app. SMOKE_DIRECT=1 forces the real display when you want to watch it.
+const headless = process.env.SMOKE_DIRECT !== "1";
 const command = headless ? "xvfb-run" : electron;
 const args = headless
     ? ["-a", "--server-args=-screen 0 1280x900x24", electron, "--no-sandbox", entry]

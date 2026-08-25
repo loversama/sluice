@@ -4,10 +4,22 @@ import { ElNotification } from "element-plus";
 import { useRoute } from "vue-router";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { useViewport } from "@/lib/viewport.js";
 import AuthGate from "@/components/AuthGate.vue";
+import AppHeader from "@/components/AppHeader.vue";
+import Compact from "@/views/Compact.vue";
 
 const store = useMinerStore();
 const route = useRoute();
+const { isCompact } = useViewport();
+
+/**
+ * In a narrow window the dashboard is replaced by a stacked one rather than reflowed.
+ * The full dashboard needs width for the tier ladder, the live channel and the activity
+ * feed; squeezing those to 350px makes three unreadable things instead of dropping to the
+ * three that matter. Every other page reflows fine and is left alone.
+ */
+const showCompactHome = computed(() => isCompact.value && route.path === "/");
 
 const NAV = [
     { to: "/", label: "Dashboard", icon: "◧" },
@@ -82,48 +94,38 @@ onUnmounted(() => store.disconnect());
 </script>
 
 <template>
-    <div class="min-h-full" :style="{ background: 'var(--bg)', color: 'var(--text)' }">
+    <div class="h-screen overflow-hidden" :style="{ background: 'var(--bg)', color: 'var(--text)' }">
         <AuthGate v-if="store.loaded && store.auth.status !== 'ok'" />
 
-        <div v-else class="flex min-h-screen">
+        <div v-else class="flex flex-col h-full">
             <!-- Sidebar: icon rail that expands on wider screens. -->
+        <AppHeader :nav="NAV" :compact="isCompact" />
+
+        <div class="flex-1 flex min-h-0">
+            <!-- The rail is a second way to the same places, so it earns its width only
+                 when there is width to spare. Below that the header carries navigation
+                 on its own. -->
             <nav
-                class="hidden md:flex flex-col w-[72px] xl:w-[220px] shrink-0 py-4"
+                v-if="!isCompact"
+                class="hidden lg:flex w-[168px] shrink-0 flex-col gap-0.5 py-3"
                 :style="{ background: 'var(--surface)', borderRight: '1px solid var(--border)' }"
             >
-                <div class="px-4 mb-6 flex items-center gap-2">
-                    <span class="text-[18px]" :style="{ color: 'var(--accent)' }">◈</span>
-                    <span class="hidden xl:block text-[13px] font-semibold">Drops Bot</span>
-                </div>
-
                 <RouterLink
                     v-for="item in NAV"
                     :key="item.to"
                     :to="item.to"
-                    class="flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-[13px] transition-colors"
+                    class="flex items-center gap-3 px-4 py-2 mx-2 rounded-lg text-[13px] transition-colors"
                     :style="{
                         background: isActive(item.to) ? 'var(--surface-2)' : 'transparent',
                         color: isActive(item.to) ? 'var(--text)' : 'var(--text-2)',
                     }"
                 >
                     <span class="text-[15px] w-5 text-center">{{ item.icon }}</span>
-                    <span class="hidden xl:block">{{ item.label }}</span>
+                    <span>{{ item.label }}</span>
                 </RouterLink>
-
-                <div class="mt-auto px-4 pt-4 flex items-center gap-2" :style="{ borderTop: '1px solid var(--border)' }">
-                    <span
-                        class="w-2 h-2 rounded-full shrink-0"
-                        :class="store.connection === 'open' ? 'pulse' : ''"
-                        :style="{ background: store.connection === 'open' ? 'var(--success)' : 'var(--warn)' }"
-                        :title="store.connection"
-                    />
-                    <span class="hidden xl:block text-[11px] truncate" :style="{ color: 'var(--text-2)' }">
-                        {{ store.auth.user?.displayName ?? "not signed in" }}
-                    </span>
-                </div>
             </nav>
 
-            <main class="flex-1 min-w-0 pb-20 md:pb-0">
+            <main class="flex-1 min-w-0 overflow-y-auto">
                 <div
                     v-if="problem"
                     class="px-4 py-2 text-[12px]"
@@ -135,27 +137,12 @@ onUnmounted(() => store.disconnect());
                     {{ problem.message }}
                 </div>
 
-                <div class="p-4 max-w-[1800px] mx-auto [&_.sticky]:backdrop-blur">
+                <Compact v-if="showCompactHome" />
+                <div v-else class="p-4 max-w-[1800px] mx-auto [&_.sticky]:backdrop-blur">
                     <RouterView />
                 </div>
             </main>
-
-            <!-- Mobile: the rail becomes a bottom tab bar. -->
-            <nav
-                class="md:hidden fixed bottom-0 inset-x-0 flex"
-                :style="{ background: 'var(--surface)', borderTop: '1px solid var(--border)' }"
-            >
-                <RouterLink
-                    v-for="item in NAV"
-                    :key="item.to"
-                    :to="item.to"
-                    class="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]"
-                    :style="{ color: isActive(item.to) ? 'var(--accent)' : 'var(--text-2)' }"
-                >
-                    <span class="text-[16px]">{{ item.icon }}</span>
-                    {{ item.label }}
-                </RouterLink>
-            </nav>
+        </div>
         </div>
     </div>
 </template>

@@ -56,8 +56,11 @@ if (!app.requestSingleInstanceLock()) {
         win = new BrowserWindow({
             width: 1180,
             height: 820,
-            minWidth: 900,
-            minHeight: 600,
+            // Narrow enough to sit down the side of a screen: below ~560px the dashboard
+            // swaps to a stacked layout showing what is mining, what is queued and what
+            // has just landed, which is what you want from a window kept in the corner.
+            minWidth: 350,
+            minHeight: 480,
             show: false,
             backgroundColor: "#0e0e10",
             title: "Sluice",
