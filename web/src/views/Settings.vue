@@ -35,6 +35,76 @@ const form = reactive({
  */
 const canEmbedAnonymously = supportsAnonymousEmbed();
 
+const tgChecking = ref(false);
+const tgDetecting = ref(false);
+const tgBot = ref(null);
+const tgChat = ref(null);
+const tgBotError = ref("");
+const tgChatError = ref("");
+
+/** Steps light up as they are satisfied, so the panel shows how far along you are. */
+function stepStyle(step) {
+    const done =
+        (step === 1 && Boolean(form.telegramBotToken)) ||
+        (step === 2 && Boolean(tgBot.value)) ||
+        (step === 3 && Boolean(form.telegramChatId));
+    return done
+        ? { background: "var(--accent)", color: "white" }
+        : { background: "var(--surface)", color: "var(--text-2)" };
+}
+
+/**
+ * Both calls go through the daemon rather than straight to Telegram. It already holds the
+ * token, so a saved one keeps working after a reload even though the dashboard only ever
+ * receives it masked.
+ */
+async function postTelegram(path) {
+    const response = await fetch(`/api/notify/telegram/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botToken: form.telegramBotToken }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Failed (${response.status})`);
+    return body;
+}
+
+async function checkTelegramBot() {
+    tgChecking.value = true;
+    tgBot.value = null;
+    tgBotError.value = "";
+    try {
+        const body = await postTelegram("check");
+        if (body.ok) tgBot.value = body;
+        else tgBotError.value = body.error ?? "Telegram did not recognise that token.";
+    } catch (error) {
+        tgBotError.value = error.message;
+    } finally {
+        tgChecking.value = false;
+    }
+}
+
+async function detectTelegramChat() {
+    tgDetecting.value = true;
+    tgChat.value = null;
+    tgChatError.value = "";
+    try {
+        const body = await postTelegram("detect-chat");
+        if (body.ok) {
+            tgChat.value = body;
+            form.telegramChatId = body.chatId;
+        } else if (body.waiting) {
+            tgChatError.value = "No message yet. Send your bot something, then press again.";
+        } else {
+            tgChatError.value = body.error ?? "Could not read the chat.";
+        }
+    } catch (error) {
+        tgChatError.value = error.message;
+    } finally {
+        tgDetecting.value = false;
+    }
+}
+
 const newChannel = ref("");
 const newBlocked = ref("");
 const saved = ref(false);
@@ -593,6 +663,7 @@ const inputStyle = {
                         {{ steam.gameCount }} games
                         &middot; via {{ steam.provider === "sinfulshadows" ? "SinfulShadows" : "your Steam key" }}
                         <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt) }}</template>
+
                         <template v-if="steam.stale"> &middot; cached</template>
                     </p>
                 </div>
@@ -698,15 +769,99 @@ const inputStyle = {
 
         <section class="card p-4 space-y-3 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Notifications</h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label class="block">
-                    <span class="text-[12px]">Telegram bot token</span>
-                    <input v-model="form.telegramBotToken" type="password" class="w-full mt-1 px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </label>
-                <label class="block">
-                    <span class="text-[12px]">Telegram chat ID</span>
-                    <input v-model="form.telegramChatId" class="w-full mt-1 px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </label>
+            <!--
+                Numbered rather than two bare boxes. Creating the bot is easy; finding the
+                chat ID is where people give up, so that step does the work itself instead
+                of naming a number and leaving them to find it.
+            -->
+            <div class="rounded-lg p-3 space-y-3" :style="{ background: 'var(--surface-2)' }">
+                <div class="flex items-baseline gap-2">
+                    <span class="text-[12px] font-medium">Telegram</span>
+                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Get a message when a drop is claimed.
+                    </span>
+                </div>
+
+                <div class="flex gap-2">
+                    <span class="tg-step" :style="stepStyle(1)">1</span>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[12px]">Make a bot for yourself</p>
+                        <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
+                            Open BotFather in Telegram, send it <code>/newbot</code>, and follow
+                            the two questions. It replies with a token.
+                        </p>
+                        <a
+                            href="https://t.me/BotFather"
+                            target="_blank"
+                            rel="noreferrer"
+                            class="text-[11px] underline"
+                            :style="{ color: 'var(--accent)' }"
+                        >Open BotFather</a>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <span class="tg-step" :style="stepStyle(2)">2</span>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[12px] mb-1.5">Paste the token</p>
+                        <div class="flex gap-2">
+                            <input
+                                v-model="form.telegramBotToken"
+                                type="password"
+                                placeholder="1234567890:AA..."
+                                class="flex-1 min-w-0 px-3 py-2 rounded-lg text-[12px] outline-none"
+                                :style="inputStyle"
+                            />
+                            <button
+                                class="px-3 py-2 rounded-lg text-[12px] shrink-0"
+                                :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                                :disabled="tgChecking || !form.telegramBotToken"
+                                @click="checkTelegramBot"
+                            >
+                                {{ tgChecking ? "Checking&hellip;" : "Check" }}
+                            </button>
+                        </div>
+                        <p v-if="tgBot" class="text-[11px] mt-1" :style="{ color: 'var(--ok, var(--accent))' }">
+                            Connected to @{{ tgBot.username }}.
+                        </p>
+                        <p v-else-if="tgBotError" class="text-[11px] mt-1" :style="{ color: 'var(--warn)' }">
+                            {{ tgBotError }}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <span class="tg-step" :style="stepStyle(3)">3</span>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[12px]">Say hello to it</p>
+                        <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
+                            Send your bot any message in Telegram, then press this &mdash; it
+                            reads the chat ID off that message, so you never have to find it.
+                        </p>
+                        <div class="flex gap-2">
+                            <input
+                                v-model="form.telegramChatId"
+                                placeholder="Chat ID"
+                                class="flex-1 min-w-0 px-3 py-2 rounded-lg text-[12px] outline-none"
+                                :style="inputStyle"
+                            />
+                            <button
+                                class="px-3 py-2 rounded-lg text-[12px] shrink-0"
+                                :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                                :disabled="tgDetecting || !form.telegramBotToken"
+                                @click="detectTelegramChat"
+                            >
+                                {{ tgDetecting ? "Looking&hellip;" : "Find it for me" }}
+                            </button>
+                        </div>
+                        <p v-if="tgChat" class="text-[11px] mt-1" :style="{ color: 'var(--text-2)' }">
+                            Found {{ tgChat.label }}.
+                        </p>
+                        <p v-else-if="tgChatError" class="text-[11px] mt-1" :style="{ color: 'var(--warn)' }">
+                            {{ tgChatError }}
+                        </p>
+                    </div>
+                </div>
             </div>
             <label class="block">
                 <span class="text-[12px]">Discord webhook URL</span>
@@ -793,3 +948,17 @@ const inputStyle = {
         </div>
     </div>
 </template>
+
+<style scoped>
+.tg-step {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+}
+</style>

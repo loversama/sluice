@@ -42,5 +42,12 @@ export { InstanceLock, instanceLockPath, findConflictingInstance } from "./insta
 export type { Miner } from "./miner.js";
 export type { AuthState } from "./twitch/auth.js";
 export type { NotifierGroup } from "./notifiers/index.js";
+export {
+    botFromGetMe,
+    chatFromUpdates,
+    describeTelegramError,
+    looksLikeBotToken,
+} from "./notifiers/telegram-setup.js";
+export type { TelegramBot, TelegramChat } from "./notifiers/telegram-setup.js";
 export type { SteamLibrary } from "./steam/library.js";
 export type { Campaign, Drop, PriorityMode } from "./models/campaign.js";

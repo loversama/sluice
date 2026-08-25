@@ -428,10 +428,6 @@ if (!app.requestSingleInstanceLock()) {
       setLogSink(createFileSink(logDirectory(dataDir), !app.isPackaged));
       handle = createApp({
         dataDir,
-        // Electron keeps cookies between runs, so an embedded player is far more
-        // likely here than in a browser tab to become a second watch session on the
-        // same account - which is the documented way to make progress stall.
-        configDefaults: { allowStreamEmbed: false },
         getOwnPort: () => port,
         onDeviceCode: () => {
           win?.show();

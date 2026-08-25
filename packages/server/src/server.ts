@@ -10,6 +10,9 @@ import {
     verifyCallback,
     isMasked,
     maskConfig,
+    botFromGetMe,
+    chatFromUpdates,
+    describeTelegramError,
     serializeCampaign,
     type Config,
     type DeviceCodeInfo,
@@ -51,6 +54,24 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
         "Cache-Control": "no-store",
     });
     response.end(payload);
+}
+
+/**
+ * One call to Telegram's bot API, returning the status alongside the body so a caller can
+ * tell "wrong token" from "nobody has messaged it yet".
+ */
+async function callTelegram(
+    token: string,
+    method: string,
+): Promise<{ status: number; payload: unknown }> {
+    try {
+        const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+            signal: AbortSignal.timeout(10_000),
+        });
+        return { status: response.status, payload: await response.json().catch(() => null) };
+    } catch {
+        return { status: 0, payload: { description: "Could not reach Telegram." } };
+    }
 }
 
 async function readBody(request: IncomingMessage): Promise<unknown> {
@@ -429,6 +450,36 @@ export class ApiServer {
             return sendJson(response, 200, { suggestions: miner?.getLinkSuggestions() ?? [] });
         }
 
+        if (path === "/api/notify/telegram/check" && method === "POST") {
+            const token = this.telegramToken(await readBody(request));
+            if (!token) {
+                return sendJson(response, 400, { error: "Paste a bot token first." });
+            }
+            const { status, payload } = await callTelegram(token, "getMe");
+            const bot = botFromGetMe(payload);
+            return bot
+                ? sendJson(response, 200, { ok: true, ...bot })
+                : sendJson(response, 200, { ok: false, error: describeTelegramError(status, payload) });
+        }
+
+        if (path === "/api/notify/telegram/detect-chat" && method === "POST") {
+            const token = this.telegramToken(await readBody(request));
+            if (!token) {
+                return sendJson(response, 400, { error: "Paste a bot token first." });
+            }
+            // A short timeout, not a long poll: the user is watching a button, and a
+            // request that hangs for 30s reads as broken however correct it is.
+            const { status, payload } = await callTelegram(token, "getUpdates?limit=20&timeout=0");
+            const chat = chatFromUpdates(payload);
+            if (chat) {
+                return sendJson(response, 200, { ok: true, ...chat });
+            }
+            const body = payload as { ok?: boolean } | null;
+            return body?.ok === true
+                ? sendJson(response, 200, { ok: false, waiting: true })
+                : sendJson(response, 200, { ok: false, error: describeTelegramError(status, payload) });
+        }
+
         if (path === "/api/notify/test" && method === "POST") {
             const notifier = this.context.getNotifier();
             if (notifier.isEmpty) {
@@ -443,6 +494,21 @@ export class ApiServer {
         }
 
         return sendJson(response, 404, { error: "Not found" });
+    }
+
+    /**
+     * The token to talk to Telegram with.
+     *
+     * The dashboard only ever sees secrets masked, so a token already saved is not in the
+     * form the user is looking at. Taking the stored one when the client has nothing real
+     * to offer is what lets the setup buttons keep working after a reload.
+     */
+    private telegramToken(body: unknown): string {
+        const supplied = (body as { botToken?: unknown } | null)?.botToken;
+        if (typeof supplied === "string" && supplied.trim() && !isMasked(supplied)) {
+            return supplied.trim();
+        }
+        return this.context.getConfig().notifications.telegram?.botToken ?? "";
     }
 
     /** Best-effort origin for OpenID return URLs, from the Host header the browser used. */
