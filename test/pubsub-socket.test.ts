@@ -45,7 +45,7 @@ vi.mock("ws", () => ({
     WebSocket: FakeWebSocket,
 }));
 
-const { PubSubPool } = await import("../src/twitch/websocket.js");
+const { PubSubPool } = await import("../packages/core/src/twitch/websocket.js");
 
 describe("PubSub socket lifecycle", () => {
     beforeEach(() => {

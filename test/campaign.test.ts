@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Campaign, compareCampaigns, type RankingOptions, isInLibraryScope } from "../src/models/campaign.js";
+import { Campaign, compareCampaigns, type RankingOptions, isInLibraryScope } from "../packages/core/src/models/campaign.js";
 import { iso, makeCampaign, makeDrop } from "./fixtures.js";
 
 const rank = (options: Partial<RankingOptions> = {}): RankingOptions => ({

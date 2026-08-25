@@ -1,4 +1,4 @@
-import type { DropCampaign, TimeBasedDrop } from "../src/twitch/types.js";
+import type { DropCampaign, TimeBasedDrop } from "../packages/core/src/twitch/types.js";
 
 /** Minutes as milliseconds, for readable relative timestamps. */
 const MIN = 60_000;

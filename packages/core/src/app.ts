@@ -25,7 +25,7 @@ import { AuthState } from "./twitch/auth.js";
 import { TwitchGql, StaleQueryHashError } from "./twitch/gql.js";
 import { VERSION } from "./version.js";
 import { wireMinerToBus } from "./wiring.js";
-import type { DeviceCodeInfo, ServerContext } from "./api/server.js";
+import type { DeviceCodeInfo, ServerContext } from "./api/context.js";
 
 export interface AppOptions {
     /** Root of all persisted state: auth.json and users/<id>/ live beneath it. */

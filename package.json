@@ -3,20 +3,21 @@
   "version": "0.1.0",
   "description": "Browserless Twitch drops miner.",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "packages/daemon/dist/index.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "check-hashes": "node dist/tools/check-hashes.js",
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "clean": "tsc -b --clean",
+    "start": "node packages/daemon/dist/index.js",
+    "typecheck": "tsc -b --noEmit || tsc -b",
+    "check-hashes": "node packages/core/dist/tools/check-hashes.js",
     "build:web": "npm --prefix web install && npm --prefix web run build",
     "build:all": "npm run build && npm run build:web",
     "dev:web": "npm --prefix web run dev",
-    "start:web": "node dist/index.js --web",
+    "start:web": "node packages/daemon/dist/index.js --web",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -29,5 +30,8 @@
     "@types/ws": "^8.5.13",
     "typescript": "^5.7.2",
     "vitest": "^3.2.7"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

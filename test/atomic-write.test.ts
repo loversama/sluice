@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { writeFileAtomic } from "../src/atomic-write.js";
+import { writeFileAtomic } from "../packages/core/src/atomic-write.js";
 
 async function tempDir(): Promise<string> {
     return mkdtemp(join(tmpdir(), "tdb-atomic-"));

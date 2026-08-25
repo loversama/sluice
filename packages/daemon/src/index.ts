@@ -2,10 +2,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { createApp } from "./app.js";
-import logger, { setLogLevel, type LogLevel } from "./logger.js";
-import { ApiServer } from "./api/server.js";
-import { loadConfig } from "./config.js";
+import { createApp, loadConfig, logger, setLogLevel, type LogLevel } from "@tdb/core";
+import { ApiServer } from "@tdb/server";
 
 const HELP = `
 Twitch Drops Bot - browserless Twitch drop miner
@@ -96,7 +94,11 @@ async function main(): Promise<void> {
     let boundPort: number | null = null;
     let server: ApiServer | null = null;
     if (values.web) {
-        const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
+        // dist/index.js -> packages/daemon/dist -> repo root. Stated once, here, rather
+        // than guessed at from inside the server: the desktop build serves the same assets
+        // from somewhere else entirely.
+        const here = dirname(fileURLToPath(import.meta.url));
+        const staticDir = process.env.TDB_WEB_DIR ?? resolve(here, "..", "..", "..", "web", "dist");
         server = new ApiServer(app.context, staticDir);
         const { host, port } = parseAddress(values["web-addr"]!);
         boundPort = await server.listen(host, port);

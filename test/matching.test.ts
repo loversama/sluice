@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findBestMatch, normalizeTitle, similarity } from "../src/steam/matching.js";
+import { findBestMatch, normalizeTitle, similarity } from "../packages/core/src/steam/matching.js";
 
 const library = [
     { name: "Tom Clancy's Ghost Recon® Wildlands" },

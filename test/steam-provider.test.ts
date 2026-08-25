@@ -3,16 +3,16 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadConfig } from "../src/config.js";
-import { SteamLibrary } from "../src/steam/library.js";
-import type { LibraryProvider, LibrarySnapshot } from "../src/steam/provider.js";
-import type { OwnedGame } from "../src/steam/client.js";
+import { loadConfig } from "../packages/core/src/config.js";
+import { SteamLibrary } from "../packages/core/src/steam/library.js";
+import type { LibraryProvider, LibrarySnapshot } from "../packages/core/src/steam/provider.js";
+import type { OwnedGame } from "../packages/core/src/steam/client.js";
 
 const requestMock = vi.hoisted(() => vi.fn());
 vi.mock("undici", () => ({ request: requestMock }));
 
 // Imported after the mock so the provider picks up the stub.
-const { SinfulShadowsProvider, LibraryError } = await import("../src/steam/provider.js");
+const { SinfulShadowsProvider, LibraryError } = await import("../packages/core/src/steam/provider.js");
 
 function game(partial: Partial<OwnedGame> & { name: string }): OwnedGame {
     return {

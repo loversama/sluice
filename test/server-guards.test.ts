@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hostnameOf, isCrossOrigin, isKnownHost } from "../src/api/server.js";
+import { hostnameOf, isCrossOrigin, isKnownHost } from "../packages/server/src/server.js";
 
 const local = { boundHost: "127.0.0.1", allowedHosts: [] as string[] };
 

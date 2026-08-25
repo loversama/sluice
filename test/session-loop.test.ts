@@ -63,9 +63,9 @@ class FakeAuth {
     clear(): void {}
 }
 
-vi.mock("../src/miner.js", () => ({ Miner: FakeMiner }));
-vi.mock("../src/twitch/auth.js", () => ({ AuthState: FakeAuth, AuthError: Error }));
-vi.mock("../src/twitch/gql.js", async () => {
+vi.mock("../packages/core/src/miner.js", () => ({ Miner: FakeMiner }));
+vi.mock("../packages/core/src/twitch/auth.js", () => ({ AuthState: FakeAuth, AuthError: Error }));
+vi.mock("../packages/core/src/twitch/gql.js", async () => {
     class StaleQueryHashError extends Error {}
     class AuthExpiredError extends Error {}
     return {
@@ -80,8 +80,8 @@ vi.mock("../src/twitch/gql.js", async () => {
     };
 });
 
-const { createApp } = await import("../src/app.js");
-const { StaleQueryHashError } = await import("../src/twitch/gql.js");
+const { createApp } = await import("../packages/core/src/app.js");
+const { StaleQueryHashError } = await import("../packages/core/src/twitch/gql.js");
 
 async function makeApp() {
     const dataDir = await mkdtemp(join(tmpdir(), "tdb-session-"));

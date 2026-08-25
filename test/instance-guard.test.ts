@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { InstanceLock, instanceLockPath } from "../src/instance-guard.js";
+import { InstanceLock, instanceLockPath } from "../packages/core/src/instance-guard.js";
 
 async function tempDir(): Promise<string> {
     return mkdtemp(join(tmpdir(), "tdb-lock-"));

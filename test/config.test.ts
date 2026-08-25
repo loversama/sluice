@@ -3,8 +3,8 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DEFAULT_CONFIG, loadConfig, saveConfig } from "../src/config.js";
-import { isMasked, maskConfig } from "../src/api/serialize.js";
+import { DEFAULT_CONFIG, loadConfig, saveConfig } from "../packages/core/src/config.js";
+import { isMasked, maskConfig } from "../packages/core/src/api/serialize.js";
 
 async function tempConfig(contents: unknown): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "tdb-"));
