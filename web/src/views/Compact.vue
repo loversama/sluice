@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import draggable from "vuedraggable";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { useViewport } from "@/lib/viewport.js";
 import { formatRelative } from "@/lib/format.js";
 import { nextPriorityGames } from "@/lib/ranking.js";
 import Skeleton from "@/components/Skeleton.vue";
@@ -13,9 +14,9 @@ import StreamPreview from "@/components/StreamPreview.vue";
  * The dashboard for a window narrow enough to sit down the side of a screen.
  *
  * Laid out as one column of full-bleed bands rather than a stack of cards: at 350px the
- * card gutters were costing about a fifth of the width to say nothing. What is being mined
- * leads, the stream itself sits under it, and the queue below that is the thing you can
- * actually act on.
+ * card gutters were costing about a fifth of the width to say nothing. The whole thing is
+ * sized to the window - the two lists share whatever is left after the header and the
+ * stream, and scroll inside themselves - so the window itself never grows a scrollbar.
  */
 const store = useMinerStore();
 
@@ -46,6 +47,93 @@ const stats = computed(() => store.stats ?? null);
  * there is nothing, it is that we do not know yet.
  */
 const loading = computed(() => !store.loaded);
+
+/* -------------------------------------------------------------------------- */
+/* Status colour                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The header carries its state as a colour as well as a word, so a glance at the edge of
+ * the screen is enough. Mixed into the surface rather than used neat: this sits behind
+ * body text and runs for hours, so it has to stay furniture.
+ */
+const tone = computed(() => {
+    if (loading.value) return { label: null, colour: "var(--text-2)" };
+    if (store.daemon?.paused) return { label: "Paused", colour: "var(--warn)" };
+    if (store.isStalled) return { label: "Quiet", colour: "var(--warn)" };
+    if (channel.value) return { label: null, colour: "var(--accent)" };
+    return { label: null, colour: "var(--text-2)" };
+});
+
+const heroStyle = computed(() => ({
+    background: `color-mix(in srgb, ${tone.value.colour} 14%, var(--surface))`,
+    transition: "background 400ms ease",
+}));
+
+/* -------------------------------------------------------------------------- */
+/* Preview                                                                     */
+/* -------------------------------------------------------------------------- */
+
+const { height: windowHeight } = useViewport();
+
+/**
+ * Below this there is not enough room for the stream and two useful lists, and the stream
+ * is the part you can afford to lose - it is a nice-to-have next to knowing what is queued.
+ */
+const PREVIEW_NEEDS = 640;
+
+/**
+ * Null until the user says otherwise, and then it wins at every size. Auto-hiding is there
+ * so a window dragged short does something sensible on its own, not to overrule someone who
+ * has already told us what they want.
+ */
+const previewChoice = ref(localStorage.getItem("sluice.preview"));
+
+const showPreview = computed(() =>
+    previewChoice.value ? previewChoice.value === "shown" : windowHeight.value >= PREVIEW_NEEDS,
+);
+
+function togglePreview() {
+    previewChoice.value = showPreview.value ? "hidden" : "shown";
+    localStorage.setItem("sluice.preview", previewChoice.value);
+}
+
+/** Compact never falls back to the thumbnail while the player is allowed. */
+const playing = ref(true);
+
+const live = computed(() => store.allowStreamEmbed);
+
+/**
+ * Switching to the live player is a real decision, not a display preference: it runs in
+ * this browser with your Twitch cookies and can open a second watch session, which is the
+ * documented way to make a miner report false progress. So the first time it is asked for
+ * here, it is asked for properly - after that the toggle is immediate.
+ */
+async function setLive(value) {
+    if (value === store.allowStreamEmbed) return;
+
+    if (value) {
+        try {
+            await ElMessageBox.confirm(
+                "The player runs in this browser and sends your Twitch cookies, so it can " +
+                    "open a second watch session on your account - which can make the miner " +
+                    "report false progress and stall. The thumbnail carries none of that risk.",
+                "Play the live stream here?",
+                { confirmButtonText: "Play it anyway", cancelButtonText: "Keep the thumbnail" },
+            );
+        } catch {
+            return; // Dismissed - leave the setting alone.
+        }
+    }
+
+    try {
+        await store.saveConfig({ allowStreamEmbed: value });
+        store.allowStreamEmbed = value;
+        playing.value = true;
+    } catch (error) {
+        ElMessage.error(error.message);
+    }
+}
 
 /* -------------------------------------------------------------------------- */
 /* The queue, and what dragging it means                                       */
@@ -117,29 +205,27 @@ function move(index, delta) {
 </script>
 
 <template>
-    <div class="flex flex-col">
-        <!-- Now mining. Full bleed and pinned: in a window this size it is the reason the
-             window is open, and it should not scroll away behind the queue. -->
-        <section class="sticky top-0 z-10" :style="{ background: 'var(--surface)' }">
+    <!--
+        Sized to the window, so in normal use nothing here scrolls but the two lists. The
+        root is auto rather than hidden purely as a floor: the thin window can be dragged to
+        420px, where the header and the stream alone nearly fill it, and clipping the lists
+        out of existence would be a worse answer than one scrollbar.
+    -->
+    <div class="flex-1 min-h-0 flex flex-col overflow-y-auto scroll-thin">
+        <!-- Now mining. Tinted by state, so the header reads at a glance. -->
+        <section class="shrink-0" :style="heroStyle">
             <div class="px-3 pt-2.5 pb-2">
                 <div class="flex items-center justify-between gap-2 mb-1">
                     <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Now mining
                     </span>
                     <span
-                        v-if="store.daemon?.paused"
+                        v-if="tone.label"
                         class="text-[10px] px-1.5 py-0.5 rounded"
-                        :style="{ background: 'var(--surface-2)', color: 'var(--warn)' }"
+                        :style="{ background: 'var(--surface-2)', color: tone.colour }"
+                        :title="tone.label === 'Quiet' ? 'Progress has gone quiet. The miner recovers on its own.' : undefined"
                     >
-                        Paused
-                    </span>
-                    <span
-                        v-else-if="store.isStalled"
-                        class="text-[10px] px-1.5 py-0.5 rounded"
-                        :style="{ background: 'var(--surface-2)', color: 'var(--warn)' }"
-                        title="Progress has gone quiet. The miner recovers on its own."
-                    >
-                        Quiet
+                        {{ tone.label }}
                     </span>
                 </div>
 
@@ -150,11 +236,11 @@ function move(index, delta) {
                     </p>
 
                     <div v-if="drop" class="flex items-baseline justify-between gap-2 mt-1.5">
-                        <span class="text-[11px]" :style="{ color: 'var(--muted)' }">
+                        <span class="text-[11px] font-medium" :style="{ color: remaining === 0 ? 'var(--accent)' : 'var(--text-2)' }">
                             {{ remaining === 0 ? "Ready to claim" : `${remaining} min left` }}
                         </span>
-                        <span class="text-[11px] tabular shrink-0">
-                            {{ drop.currentMinutes }}/{{ drop.requiredMinutes }}m
+                        <span class="text-[11px] tabular shrink-0" :style="{ color: 'var(--text-2)' }">
+                            {{ drop.currentMinutes }}/{{ drop.requiredMinutes }}m &middot; {{ progress }}%
                         </span>
                     </div>
 
@@ -176,43 +262,135 @@ function move(index, delta) {
                 </p>
             </div>
 
-            <!-- Edge to edge, flush with the bottom of the band: at this width the progress
-                 bar reads better as the seam between sections than as another boxed row. -->
-            <div class="h-[3px]" :style="{ background: 'var(--surface-2)' }">
+            <!-- Edge to edge and deliberately heavy: this is the one number the window
+                 exists to report, and at 3px it was losing the argument with the
+                 screenshot underneath it. -->
+            <div class="h-[7px]" :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }">
                 <div
                     v-if="drop"
                     class="h-full transition-[width] duration-700"
-                    :style="{ width: `${progress}%`, background: 'var(--accent)' }"
+                    :style="{
+                        width: `${progress}%`,
+                        background: tone.colour,
+                        boxShadow: `0 0 10px color-mix(in srgb, ${tone.colour} 70%, transparent)`,
+                    }"
                 />
             </div>
         </section>
 
-        <!-- The stream itself. -->
-        <StreamPreview v-if="channel" :key="channel.login" :channel="channel" compact />
-        <div v-else-if="loading" class="aspect-video skeleton" />
-
-        <!-- Up next, as a full-width band rather than a card heading. -->
+        <!-- Preview. Labelled like the other bands, and carrying its own controls. -->
         <div
-            class="flex items-center gap-2 px-3 py-1.5"
+            v-if="channel || loading"
+            class="shrink-0 flex items-center gap-2 px-3 py-1.5"
             :style="{ background: 'var(--surface-2)' }"
         >
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Preview
+            </span>
+            <div class="ml-auto flex items-center gap-1">
+                <button
+                    v-for="option in [{ value: false, label: 'Image' }, { value: true, label: 'Live' }]"
+                    :key="option.label"
+                    class="text-[10px] px-1.5 py-0.5 rounded"
+                    :style="
+                        live === option.value
+                            ? { background: 'var(--surface)', color: 'var(--text)' }
+                            : { color: 'var(--muted)' }
+                    "
+                    :title="
+                        option.value
+                            ? 'Play the stream here, muted. Runs in this browser with your Twitch cookies.'
+                            : 'Thumbnail from Twitch, refreshed every 30s. No watch session.'
+                    "
+                    @click="setLive(option.value)"
+                >
+                    {{ option.label }}
+                </button>
+                <button
+                    class="text-[10px] pl-1.5"
+                    :style="{ color: 'var(--muted)' }"
+                    :title="showPreview ? 'Hide the stream to give the lists more room' : 'Show the stream'"
+                    @click="togglePreview"
+                >
+                    {{ showPreview ? "Hide" : "Show" }}
+                </button>
+            </div>
+        </div>
+
+        <template v-if="showPreview">
+            <StreamPreview
+                v-if="channel"
+                :key="channel.login"
+                v-model:playing="playing"
+                :channel="channel"
+                compact
+                class="shrink-0 max-h-[30vh]"
+            />
+            <div v-else-if="loading" class="shrink-0 aspect-video max-h-[30vh] skeleton" />
+        </template>
+
+        <!-- Recently claimed. The reason any of this is running, so it leads. -->
+        <div class="shrink-0 flex items-center gap-2 px-3 py-1.5" :style="{ background: 'var(--surface-2)' }">
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Recently claimed
+            </span>
+            <span v-if="claims.length" class="text-[10px] tabular" :style="{ color: 'var(--muted)' }">
+                {{ claims.length }}
+            </span>
+        </div>
+
+        <div class="flex-1 min-h-[56px] overflow-y-auto scroll-thin px-3 py-2">
+            <ul v-if="claims.length" class="flex flex-col gap-2">
+                <li v-for="claim in claims" :key="`${claim.dropId}-${claim.at}`" class="flex items-center gap-2 min-w-0">
+                    <img
+                        v-if="claim.rewardImageURL"
+                        :src="claim.rewardImageURL"
+                        alt=""
+                        class="w-6 h-6 rounded object-cover shrink-0"
+                        loading="lazy"
+                    />
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[12px] truncate leading-tight">{{ claim.dropName }}</p>
+                        <p class="text-[10px] truncate" :style="{ color: 'var(--text-2)' }">
+                            {{ claim.gameName }}
+                        </p>
+                    </div>
+                    <span class="text-[10px] shrink-0 tabular" :style="{ color: 'var(--muted)' }">
+                        {{ formatRelative(claim.at) }}
+                    </span>
+                </li>
+            </ul>
+            <div v-else-if="loading" class="flex flex-col gap-2.5">
+                <div v-for="n in 3" :key="n" class="flex items-center gap-2">
+                    <Skeleton width="24px" height="24px" />
+                    <div class="flex-1 flex flex-col gap-1">
+                        <Skeleton :width="`${75 - n * 8}%`" height="10px" />
+                        <Skeleton :width="`${50 - n * 6}%`" height="8px" />
+                    </div>
+                </div>
+            </div>
+            <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">No drops claimed yet.</p>
+        </div>
+
+        <!-- Up next. -->
+        <div class="shrink-0 flex items-center gap-2 px-3 py-1.5" :style="{ background: 'var(--surface-2)' }">
             <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Up next
             </span>
             <span v-if="order.length" class="text-[10px] tabular" :style="{ color: 'var(--muted)' }">
                 {{ order.length }}
             </span>
-            <span v-if="saving" class="text-[10px] ml-auto" :style="{ color: 'var(--muted)' }">
-                Saving&hellip;
+            <span
+                v-if="order.length"
+                class="text-[10px] ml-auto"
+                :style="{ color: 'var(--muted)' }"
+                title="Dragging pins the game in your priority list. Whatever is mining now stays first."
+            >
+                {{ saving ? "Saving…" : "Drag to rank" }}
             </span>
         </div>
 
-        <div class="px-3 py-2">
-            <p v-if="order.length" class="text-[10px] mb-1.5" :style="{ color: 'var(--muted)' }">
-                Drag to rank. Pinning a game here keeps it ahead of the rest; what is mining
-                now stays first.
-            </p>
-
+        <div class="flex-1 min-h-[56px] overflow-y-auto scroll-thin px-3 py-2">
             <draggable
                 v-if="order.length"
                 v-model="order"
@@ -287,64 +465,22 @@ function move(index, delta) {
                 </div>
             </div>
 
-            <p v-else class="text-[12px] py-1" :style="{ color: 'var(--text-2)' }">Nothing queued.</p>
+            <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">Nothing queued.</p>
         </div>
 
         <!-- Totals. One line, because at this width a stat grid is just noise. -->
-        <div v-if="loading" class="flex items-center justify-between px-3 pb-2">
-            <Skeleton v-for="n in 3" :key="n" width="52px" height="9px" />
-        </div>
         <div
-            v-else-if="stats"
-            class="flex items-center justify-between px-3 pb-2 text-[10px]"
-            :style="{ color: 'var(--text-2)' }"
+            class="shrink-0 flex items-center justify-between px-3 py-1.5 text-[10px]"
+            :style="{ borderTop: '1px solid var(--border)', color: 'var(--text-2)' }"
         >
-            <span>{{ stats.dropsAllTime }} drops</span>
-            <span>{{ stats.campaignsCompleted }} campaigns</span>
-            <span>{{ Math.round(stats.minutesEarned / 60) }}h mined</span>
-        </div>
-
-        <!-- Recently claimed. The reason any of this is running. -->
-        <div
-            class="flex items-center gap-2 px-3 py-1.5"
-            :style="{ background: 'var(--surface-2)' }"
-        >
-            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
-                Recently claimed
-            </span>
-        </div>
-
-        <div class="px-3 py-2">
-            <ul v-if="claims.length" class="flex flex-col gap-2">
-                <li v-for="claim in claims" :key="`${claim.dropId}-${claim.at}`" class="flex items-center gap-2 min-w-0">
-                    <img
-                        v-if="claim.rewardImageURL"
-                        :src="claim.rewardImageURL"
-                        alt=""
-                        class="w-6 h-6 rounded object-cover shrink-0"
-                        loading="lazy"
-                    />
-                    <div class="min-w-0 flex-1">
-                        <p class="text-[12px] truncate leading-tight">{{ claim.dropName }}</p>
-                        <p class="text-[10px] truncate" :style="{ color: 'var(--text-2)' }">
-                            {{ claim.gameName }}
-                        </p>
-                    </div>
-                    <span class="text-[10px] shrink-0 tabular" :style="{ color: 'var(--muted)' }">
-                        {{ formatRelative(claim.at) }}
-                    </span>
-                </li>
-            </ul>
-            <div v-else-if="loading" class="flex flex-col gap-2.5">
-                <div v-for="n in 3" :key="n" class="flex items-center gap-2">
-                    <Skeleton width="24px" height="24px" />
-                    <div class="flex-1 flex flex-col gap-1">
-                        <Skeleton :width="`${75 - n * 8}%`" height="10px" />
-                        <Skeleton :width="`${50 - n * 6}%`" height="8px" />
-                    </div>
-                </div>
-            </div>
-            <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">No drops claimed yet.</p>
+            <template v-if="loading">
+                <Skeleton v-for="n in 3" :key="n" width="52px" height="9px" />
+            </template>
+            <template v-else-if="stats">
+                <span>{{ stats.dropsAllTime }} drops</span>
+                <span>{{ stats.campaignsCompleted }} campaigns</span>
+                <span>{{ Math.round(stats.minutesEarned / 60) }}h mined</span>
+            </template>
         </div>
     </div>
 </template>

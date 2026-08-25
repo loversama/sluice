@@ -175,10 +175,16 @@ onUnmounted(() => store.disconnect());
                 </RouterLink>
             </nav>
 
-            <main class="flex-1 min-w-0 overflow-y-auto">
+            <!-- The narrow home fits itself to the window and scrolls its own lists, so the
+                 page behind it must not scroll too - two nested scrollbars at 350px is one
+                 too many. Every other route keeps the ordinary scrolling main. -->
+            <main
+                class="flex-1 min-w-0"
+                :class="showCompactHome ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'"
+            >
                 <div
                     v-if="problem"
-                    class="px-4 py-2 text-[12px]"
+                    class="px-4 py-2 text-[12px] shrink-0"
                     :style="{
                         background: `color-mix(in srgb, var(--${problem.level}) 15%, transparent)`,
                         color: `var(--${problem.level})`,
