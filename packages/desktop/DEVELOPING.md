@@ -1,7 +1,25 @@
 # Running the desktop build
 
-**This cannot be developed from WSL.** Electron needs a real display and a Windows Node
-install; run these from PowerShell against the same working copy.
+Most of this **can** be run from WSL. WSLg provides a display, and `xvfb-run` works where
+it does not:
+
+```bash
+npm run build:web && npm run build
+npm --prefix packages/desktop run build
+xvfb-run -a --server-args="-screen 0 1280x900x24" \
+  ./node_modules/electron/dist/electron --no-sandbox packages/desktop/out/main/index.js
+```
+
+That is enough to confirm the app starts, binds a free port, serves the dashboard, loads it
+in the renderer, and reaches Twitch for a device code. A quick way to prove the renderer
+really loaded it, rather than the window merely opening:
+
+```bash
+ss -tnp | grep :<port>     # an ESTAB from the renderer process is the SSE stream
+```
+
+For anything involving the desktop session itself, use PowerShell against the same working
+copy:
 
 ```powershell
 npm install                    # from the repo root, once
@@ -20,8 +38,9 @@ and a browser, which is a faster loop than any Electron reload would be.
 The window is the easy part; these are the bits that only fail in a packaged, real-display
 context:
 
-- The window opens on the device-code screen without waiting for a Twitch login.
 - The **twitch.tv/activate** link opens your default browser, not a window inside the app.
+  This is the main thing Xvfb cannot answer: there is no browser registered there for
+  `shell.openExternal` to reach.
 - **Settings -> Sign in through Steam** leaves the app, completes in the browser, and the
   Settings page updates over SSE when it returns. This one is the fiddliest: the anchor is
   a same-tab navigation to our own `/api/steam/login`, which then 302s outward, so the
