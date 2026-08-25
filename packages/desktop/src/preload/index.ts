@@ -37,6 +37,11 @@ const bridge = {
     onMaximizedChange: (fn: (maximized: boolean) => void): void => {
         ipcRenderer.on("window:maximized", (_event, value: boolean) => fn(value));
     },
+    toggleThin: (): Promise<boolean> => ipcRenderer.invoke("window:toggle-thin"),
+    isThin: (): Promise<boolean> => ipcRenderer.invoke("window:is-thin"),
+    onThinChange: (fn: (thin: boolean) => void): void => {
+        ipcRenderer.on("window:thin", (_event, value: boolean) => fn(value));
+    },
 };
 
 contextBridge.exposeInMainWorld("desktopBridge", bridge);

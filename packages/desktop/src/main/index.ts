@@ -32,6 +32,11 @@ if (!app.requestSingleInstanceLock()) {
     /** Set only by an explicit Quit, so closing the window can mean "hide" instead. */
     let reallyQuitting = false;
     let warnedAboutTray = false;
+    /** The side-of-the-screen form. Entered by choice, never by dragging. */
+    const THIN_WIDTH = 350;
+    let thin = false;
+    /** What to go back to, so leaving thin does not forget the size you had. */
+    let wideWidth = 1180;
     /** Built once the app handle exists, so update state rides the dashboard's own stream. */
     let updates: AutoUpdate | null = null;
 
@@ -56,10 +61,10 @@ if (!app.requestSingleInstanceLock()) {
         win = new BrowserWindow({
             width: 1180,
             height: 820,
-            // Narrow enough to sit down the side of a screen: below ~560px the dashboard
-            // swaps to a stacked layout showing what is mining, what is queued and what
-            // has just landed, which is what you want from a window kept in the corner.
-            minWidth: 350,
+            // Deliberately above the thin form's width. The narrow layout is a mode you
+            // choose with a button, not somewhere you can end up by dragging an edge and
+            // wondering why the app rearranged itself.
+            minWidth: 560,
             minHeight: 480,
             show: false,
             backgroundColor: "#0e0e10",
@@ -275,6 +280,33 @@ if (!app.requestSingleInstanceLock()) {
         });
         ipcMain.handle("window:close", () => win?.close());
         ipcMain.handle("window:is-maximized", () => win?.isMaximized() ?? false);
+
+        /**
+         * Switch between the ordinary window and the thin one that lives down the side of
+         * a screen.
+         *
+         * The minimum width moves with it, which is the point: at 350 the dashboard is a
+         * different layout, and arriving there by dragging an edge would feel like the app
+         * breaking rather than changing shape. Going thin is a decision; coming back
+         * restores the size that was in use before.
+         */
+        ipcMain.handle("window:toggle-thin", () => {
+            if (!win) return false;
+            if (thin) {
+                win.setMinimumSize(560, 480);
+                win.setBounds({ width: wideWidth, height: win.getBounds().height }, true);
+                thin = false;
+            } else {
+                if (win.isMaximized()) win.unmaximize();
+                wideWidth = win.getBounds().width;
+                win.setMinimumSize(320, 420);
+                win.setBounds({ width: THIN_WIDTH, height: win.getBounds().height }, true);
+                thin = true;
+            }
+            win.webContents.send("window:thin", thin);
+            return thin;
+        });
+        ipcMain.handle("window:is-thin", () => thin);
         ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
         ipcMain.handle("desktop:check-updates", () => updates?.check());
         ipcMain.handle("desktop:install-update", () => {

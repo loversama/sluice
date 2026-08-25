@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ElNotification } from "element-plus";
 import { useRoute } from "vue-router";
 
@@ -12,6 +12,18 @@ import Compact from "@/views/Compact.vue";
 const store = useMinerStore();
 const route = useRoute();
 const { isCompact } = useViewport();
+
+/**
+ * Collapsing leaves the icons rather than removing the rail: it buys back width without
+ * taking away the way around, which is what a disappearing sidebar does.
+ */
+const sidebarCollapsed = ref(localStorage.getItem("sluice.sidebar") === "collapsed");
+watch(sidebarCollapsed, (value) =>
+    localStorage.setItem("sluice.sidebar", value ? "collapsed" : "open"),
+);
+
+/** The rail is only worth its width when there is width; below that the header takes over. */
+const hasSidebar = computed(() => !isCompact.value);
 
 /**
  * In a narrow window the dashboard is replaced by a stacked one rather than reflowed.
@@ -99,29 +111,40 @@ onUnmounted(() => store.disconnect());
 
         <div v-else class="flex flex-col h-full">
             <!-- Sidebar: icon rail that expands on wider screens. -->
-        <AppHeader :nav="NAV" :compact="isCompact" />
+        <AppHeader
+            :nav="NAV"
+            :compact="isCompact"
+            :has-sidebar="hasSidebar"
+            @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
+        />
 
         <div class="flex-1 flex min-h-0">
             <!-- The rail is a second way to the same places, so it earns its width only
                  when there is width to spare. Below that the header carries navigation
                  on its own. -->
             <nav
-                v-if="!isCompact"
-                class="hidden lg:flex w-[168px] shrink-0 flex-col gap-0.5 py-3"
-                :style="{ background: 'var(--surface)', borderRight: '1px solid var(--border)' }"
+                v-if="hasSidebar"
+                class="shrink-0 flex flex-col gap-0.5 py-2 transition-[width] duration-150"
+                :style="{
+                    width: sidebarCollapsed ? '52px' : '176px',
+                    background: 'var(--surface)',
+                    borderRight: '1px solid var(--border)',
+                }"
             >
                 <RouterLink
                     v-for="item in NAV"
                     :key="item.to"
                     :to="item.to"
-                    class="flex items-center gap-3 px-4 py-2 mx-2 rounded-lg text-[13px] transition-colors"
+                    class="flex items-center gap-3 mx-2 rounded-lg text-[13px] transition-colors"
+                    :class="sidebarCollapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2'"
+                    :title="sidebarCollapsed ? item.label : undefined"
                     :style="{
                         background: isActive(item.to) ? 'var(--surface-2)' : 'transparent',
                         color: isActive(item.to) ? 'var(--text)' : 'var(--text-2)',
                     }"
                 >
-                    <span class="text-[15px] w-5 text-center">{{ item.icon }}</span>
-                    <span>{{ item.label }}</span>
+                    <span class="text-[15px] w-5 text-center shrink-0">{{ item.icon }}</span>
+                    <span v-if="!sidebarCollapsed" class="truncate">{{ item.label }}</span>
                 </RouterLink>
             </nav>
 

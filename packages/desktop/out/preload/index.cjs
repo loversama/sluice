@@ -16,6 +16,11 @@ const bridge = {
   isMaximized: () => electron.ipcRenderer.invoke("window:is-maximized"),
   onMaximizedChange: (fn) => {
     electron.ipcRenderer.on("window:maximized", (_event, value) => fn(value));
+  },
+  toggleThin: () => electron.ipcRenderer.invoke("window:toggle-thin"),
+  isThin: () => electron.ipcRenderer.invoke("window:is-thin"),
+  onThinChange: (fn) => {
+    electron.ipcRenderer.on("window:thin", (_event, value) => fn(value));
   }
 };
 electron.contextBridge.exposeInMainWorld("desktopBridge", bridge);

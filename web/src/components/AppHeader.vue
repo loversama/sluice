@@ -7,7 +7,10 @@ import { useMinerStore } from "@/stores/miner.js";
 const props = defineProps({
     nav: { type: Array, required: true },
     compact: { type: Boolean, default: false },
+    /** True when the sidebar is on screen, in which case it owns navigation. */
+    hasSidebar: { type: Boolean, default: false },
 });
+const emit = defineEmits(["toggle-sidebar"]);
 
 const store = useMinerStore();
 const route = useRoute();
@@ -35,12 +38,20 @@ const connectionTone = computed(() =>
  */
 const desktop = typeof window !== "undefined" ? (window.desktopBridge ?? null) : null;
 const maximized = ref(false);
+const thin = ref(false);
 
 onMounted(async () => {
     if (!desktop?.isMaximized) return;
     maximized.value = await desktop.isMaximized();
     desktop.onMaximizedChange?.((value) => (maximized.value = value));
+    thin.value = (await desktop.isThin?.()) ?? false;
+    desktop.onThinChange?.((value) => (thin.value = value));
 });
+
+async function toggleThin() {
+    if (!desktop?.toggleThin) return;
+    thin.value = await desktop.toggleThin();
+}
 
 async function toggleMaximize() {
     if (!desktop?.toggleMaximize) return;
@@ -59,7 +70,16 @@ async function toggleMaximize() {
         }"
     >
         <!-- Identity. The mark stays at every width; the name is the first thing to go. -->
-        <div class="flex items-center gap-2 shrink-0">
+        <button
+            v-if="hasSidebar"
+            class="app-no-drag flex items-center gap-2 shrink-0 rounded-md px-1 py-1 -ml-1 transition-colors hover:bg-[var(--surface-2)]"
+            title="Collapse or expand the sidebar"
+            @click="emit('toggle-sidebar')"
+        >
+            <span class="text-[16px]" :style="{ color: 'var(--accent)' }">◈</span>
+            <span class="text-[13px] font-semibold tracking-tight">Sluice</span>
+        </button>
+        <div v-else class="flex items-center gap-2 shrink-0">
             <span class="text-[16px]" :style="{ color: 'var(--accent)' }">◈</span>
             <span v-if="!compact" class="text-[13px] font-semibold tracking-tight">Sluice</span>
         </div>
@@ -67,7 +87,13 @@ async function toggleMaximize() {
         <!-- Navigation lives up here at every width. In a narrow window these become the
              only way around, so they are icons with the labels dropped rather than hidden
              behind a menu that costs an extra click. -->
-        <nav class="app-no-drag flex items-center gap-0.5 min-w-0" :class="compact ? 'flex-1 justify-around' : 'ml-3'">
+        <!-- Only when the sidebar is not on screen. Two rows of the same five links is
+             clutter, and leaves you wondering whether they do different things. -->
+        <nav
+            v-if="!hasSidebar"
+            class="app-no-drag flex items-center gap-0.5 min-w-0"
+            :class="compact ? 'flex-1 justify-around' : 'ml-3'"
+        >
             <RouterLink
                 v-for="item in nav"
                 :key="item.to"
@@ -112,6 +138,17 @@ async function toggleMaximize() {
         <!-- Only in the desktop build, and only where the platform expects them: macOS
              keeps its own traffic lights on the left. -->
         <div v-if="desktop" class="app-no-drag flex items-stretch self-stretch ml-2 shrink-0">
+            <button
+                class="win-btn"
+                :title="thin ? 'Back to the full window' : 'Shrink to a side panel'"
+                :style="thin ? { color: 'var(--accent)' } : undefined"
+                @click="toggleThin"
+            >
+                <svg width="10" height="10" viewBox="0 0 10 10">
+                    <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" />
+                    <rect :x="thin ? 0.5 : 6.5" y="0.5" :width="thin ? 9 : 3" height="9" fill="currentColor" opacity="0.55" />
+                </svg>
+            </button>
             <button class="win-btn" title="Minimise" @click="desktop.minimize()">
                 <svg width="10" height="10" viewBox="0 0 10 10"><rect y="4.5" width="10" height="1" fill="currentColor" /></svg>
             </button>
