@@ -243,6 +243,8 @@ export const useMinerStore = defineStore("miner", {
             });
 
             on("watching", (payload) => {
+                // Whatever the loading phase said, something is being watched now.
+                this.loading = null;
                 this.mining = {
                     channel: payload.channel,
                     campaignId: payload.campaignId,

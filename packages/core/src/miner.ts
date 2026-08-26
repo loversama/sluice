@@ -2101,7 +2101,11 @@ export class Miner extends EventEmitter {
             }
         }
 
-        this.emit("loading", { phase: "choosing" });
+        // "Choosing" only makes sense before anything has been chosen. A refresh that runs
+        // while already watching is background work, and leaving the dashboard on a startup
+        // message afterwards stranded it there: the ready signal rides on the watching
+        // event, which a refresh that changes nothing never fires.
+        this.emit("loading", { phase: this.currentChannel ? "ready" : "choosing" });
 
         // A fully claimed campaign disappears from dropCampaignsInProgress, and
         // DropCampaignDetails carries no `self` block at all, so nothing above knows the
