@@ -17,6 +17,7 @@ import type { SteamLibrary } from "./steam/library.js";
 import { loadState, saveState } from "./state.js";
 import { loadClaims, saveClaims, summarise, type ClaimHistory, type ClaimStats } from "./claims.js";
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
+import { detectForeignSession, type ProgressSnapshot } from "./foreign-session.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -207,7 +208,11 @@ export class Miner extends EventEmitter {
     private pubsub: PubSubPool | null = null;
     private currentChannel: Channel | null = null;
     private currentDrop: Drop | null = null;
+    private foreignSessionAt: number | null = null;
     private lastProgressAt = 0;
+
+    /** Drop minutes as of the last sweep, for spotting another session earning as us. */
+    private lastProgress: ProgressSnapshot = { minutes: new Map(), dropId: null };
     /**
      * Campaigns pushed to the back by the Next button, by id, valued with when.
      *
@@ -487,6 +492,58 @@ export class Miner extends EventEmitter {
             this.pushFeed("info", `Restored ${count} skipped campaign${count === 1 ? "" : "s"}`);
         }
         return count;
+    }
+
+    /**
+     * Notice when the account is earning somewhere that is not here.
+     *
+     * Twitch credits one watch session per account, so a second copy of this - or a browser
+     * tab left on a stream - silently starves whichever one loses. The existing stall
+     * handling blames the channel and hops to another, which never helps and buries the
+     * cause; this reports it instead.
+     *
+     * It only warns. Pausing on its own evidence would be worse when wrong: a false stop
+     * earns nothing at all, whereas a false warning costs a line of text.
+     */
+    private checkForForeignSession(next: Map<string, Campaign>): void {
+        const minutes = new Map<string, number>();
+        for (const campaign of next.values()) {
+            for (const drop of campaign.drops) {
+                minutes.set(drop.id, drop.currentMinutes);
+            }
+        }
+
+        const snapshot: ProgressSnapshot = { minutes, dropId: this.currentDrop?.id ?? null };
+        const foreign = detectForeignSession(this.lastProgress, snapshot);
+        this.lastProgress = snapshot;
+
+        if (!foreign) {
+            this.foreignSessionAt = null;
+            return;
+        }
+
+        // One line per occurrence, not per sweep: it stays true for as long as the other
+        // session runs, and a feed full of the same warning is its own problem.
+        if (this.foreignSessionAt) {
+            return;
+        }
+        this.foreignSessionAt = Date.now();
+
+        const owner = [...next.values()].find((campaign) =>
+            campaign.drops.some((drop) => drop.id === foreign.dropId),
+        );
+        const where = owner ? ` (${owner.gameName})` : "";
+
+        logger.warn(
+            `Another session is earning on this account: ${foreign.dropId}${where} gained ` +
+                `${foreign.gainedMinutes} minutes while this one earned nothing. ` +
+                "Twitch credits one watch session per account.",
+        );
+        this.pushFeed(
+            "warn",
+            `Something else is watching as you${where} - Twitch only credits one session, ` +
+                "so nothing is being earned here",
+        );
     }
 
     /** Refresh campaigns immediately rather than waiting for the next scheduled sweep. */
@@ -2212,6 +2269,7 @@ export class Miner extends EventEmitter {
             }
         }
 
+        this.checkForForeignSession(next);
         this.campaigns = next;
         // The stats read required minutes and deliverability from the campaigns, so a
         // refresh can change the answer even when no drop was claimed.
