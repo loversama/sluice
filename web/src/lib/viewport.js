@@ -19,10 +19,27 @@ export function useViewport() {
     onMounted(() => window.addEventListener("resize", onResize, { passive: true }));
     onUnmounted(() => window.removeEventListener("resize", onResize));
 
+    /**
+     * The desktop app decides its own layout.
+     *
+     * In the browser, width is all there is to go on. In the desktop build the side panel
+     * is a mode the user chose, so it stays a side panel however wide the window is - which
+     * is what lets it fill a portrait monitor instead of springing back to the wide layout
+     * halfway across.
+     */
+    const thin = ref(false);
+    const bridge = typeof window === "undefined" ? null : window.desktopBridge;
+
+    onMounted(async () => {
+        if (!bridge) return;
+        thin.value = (await bridge.isThin?.()) ?? false;
+        bridge.onThinChange?.((value) => (thin.value = value));
+    });
+
     return {
         width,
         height,
-        /** Narrow enough that a sidebar would eat the content. */
-        isCompact: computed(() => width.value < COMPACT_BREAKPOINT),
+        /** Narrow enough that a sidebar would eat the content, or explicitly in the panel. */
+        isCompact: computed(() => (bridge ? thin.value : width.value < COMPACT_BREAKPOINT)),
     };
 }

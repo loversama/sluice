@@ -35,7 +35,16 @@ if (!app.requestSingleInstanceLock()) {
     let reallyQuitting = false;
     let warnedAboutTray = false;
     /** The side-of-the-screen form. Entered by choice, never by dragging. */
-    const THIN_WIDTH = 350;
+    /**
+     * The width the side panel opens at, and the width its layout is designed for.
+     *
+     * Stretching it does not return to the wide layout - the two are different modes, not
+     * two sizes of one. It scales instead, so the panel can fill a vertical monitor and
+     * still be a side panel.
+     */
+    const THIN_WIDTH = 420;
+    /** Past about three times over, text is comically large rather than merely readable. */
+    const MAX_THIN_ZOOM = 2.4;
     let thin = false;
     /** What to go back to, so leaving thin does not forget the size you had. */
     let wideWidth = 1180;
@@ -368,22 +377,50 @@ let updates: AutoUpdate | null = null;
          * breaking rather than changing shape. Going thin is a decision; coming back
          * restores the size that was in use before.
          */
+        /**
+         * Scale the side panel to whatever width it has been given.
+         *
+         * The layout is drawn for THIN_WIDTH. Widening the window used to mean the page
+         * simply had more room, which is how it fell back into the wide layout by accident;
+         * zooming keeps it the same panel, just bigger, which is what makes it usable
+         * full-screen on a portrait monitor.
+         */
+        const applyThinZoom = (): void => {
+            if (!win) return;
+            if (!thin) {
+                win.webContents.setZoomFactor(1);
+                return;
+            }
+            const { width } = win.getContentBounds();
+            const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
+            win.webContents.setZoomFactor(factor);
+        };
+
         ipcMain.handle("window:toggle-thin", () => {
             if (!win) return false;
             if (thin) {
-                win.setMinimumSize(560, 480);
+                // Wide has a floor of its own: below this the columns stop being columns,
+                // and the answer to wanting it narrower is the side panel, not a squeeze.
+                win.setMinimumSize(720, 480);
                 win.setBounds({ width: wideWidth, height: win.getBounds().height }, true);
                 thin = false;
             } else {
                 if (win.isMaximized()) win.unmaximize();
                 wideWidth = win.getBounds().width;
-                win.setMinimumSize(320, 420);
+                // No maximum: the panel is allowed to be as wide as the user likes, and
+                // scales rather than reflowing.
+                win.setMinimumSize(THIN_WIDTH, 420);
                 win.setBounds({ width: THIN_WIDTH, height: win.getBounds().height }, true);
                 thin = true;
             }
+            applyThinZoom();
             win.webContents.send("window:thin", thin);
             return thin;
         });
+        win.on("resize", applyThinZoom);
+        win.on("maximize", applyThinZoom);
+        win.on("unmaximize", applyThinZoom);
+
         ipcMain.handle("window:is-thin", () => thin);
         ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
         ipcMain.handle("desktop:check-updates", () => updates?.check());

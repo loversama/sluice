@@ -598,22 +598,36 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle("window:close", () => win?.close());
     ipcMain.handle("window:is-maximized", () => win?.isMaximized() ?? false);
+    const applyThinZoom = () => {
+      if (!win) return;
+      if (!thin) {
+        win.webContents.setZoomFactor(1);
+        return;
+      }
+      const { width } = win.getContentBounds();
+      const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
+      win.webContents.setZoomFactor(factor);
+    };
     ipcMain.handle("window:toggle-thin", () => {
       if (!win) return false;
       if (thin) {
-        win.setMinimumSize(560, 480);
+        win.setMinimumSize(720, 480);
         win.setBounds({ width: wideWidth, height: win.getBounds().height }, true);
         thin = false;
       } else {
         if (win.isMaximized()) win.unmaximize();
         wideWidth = win.getBounds().width;
-        win.setMinimumSize(320, 420);
+        win.setMinimumSize(THIN_WIDTH, 420);
         win.setBounds({ width: THIN_WIDTH, height: win.getBounds().height }, true);
         thin = true;
       }
+      applyThinZoom();
       win.webContents.send("window:thin", thin);
       return thin;
     });
+    win.on("resize", applyThinZoom);
+    win.on("maximize", applyThinZoom);
+    win.on("unmaximize", applyThinZoom);
     ipcMain.handle("window:is-thin", () => thin);
     ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
     ipcMain.handle("desktop:check-updates", () => updates?.check());
@@ -629,7 +643,8 @@ if (!app.requestSingleInstanceLock()) {
   let quitting = false;
   let reallyQuitting = false;
   let warnedAboutTray = false;
-  const THIN_WIDTH = 350;
+  const THIN_WIDTH = 420;
+  const MAX_THIN_ZOOM = 2.4;
   let thin = false;
   let wideWidth = 1180;
   let toasts = null;
