@@ -7,6 +7,7 @@ import { useMinerStore } from "@/stores/miner.js";
 import { useViewport } from "@/lib/viewport.js";
 import AuthGate from "@/components/AuthGate.vue";
 import AppHeader from "@/components/AppHeader.vue";
+import UpdateBanner from "@/components/UpdateBanner.vue";
 import Compact from "@/views/Compact.vue";
 
 const store = useMinerStore();
@@ -153,6 +154,8 @@ onUnmounted(() => store.disconnect());
             :has-sidebar="hasSidebar"
             @toggle-sidebar="toggleSidebar"
         />
+
+        <UpdateBanner />
 
         <div class="flex-1 flex min-h-0">
             <!-- The rail is a second way to the same places, so it earns its width only

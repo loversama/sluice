@@ -28,6 +28,14 @@ const bridge = {
         ipcRenderer.invoke("desktop:update-status"),
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke("desktop:check-updates"),
     installUpdate: (): Promise<void> => ipcRenderer.invoke("desktop:install-update"),
+    changelog: (): Promise<{
+        ok: boolean;
+        error?: string;
+        releases?: { version: string; name: string; at: string | null; notes: string }[];
+    }> => ipcRenderer.invoke("desktop:changelog"),
+    onUpdateStatus: (fn: (status: { status: string; version?: string; percent?: number }) => void): void => {
+        ipcRenderer.on("desktop:update", (_event, status) => fn(status));
+    },
 
     // There is no window frame, so the page draws the controls.
     minimize: (): Promise<void> => ipcRenderer.invoke("window:minimize"),

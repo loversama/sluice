@@ -223,9 +223,9 @@ const idleReason = computed(() => {
                         was a 2000px line an inch away from the drop it measured, which
                         reads as a divider between sections rather than as progress.
                     -->
-                    <!-- Long enough to read as a measure of a long wait. Capped only so it
-                         stops before the tier pips and heartbeat on a very wide window. -->
-                    <div class="flex items-center gap-3 mt-2 max-w-[1400px]">
+                    <!-- Spans the whole content column: it measures a wait of hours, and a
+                         bar that stops short of the panel reads as a bar that is stuck. -->
+                    <div class="flex items-center gap-3 mt-2">
                         <div
                             class="flex-1 h-[8px] rounded-full overflow-hidden"
                             :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }"

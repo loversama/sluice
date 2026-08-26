@@ -9,6 +9,10 @@ const bridge = {
   updateStatus: () => electron.ipcRenderer.invoke("desktop:update-status"),
   checkForUpdates: () => electron.ipcRenderer.invoke("desktop:check-updates"),
   installUpdate: () => electron.ipcRenderer.invoke("desktop:install-update"),
+  changelog: () => electron.ipcRenderer.invoke("desktop:changelog"),
+  onUpdateStatus: (fn) => {
+    electron.ipcRenderer.on("desktop:update", (_event, status) => fn(status));
+  },
   // There is no window frame, so the page draws the controls.
   minimize: () => electron.ipcRenderer.invoke("window:minimize"),
   toggleMaximize: () => electron.ipcRenderer.invoke("window:toggle-maximize"),

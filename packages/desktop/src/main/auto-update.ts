@@ -3,7 +3,21 @@ import type { EventEmitter } from "node:events";
 import { logger } from "@sluice/core";
 
 /** How often to look, once the first check has happened. */
-const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+/** Three looks every two hours, which is often enough for a fix and gentle on the API. */
+const CHECK_WINDOW_MS = 2 * 60 * 60 * 1000;
+const CHECKS_PER_WINDOW = 3;
+
+/**
+ * How long until the next look.
+ *
+ * Anywhere in the back half of its slot, so two checks cannot land back to back and no two
+ * installations ask GitHub at the same moment after a release - which is both rude and the
+ * surest way to be rate limited. Exported so the spread can be tested without waiting.
+ */
+export function nextCheckDelay(random: () => number = Math.random): number {
+    const slot = CHECK_WINDOW_MS / CHECKS_PER_WINDOW;
+    return slot * (0.5 + random() * 0.5);
+}
 /** How long to wait when the release exists but its metadata has not appeared yet. */
 const RETRY_AFTER_MS = 5 * 60 * 1000;
 
@@ -32,7 +46,15 @@ export class AutoUpdate {
     private updater: UpdaterLike | null = null;
     private lastStatus: UpdateStatus = { status: "idle" };
 
-    constructor(private readonly bus: EventEmitter) {}
+    /**
+     * @param enabled whether automatic checking is switched on. Read at each check rather
+     *                than captured, so turning it off in settings takes effect immediately
+     *                instead of at the next restart.
+     */
+    constructor(
+        private readonly bus: EventEmitter,
+        private readonly enabled: () => boolean = () => true,
+    ) {}
 
     get status(): UpdateStatus {
         return this.lastStatus;
@@ -86,11 +108,34 @@ export class AutoUpdate {
         });
 
         this.check();
-        this.checkTimer = setInterval(() => this.check(), CHECK_INTERVAL_MS);
+        this.scheduleNext();
+    }
+
+    /**
+     * Three looks every two hours, scattered rather than on the hour.
+     *
+     * A fixed interval means every installation in the world asks GitHub at the same second
+     * after a release, which is both rude and the surest way to be rate limited. Spreading
+     * each check randomly across its slot costs nothing and avoids the stampede.
+     */
+    private scheduleNext(): void {
+        this.checkTimer = setTimeout(() => {
+            this.check();
+            this.scheduleNext();
+        }, nextCheckDelay());
         this.checkTimer.unref();
     }
 
-    check(): void {
+    /** A manual check, which happens whatever the automatic setting says. */
+    checkNow(): void {
+        this.check(true);
+    }
+
+    check(manual = false): void {
+        if (!manual && !this.enabled()) {
+            logger.debug("Automatic update check skipped: switched off.");
+            return;
+        }
         try {
             void this.updater?.checkForUpdates();
         } catch (error) {
@@ -110,7 +155,7 @@ export class AutoUpdate {
 
     stop(): void {
         if (this.checkTimer) {
-            clearInterval(this.checkTimer);
+            clearTimeout(this.checkTimer);
             this.checkTimer = null;
         }
         if (this.retryTimer) {

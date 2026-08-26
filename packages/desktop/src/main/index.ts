@@ -231,7 +231,11 @@ let updates: AutoUpdate | null = null;
 
             // The bus is already the dashboard's SSE stream, so update state reaches the
             // UI without a second channel.
-            updates = new AutoUpdate(handle.bus);
+            handle.bus.on("update", (status: unknown) => {
+                win?.webContents.send("desktop:update", status);
+            });
+
+            updates = new AutoUpdate(handle.bus, () => handle?.context.getConfig().autoUpdate !== false);
             registerIpc();
             handle.start();
 
@@ -434,7 +438,40 @@ let updates: AutoUpdate | null = null;
         });
         ipcMain.handle("window:is-thin", () => thin);
         ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
-        ipcMain.handle("desktop:check-updates", () => updates?.check());
+        ipcMain.handle("desktop:check-updates", () => updates?.checkNow());
+        /**
+         * Release notes, fetched here rather than in the page.
+         *
+         * The renderer is the same build the container serves, and it has no business
+         * knowing which GitHub repository this came from.
+         */
+        ipcMain.handle("desktop:changelog", async () => {
+            try {
+                const response = await fetch(
+                    "https://api.github.com/repos/loversama/sluice-releases/releases?per_page=10",
+                    { headers: { accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(10_000) },
+                );
+                if (!response.ok) return { ok: false, error: `GitHub returned ${response.status}` };
+                const releases = (await response.json()) as {
+                    tag_name?: string;
+                    name?: string;
+                    published_at?: string;
+                    body?: string;
+                }[];
+                return {
+                    ok: true,
+                    releases: releases.map((release) => ({
+                        version: release.tag_name ?? release.name ?? "",
+                        name: release.name ?? "",
+                        at: release.published_at ?? null,
+                        notes: release.body ?? "",
+                    })),
+                };
+            } catch {
+                return { ok: false, error: "Could not reach GitHub." };
+            }
+        });
+
         ipcMain.handle("desktop:install-update", () => {
             // Restarting mid-session ends a mining session, so it is never done unasked.
             reallyQuitting = true;

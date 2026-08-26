@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
-import { AutoUpdate, type UpdaterLike } from "../packages/desktop/src/main/auto-update.js";
+import { nextCheckDelay, AutoUpdate, type UpdaterLike } from "../packages/desktop/src/main/auto-update.js";
 
 /** Stands in for electron-updater, so a test can decide what it reports and when. */
 class FakeUpdater extends EventEmitter implements UpdaterLike {
@@ -103,12 +103,29 @@ describe("AutoUpdate", () => {
         });
     });
 
-    it("keeps looking on a schedule", () => {
+    it("keeps looking, about three times every two hours", () => {
         new AutoUpdate(bus).start(updater);
-        vi.advanceTimersByTime(15 * 60 * 1000);
-        expect(updater.checks).toBe(2);
-        vi.advanceTimersByTime(15 * 60 * 1000);
-        expect(updater.checks).toBe(3);
+        vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+
+        // One on start, then a scattered three-ish per window - never none, never a flood.
+        expect(updater.checks).toBeGreaterThanOrEqual(4);
+        expect(updater.checks).toBeLessThanOrEqual(7);
+    });
+
+    it("does not check automatically when switched off", () => {
+        new AutoUpdate(bus, () => false).start(updater);
+        vi.advanceTimersByTime(4 * 60 * 60 * 1000);
+
+        expect(updater.checks).toBe(0);
+    });
+
+    it("still checks when asked directly, however the setting is set", () => {
+        // The button in settings is an instruction, not a suggestion.
+        const updates = new AutoUpdate(bus, () => false);
+        updates.start(updater);
+        updates.checkNow();
+
+        expect(updater.checks).toBe(1);
     });
 
     it("stops checking once stopped", () => {
@@ -127,5 +144,27 @@ describe("AutoUpdate", () => {
         updates.start(updater);
         updates.installNow();
         expect(updater.installs).toBe(1);
+    });
+});
+
+/**
+ * Every installation asking GitHub at the same second after a release is both rude and the
+ * surest way to be rate limited, so the delay is deliberately scattered.
+ */
+describe("nextCheckDelay", () => {
+    const SLOT = (2 * 60 * 60 * 1000) / 3;
+
+    it("never waits less than half a slot, so two checks cannot land together", () => {
+        expect(nextCheckDelay(() => 0)).toBe(SLOT / 2);
+    });
+
+    it("never waits longer than its slot, so three still fit in the window", () => {
+        expect(nextCheckDelay(() => 1)).toBe(SLOT);
+    });
+
+    it("lands somewhere different each time", () => {
+        const seen = new Set(Array.from({ length: 20 }, () => nextCheckDelay()));
+
+        expect(seen.size).toBeGreaterThan(1);
     });
 });

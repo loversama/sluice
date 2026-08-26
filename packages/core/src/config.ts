@@ -169,6 +169,15 @@ export interface Config {
      * rail's width, which is most of the time on a side-by-side desktop.
      */
     sidebarMode: "expanded" | "collapsed" | "auto";
+    /**
+     * Check for and download new versions on its own. Desktop only; the container is
+     * updated by pulling an image.
+     *
+     * On by default and worth leaving on: Twitch rotates its GraphQL query hashes without
+     * notice, and when it does the bot cannot mine until a fix ships. Someone running the
+     * installer has no other route to that fix.
+     */
+    autoUpdate: boolean;
     desktopNotifications: boolean;
     /**
      * How those pop-ups look. Native matches everything else on the machine, which is what
@@ -213,6 +222,7 @@ export const DEFAULT_CONFIG: Config = {
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: false,
     sidebarMode: "auto",
+    autoUpdate: true,
     desktopNotifications: true,
     desktopNotificationStyle: "native",
     sounds: { enabled: true, volume: 0.5 },

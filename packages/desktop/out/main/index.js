@@ -431,13 +431,25 @@ async function importFromDockerData(win) {
     return { imported: false, message: `Import failed: ${message}` };
   }
 }
-const CHECK_INTERVAL_MS = 15 * 60 * 1e3;
+const CHECK_WINDOW_MS = 2 * 60 * 60 * 1e3;
+const CHECKS_PER_WINDOW = 3;
+function nextCheckDelay(random = Math.random) {
+  const slot = CHECK_WINDOW_MS / CHECKS_PER_WINDOW;
+  return slot * (0.5 + random() * 0.5);
+}
 const RETRY_AFTER_MS = 5 * 60 * 1e3;
 class AutoUpdate {
-  constructor(bus) {
+  /**
+   * @param enabled whether automatic checking is switched on. Read at each check rather
+   *                than captured, so turning it off in settings takes effect immediately
+   *                instead of at the next restart.
+   */
+  constructor(bus, enabled = () => true) {
     this.bus = bus;
+    this.enabled = enabled;
   }
   bus;
+  enabled;
   checkTimer = null;
   retryTimer = null;
   updater = null;
@@ -481,10 +493,31 @@ class AutoUpdate {
       this.publish({ status: "error", message });
     });
     this.check();
-    this.checkTimer = setInterval(() => this.check(), CHECK_INTERVAL_MS);
+    this.scheduleNext();
+  }
+  /**
+   * Three looks every two hours, scattered rather than on the hour.
+   *
+   * A fixed interval means every installation in the world asks GitHub at the same second
+   * after a release, which is both rude and the surest way to be rate limited. Spreading
+   * each check randomly across its slot costs nothing and avoids the stampede.
+   */
+  scheduleNext() {
+    this.checkTimer = setTimeout(() => {
+      this.check();
+      this.scheduleNext();
+    }, nextCheckDelay());
     this.checkTimer.unref();
   }
-  check() {
+  /** A manual check, which happens whatever the automatic setting says. */
+  checkNow() {
+    this.check(true);
+  }
+  check(manual = false) {
+    if (!manual && !this.enabled()) {
+      logger.debug("Automatic update check skipped: switched off.");
+      return;
+    }
     try {
       void this.updater?.checkForUpdates();
     } catch (error) {
@@ -502,7 +535,7 @@ class AutoUpdate {
   }
   stop() {
     if (this.checkTimer) {
-      clearInterval(this.checkTimer);
+      clearTimeout(this.checkTimer);
       this.checkTimer = null;
     }
     if (this.retryTimer) {
@@ -620,7 +653,28 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle("window:is-thin", () => thin);
     ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
-    ipcMain.handle("desktop:check-updates", () => updates?.check());
+    ipcMain.handle("desktop:check-updates", () => updates?.checkNow());
+    ipcMain.handle("desktop:changelog", async () => {
+      try {
+        const response = await fetch(
+          "https://api.github.com/repos/loversama/sluice-releases/releases?per_page=10",
+          { headers: { accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(1e4) }
+        );
+        if (!response.ok) return { ok: false, error: `GitHub returned ${response.status}` };
+        const releases = await response.json();
+        return {
+          ok: true,
+          releases: releases.map((release) => ({
+            version: release.tag_name ?? release.name ?? "",
+            name: release.name ?? "",
+            at: release.published_at ?? null,
+            notes: release.body ?? ""
+          }))
+        };
+      } catch {
+        return { ok: false, error: "Could not reach GitHub." };
+      }
+    });
     ipcMain.handle("desktop:install-update", () => {
       reallyQuitting = true;
       updates?.installNow();
@@ -691,7 +745,10 @@ if (!app.requestSingleInstanceLock()) {
       setLogLevel(handle.context.getConfig().logLevel);
       server = new ApiServer(handle.context, resolveWebDist());
       port = await server.listen("127.0.0.1", 0);
-      updates = new AutoUpdate(handle.bus);
+      handle.bus.on("update", (status) => {
+        win?.webContents.send("desktop:update", status);
+      });
+      updates = new AutoUpdate(handle.bus, () => handle?.context.getConfig().autoUpdate !== false);
       registerIpc();
       handle.start();
       if (app.isPackaged) {

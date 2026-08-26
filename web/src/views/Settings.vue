@@ -6,7 +6,7 @@ import { useMinerStore } from "@/stores/miner.js";
 import { useViewport } from "@/lib/viewport.js";
 import { playSound } from "@/lib/sounds.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
-import { formatRelative } from "@/lib/format.js";
+import { formatDateTime, formatRelative } from "@/lib/format.js";
 
 const store = useMinerStore();
 
@@ -30,6 +30,7 @@ const form = reactive({
     telegramChatId: "",
     discordWebhookUrl: "",
     sidebarMode: "auto",
+    autoUpdate: true,
     desktopNotifications: true,
     desktopNotificationStyle: "native",
     soundsEnabled: true,
@@ -47,6 +48,35 @@ const canEmbedAnonymously = supportsAnonymousEmbed();
 const { isCompact } = useViewport();
 
 /** The desktop build injects this bridge; the container build has no such object. */
+const update = ref({ status: "idle" });
+const changelogOpen = ref(false);
+const changelog = ref([]);
+const changelogError = ref("");
+
+const updateLabel = computed(() => {
+    const state = update.value;
+    if (state.status === "ready") return `Version ${state.version} is ready to install.`;
+    if (state.status === "downloading") return `Downloading… ${Math.round(state.percent ?? 0)}%`;
+    if (state.status === "available") return `Version ${state.version} found; downloading.`;
+    if (state.status === "error") return `Last check failed: ${state.message}`;
+    return "Up to date.";
+});
+
+async function checkUpdates() {
+    update.value = { status: "checking" };
+    await window.desktopBridge?.checkForUpdates?.();
+}
+
+async function toggleChangelog() {
+    changelogOpen.value = !changelogOpen.value;
+    if (!changelogOpen.value || changelog.value.length) return;
+
+    changelogError.value = "";
+    const result = await window.desktopBridge?.changelog?.();
+    if (result?.ok) changelog.value = result.releases ?? [];
+    else changelogError.value = result?.error ?? "Could not load the release notes.";
+}
+
 const isDesktop = typeof window !== "undefined" && Boolean(window.desktopBridge);
 
 /**
@@ -234,6 +264,10 @@ const LANGUAGES = [
 ];
 
 onMounted(async () => {
+    if (desktop) {
+        update.value = (await desktop.updateStatus?.()) ?? { status: "idle" };
+        desktop.onUpdateStatus?.((next) => (update.value = next));
+    }
     if (!store.config) await store.loadConfig();
     await loadSteam();
     const outcome = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("steam");
@@ -267,6 +301,7 @@ watch(
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
             sidebarMode: config.sidebarMode ?? "auto",
+            autoUpdate: config.autoUpdate ?? true,
             desktopNotifications: config.desktopNotifications ?? true,
             desktopNotificationStyle: config.desktopNotificationStyle ?? "native",
             soundsEnabled: config.sounds?.enabled ?? true,
@@ -328,6 +363,7 @@ async function save() {
             logLevel: form.logLevel,
             allowStreamEmbed: form.allowStreamEmbed,
             sidebarMode: form.sidebarMode,
+            autoUpdate: form.autoUpdate,
             desktopNotifications: form.desktopNotifications,
             desktopNotificationStyle: form.desktopNotificationStyle,
             sounds: { enabled: form.soundsEnabled, volume: Number(form.soundsVolume) },
@@ -1267,6 +1303,74 @@ const inputStyle = {
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Desktop app
             </h2>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Keep it up to date</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Checks a few times a day and downloads new versions in the background.
+                        Installing always waits to be asked, since it restarts the app and
+                        would end a mining session. Worth leaving on: when Twitch changes its
+                        API the bot cannot mine until a fix ships, and this is the only route
+                        that fix has to reach you.
+                    </span>
+                </span>
+                <el-switch v-model="form.autoUpdate" />
+            </label>
+
+            <div class="flex items-center justify-between gap-4">
+                <span class="text-[12px]" :style="{ color: 'var(--text-2)' }">
+                    {{ updateLabel }}
+                </span>
+                <div class="flex gap-2 shrink-0">
+                    <button
+                        class="px-2.5 py-1 rounded-lg text-[11px]"
+                        :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                        :disabled="update.status === 'checking'"
+                        @click="checkUpdates"
+                    >
+                        {{ update.status === "checking" ? "Checking…" : "Check now" }}
+                    </button>
+                    <button
+                        v-if="update.status === 'ready'"
+                        class="px-2.5 py-1 rounded-lg text-[11px] text-white"
+                        :style="{ background: 'var(--success)' }"
+                        @click="desktop.installUpdate()"
+                    >
+                        Restart and install
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <button
+                    class="text-[11px] hover:underline"
+                    :style="{ color: 'var(--accent)' }"
+                    @click="toggleChangelog"
+                >
+                    {{ changelogOpen ? "Hide" : "What's new" }}
+                </button>
+
+                <div v-if="changelogOpen" class="mt-2 space-y-3 max-h-[320px] overflow-y-auto scroll-thin pr-1">
+                    <p v-if="changelogError" class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                        {{ changelogError }}
+                    </p>
+                    <p v-else-if="!changelog.length" class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Loading&hellip;
+                    </p>
+                    <div v-for="release in changelog" :key="release.version">
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-[12px] font-semibold">{{ release.version }}</span>
+                            <span v-if="release.at" class="text-[10px]" :style="{ color: 'var(--muted)' }">
+                                {{ formatDateTime(release.at) }}
+                            </span>
+                        </div>
+                        <p class="text-[11px] whitespace-pre-line mt-0.5" :style="{ color: 'var(--text-2)' }">
+                            {{ release.notes || "No notes for this release." }}
+                        </p>
+                    </div>
+                </div>
+            </div>
 
             <label class="flex items-center justify-between gap-4">
                 <span>
