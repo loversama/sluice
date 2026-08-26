@@ -1984,6 +1984,9 @@ export class Miner extends EventEmitter {
 
         // Timed and counted: this is the slow part, and a silent slow part is the reason
         // the window looked broken on open.
+        // Nothing known yet means nothing to disturb, which is what makes it safe below to
+        // publish the queue as it is learned rather than only at the end.
+        const firstSweep = this.campaigns.size === 0;
         const listedAt = Date.now();
         logger.debug(`Campaign list fetched in ${((listedAt - startedAt) / 1000).toFixed(1)}s.`);
         this.emit("loading", { phase: "details", done: 0, total: interesting.length });
@@ -2016,6 +2019,21 @@ export class Miner extends EventEmitter {
                     done: fetched,
                     total: interesting.length,
                 });
+            }
+
+            // Hand over what is known so far at intervals, so the queue fills in as it is
+            // learned instead of staying blank and then arriving all at once. Coarser than
+            // the progress ticks above because this payload is the whole campaign list,
+            // not a counter.
+            if (fetched % 25 === 0 && fetched < interesting.length) {
+                // Publishing partway is only safe on the very first sweep, when there is
+                // nothing to disturb. On a later refresh the miner is already watching
+                // something, and letting it rank against a half-fetched list could make it
+                // switch away on evidence that is about to change.
+                if (firstSweep) {
+                    this.campaigns = new Map(next);
+                }
+                this.emit("campaigns-updated", [...next.values()]);
             }
         }
 

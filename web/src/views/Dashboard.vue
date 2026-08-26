@@ -59,7 +59,10 @@ const deliverableShare = computed(() => {
                 </header>
 
                 <p v-if="!queue.length" class="text-[12px] py-4 text-center" :style="{ color: 'var(--muted)' }">
-                    Nothing queued behind the current campaign.
+                    <template v-if="store.loading">
+                        Working out what to queue&hellip;
+                    </template>
+                    <template v-else>Nothing queued behind the current campaign.</template>
                 </p>
 
                 <!-- Scrolls rather than truncating: the queue routinely runs past a

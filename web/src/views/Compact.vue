@@ -500,7 +500,9 @@ function move(index, delta) {
                 </div>
             </div>
 
-            <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">Nothing queued.</p>
+            <p v-else class="text-[12px]" :style="{ color: 'var(--text-2)' }">
+                {{ store.loading ? "Working out what to queue…" : "Nothing queued." }}
+            </p>
         </div>
 
         <!-- Totals. One line, because at this width a stat grid is just noise. -->
