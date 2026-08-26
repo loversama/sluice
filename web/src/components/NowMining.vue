@@ -209,22 +209,41 @@ const idleReason = computed(() => {
                         {{ reward?.name ?? drop.name }}
                     </h1>
 
-                    <div class="flex items-baseline justify-between gap-3 mt-1.5 flex-wrap">
-                        <p
-                            class="text-[12px] tabular"
-                            :style="{ color: etaBeyondCampaign ? 'var(--warn)' : 'var(--text-2)' }"
+                    <!--
+                        Directly under the name it belongs to. At the foot of the band it
+                        was a 2000px line an inch away from the drop it measured, which
+                        reads as a divider between sections rather than as progress.
+                    -->
+                    <div class="flex items-center gap-3 mt-2 max-w-[880px]">
+                        <div
+                            class="flex-1 h-[8px] rounded-full overflow-hidden"
+                            :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }"
                         >
-                            {{ formatDuration(remainingMinutes) }} left
-                            <template v-if="eta"> &middot; done ~{{ formatClock(eta) }}</template>
-                            <template v-if="etaBeyondCampaign">
-                                &middot; campaign ends first, may not finish
-                            </template>
-                        </p>
+                            <div
+                                class="h-full rounded-full transition-[width] duration-700"
+                                :style="{
+                                    width: `${progress * 100}%`,
+                                    background: accent,
+                                    boxShadow: `0 0 10px color-mix(in srgb, ${accent} 70%, transparent)`,
+                                }"
+                            />
+                        </div>
                         <span class="tabular font-mono text-[12px] shrink-0" :style="{ color: 'var(--text-2)' }">
                             {{ drop.currentMinutes }} / {{ drop.requiredMinutes }} min
                             &middot; {{ Math.round(progress * 100) }}%
                         </span>
                     </div>
+
+                    <p
+                        class="text-[12px] tabular mt-1.5"
+                        :style="{ color: etaBeyondCampaign ? 'var(--warn)' : 'var(--text-2)' }"
+                    >
+                        {{ formatDuration(remainingMinutes) }} left
+                        <template v-if="eta"> &middot; done ~{{ formatClock(eta) }}</template>
+                        <template v-if="etaBeyondCampaign">
+                            &middot; campaign ends first, may not finish
+                        </template>
+                    </p>
 
                     <div class="flex items-center justify-between gap-3 mt-2 flex-wrap">
                         <div class="flex items-center gap-2 min-w-0">
@@ -309,24 +328,5 @@ const idleReason = computed(() => {
             </div>
         </div>
 
-        <!--
-            Edge to edge and flush with the bottom, as in the narrow layout - and only while
-            mining. Starting up already draws its own bar with a label and a count, and two
-            bars reporting the same thing invites you to work out which one to read.
-        -->
-        <div
-            v-if="active"
-            class="h-[7px]"
-            :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }"
-        >
-            <div
-                class="h-full transition-[width] duration-700"
-                :style="{
-                    width: `${progress * 100}%`,
-                    background: accent,
-                    boxShadow: `0 0 10px color-mix(in srgb, ${accent} 70%, transparent)`,
-                }"
-            />
-        </div>
     </section>
 </template>
