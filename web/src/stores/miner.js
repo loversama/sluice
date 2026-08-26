@@ -1,9 +1,21 @@
 import { defineStore } from "pinia";
+import { playSound } from "@/lib/sounds.js";
 
 /** Treat mining as stalled if progress has not moved for this long. */
 const STALL_THRESHOLD_MS = 4 * 60_000;
 /** Beats arrive every 59s; past this the heartbeat is suspect. */
 const BEAT_TIMEOUT_MS = 75_000;
+
+/**
+ * A claim that finishes a campaign fires drop-claimed and campaign-completed a beat apart.
+ * The completion chime should replace the claim ping rather than play over the top of it,
+ * so the ping waits briefly to see whether a completion follows for the same campaign.
+ *
+ * Long enough to cover the gap between the two events, short enough that an ordinary claim
+ * still sounds immediate.
+ */
+const CLAIM_SOUND_GRACE_MS = 600;
+const pendingClaimSounds = new Map();
 
 export const useMinerStore = defineStore("miner", {
     state: () => ({
@@ -14,6 +26,7 @@ export const useMinerStore = defineStore("miner", {
 
         daemon: null,
         allowStreamEmbed: false,
+        sounds: { enabled: true, volume: 0.5 },
         auth: { status: "pending", user: null, device: null },
         mining: null,
         queue: [],
@@ -119,6 +132,7 @@ export const useMinerStore = defineStore("miner", {
             this.fatal = null;
             this.daemon = snapshot.daemon;
             this.allowStreamEmbed = snapshot.allowStreamEmbed ?? false;
+            this.sounds = snapshot.sounds ?? this.sounds;
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
             this.queue = snapshot.queue ?? [];
@@ -252,6 +266,15 @@ export const useMinerStore = defineStore("miner", {
 
             on("drop-claimed", (payload) => {
                 this.claims = [payload, ...this.claims].slice(0, 50);
+
+                clearTimeout(pendingClaimSounds.get(payload.campaignId));
+                pendingClaimSounds.set(
+                    payload.campaignId,
+                    setTimeout(() => {
+                        pendingClaimSounds.delete(payload.campaignId);
+                        playSound("claim", this.sounds);
+                    }, CLAIM_SOUND_GRACE_MS),
+                );
                 const campaign = this.campaignsById[payload.campaignId];
                 const drop = campaign?.drops.find((candidate) => candidate.id === payload.dropId);
                 if (drop) {
@@ -262,6 +285,11 @@ export const useMinerStore = defineStore("miner", {
             });
 
             on("campaign-completed", (payload) => {
+                // Supersede the ping this claim would otherwise have made.
+                clearTimeout(pendingClaimSounds.get(payload.campaignId));
+                pendingClaimSounds.delete(payload.campaignId);
+                playSound("complete", this.sounds);
+
                 const campaign = this.campaignsById[payload.campaignId];
                 if (campaign) {
                     campaign.isCompleted = true;

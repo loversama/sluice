@@ -673,6 +673,7 @@ export class ApiServer {
             },
             mining: miner?.getMiningState() ?? null,
             allowStreamEmbed: config.allowStreamEmbed,
+            sounds: config.sounds,
             queue: miner?.getMineableCampaigns().map((campaign) => campaign.id) ?? [],
             nextRefreshAt: miner?.getNextRefreshAt()
                 ? new Date(miner.getNextRefreshAt()!).toISOString()

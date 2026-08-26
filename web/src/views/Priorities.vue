@@ -325,7 +325,6 @@ function move(index, delta) {
                         @keydown.ctrl.up.prevent="move(index, -1)"
                         @keydown.ctrl.down.prevent="move(index, 1)"
                     >
-                        <span class="drag-handle cursor-grab select-none" :style="{ color: 'var(--muted)' }">⠿</span>
                         <!-- Rank rides on the art, as on the dashboard queue, rather than
                              taking a column of its own. -->
                         <div class="relative shrink-0">
@@ -353,6 +352,13 @@ function move(index, delta) {
                             <button class="px-1.5 text-[12px]" :style="{ color: 'var(--text-2)' }" title="Move down" @click="move(index, 1)">↓</button>
                             <button class="px-1.5 text-[12px]" :style="{ color: 'var(--text-2)' }" title="Exclude" @click="toExcluded(index)">⊘</button>
                             <button class="px-1.5 text-[12px]" :style="{ color: 'var(--danger)' }" title="Remove" @click="remove(priorities, index)">×</button>
+                            <!-- Trailing, so the row reads as what it is before offering a
+                                 control to move it. -->
+                            <span
+                                class="drag-handle cursor-grab select-none pl-1"
+                                :style="{ color: 'var(--muted)' }"
+                                title="Drag to reorder"
+                            >⠿</span>
                         </div>
                     </div>
                 </template>

@@ -443,11 +443,6 @@ function move(index, delta) {
                         @keydown.ctrl.up.prevent="move(index, -1)"
                         @keydown.ctrl.down.prevent="move(index, 1)"
                     >
-                        <span
-                            class="drag-handle cursor-grab select-none text-[12px] shrink-0"
-                            :style="{ color: 'var(--muted)' }"
-                        >&#10287;</span>
-
                         <!-- Rank rides on the art, as on the full dashboard, rather than
                              taking a column of its own. -->
                         <div class="relative shrink-0">
@@ -486,6 +481,14 @@ function move(index, delta) {
                             :style="{ color: 'var(--warn)' }"
                             title="Account not linked"
                         >&#9675;</span>
+
+                        <!-- Trailing, not leading: the row is read left to right for what
+                             it is, and the grip is a control you reach for afterwards. -->
+                        <span
+                            class="drag-handle cursor-grab select-none text-[12px] shrink-0 pl-0.5"
+                            :style="{ color: 'var(--muted)' }"
+                            title="Drag to rank"
+                        >&#10287;</span>
                     </div>
                 </template>
             </draggable>

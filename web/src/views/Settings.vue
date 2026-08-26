@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
 import { useViewport } from "@/lib/viewport.js";
+import { playSound } from "@/lib/sounds.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import { formatRelative } from "@/lib/format.js";
 
@@ -28,6 +29,8 @@ const form = reactive({
     telegramBotToken: "",
     telegramChatId: "",
     discordWebhookUrl: "",
+    soundsEnabled: true,
+    soundsVolume: 0.5,
     discordBotToken: "",
     discordChannelId: "",
 });
@@ -130,6 +133,11 @@ async function loadDiscordChannels() {
     } finally {
         dcLoadingChannels.value = false;
     }
+}
+
+/** Hear it at the volume just chosen, rather than saving and waiting for a drop. */
+function previewSound(name) {
+    playSound(name, { enabled: true, volume: Number(form.soundsVolume) });
 }
 
 const tgChecking = ref(false);
@@ -252,6 +260,8 @@ watch(
             telegramBotToken: config.notifications?.telegram?.botToken ?? "",
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
+            soundsEnabled: config.sounds?.enabled ?? true,
+            soundsVolume: config.sounds?.volume ?? 0.5,
             discordBotToken: config.notifications?.discord?.botToken ?? "",
             discordChannelId: config.notifications?.discord?.channelId ?? "",
         });
@@ -308,6 +318,7 @@ async function save() {
             attemptImpossibleCampaigns: form.attemptImpossibleCampaigns,
             logLevel: form.logLevel,
             allowStreamEmbed: form.allowStreamEmbed,
+            sounds: { enabled: form.soundsEnabled, volume: Number(form.soundsVolume) },
             notifications,
         });
         saved.value = true;
@@ -983,6 +994,52 @@ const inputStyle = {
                 >
                     {{ testing && testingService === "discord" ? "Sending&hellip;" : "Test Discord" }}
                 </button>
+            </div>
+
+            <!--
+                Sounds sit with the other ways of being told something happened, rather than
+                off in Advanced - it is the same question asked a different way.
+            -->
+            <div class="rounded-lg p-3 space-y-2.5" :style="{ background: 'var(--surface-2)' }">
+                <label class="flex items-center justify-between gap-4">
+                    <span>
+                        <span class="text-[12px] font-medium">Sounds</span>
+                        <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                            A soft ping when a drop is claimed, and a different chime when a
+                            campaign finishes. Browsers refuse to play audio until the page has
+                            been clicked once, so a dashboard left untouched since loading will
+                            stay silent until you interact with it.
+                        </span>
+                    </span>
+                    <el-switch v-model="form.soundsEnabled" />
+                </label>
+
+                <div v-if="form.soundsEnabled" class="flex items-center gap-3">
+                    <span class="text-[11px] shrink-0" :style="{ color: 'var(--text-2)' }">Volume</span>
+                    <input
+                        v-model="form.soundsVolume"
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        class="flex-1 min-w-0 accent-current"
+                        :style="{ accentColor: 'var(--accent)' }"
+                    />
+                    <span class="text-[11px] tabular w-8 text-right shrink-0" :style="{ color: 'var(--text-2)' }">
+                        {{ Math.round(form.soundsVolume * 100) }}%
+                    </span>
+                    <div class="flex gap-1 shrink-0">
+                        <button
+                            v-for="sound in [{ id: 'claim', label: 'Claim' }, { id: 'complete', label: 'Complete' }]"
+                            :key="sound.id"
+                            class="px-2 py-1 rounded text-[11px]"
+                            :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                            @click="previewSound(sound.id)"
+                        >
+                            {{ sound.label }}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"

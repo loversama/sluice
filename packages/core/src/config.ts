@@ -160,6 +160,15 @@ export interface Config {
         /** Hours between library refreshes. Libraries change rarely. */
         refreshHours: number;
     };
+    /**
+     * Audible feedback in the dashboard. Held here rather than in the browser so the
+     * choice follows the account to whatever is showing the dashboard.
+     */
+    sounds: {
+        enabled: boolean;
+        /** 0 to 1. Applied to the element, so it scales the source rather than the system. */
+        volume: number;
+    };
     notifications: {
         telegram?: { botToken: string; chatId: string };
         /**
@@ -188,6 +197,7 @@ export const DEFAULT_CONFIG: Config = {
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: false,
+    sounds: { enabled: true, volume: 0.5 },
     allowedHosts: [],
     logLevel: "info",
     steam: {
