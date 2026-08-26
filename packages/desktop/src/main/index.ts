@@ -43,8 +43,16 @@ if (!app.requestSingleInstanceLock()) {
      * still be a side panel.
      */
     const THIN_WIDTH = 420;
-    /** Past about three times over, text is comically large rather than merely readable. */
-    const MAX_THIN_ZOOM = 2.4;
+    /**
+     * How much of the extra width becomes zoom rather than extra room.
+     *
+     * At 1 the panel keeps its 420px layout exactly and simply gets bigger, which on a
+     * full-height portrait monitor is comically large. At half, widening buys some larger
+     * text and some more room, which is what the panel actually wants.
+     */
+    const THIN_ZOOM_RATE = 0.5;
+    /** Past this, text stops being readable and starts being a poster. */
+    const MAX_THIN_ZOOM = 1.75;
     let thin = false;
     /** What to go back to, so leaving thin does not forget the size you had. */
     let wideWidth = 1180;
@@ -68,6 +76,25 @@ let updates: AutoUpdate | null = null;
 
     const openExternally = (url: string): void => {
         void shell.openExternal(url);
+    };
+
+        /**
+     * Scale the side panel to whatever width it has been given.
+     *
+     * The layout is drawn for THIN_WIDTH. Widening the window used to mean the page
+     * simply had more room, which is how it fell back into the wide layout by accident;
+     * zooming keeps it the same panel, just bigger, which is what makes it usable
+     * full-screen on a portrait monitor.
+     */
+    const applyThinZoom = (): void => {
+        if (!win) return;
+        if (!thin) {
+            win.webContents.setZoomFactor(1);
+            return;
+        }
+        const { width } = win.getContentBounds();
+        const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
+        win.webContents.setZoomFactor(factor);
     };
 
     function createWindow(): void {
@@ -128,6 +155,13 @@ let updates: AutoUpdate | null = null;
         const sendMaximised = () => win?.webContents.send("window:maximized", win.isMaximized());
         win.on("maximize", sendMaximised);
         win.on("unmaximize", sendMaximised);
+
+        // The side panel scales with its width rather than reflowing, so every change of
+        // size has to re-apply it. Attached here rather than where the IPC is registered:
+        // that runs before there is a window to attach to.
+        win.on("resize", applyThinZoom);
+        win.on("maximize", applyThinZoom);
+        win.on("unmaximize", applyThinZoom);
         win.on("closed", () => {
             win = null;
         });
@@ -377,25 +411,6 @@ let updates: AutoUpdate | null = null;
          * breaking rather than changing shape. Going thin is a decision; coming back
          * restores the size that was in use before.
          */
-        /**
-         * Scale the side panel to whatever width it has been given.
-         *
-         * The layout is drawn for THIN_WIDTH. Widening the window used to mean the page
-         * simply had more room, which is how it fell back into the wide layout by accident;
-         * zooming keeps it the same panel, just bigger, which is what makes it usable
-         * full-screen on a portrait monitor.
-         */
-        const applyThinZoom = (): void => {
-            if (!win) return;
-            if (!thin) {
-                win.webContents.setZoomFactor(1);
-                return;
-            }
-            const { width } = win.getContentBounds();
-            const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
-            win.webContents.setZoomFactor(factor);
-        };
-
         ipcMain.handle("window:toggle-thin", () => {
             if (!win) return false;
             if (thin) {
@@ -417,10 +432,6 @@ let updates: AutoUpdate | null = null;
             win.webContents.send("window:thin", thin);
             return thin;
         });
-        win.on("resize", applyThinZoom);
-        win.on("maximize", applyThinZoom);
-        win.on("unmaximize", applyThinZoom);
-
         ipcMain.handle("window:is-thin", () => thin);
         ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
         ipcMain.handle("desktop:check-updates", () => updates?.check());

@@ -560,6 +560,9 @@ if (!app.requestSingleInstanceLock()) {
     const sendMaximised = () => win?.webContents.send("window:maximized", win.isMaximized());
     win.on("maximize", sendMaximised);
     win.on("unmaximize", sendMaximised);
+    win.on("resize", applyThinZoom);
+    win.on("maximize", applyThinZoom);
+    win.on("unmaximize", applyThinZoom);
     win.on("closed", () => {
       win = null;
     });
@@ -598,16 +601,6 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle("window:close", () => win?.close());
     ipcMain.handle("window:is-maximized", () => win?.isMaximized() ?? false);
-    const applyThinZoom = () => {
-      if (!win) return;
-      if (!thin) {
-        win.webContents.setZoomFactor(1);
-        return;
-      }
-      const { width } = win.getContentBounds();
-      const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
-      win.webContents.setZoomFactor(factor);
-    };
     ipcMain.handle("window:toggle-thin", () => {
       if (!win) return false;
       if (thin) {
@@ -625,9 +618,6 @@ if (!app.requestSingleInstanceLock()) {
       win.webContents.send("window:thin", thin);
       return thin;
     });
-    win.on("resize", applyThinZoom);
-    win.on("maximize", applyThinZoom);
-    win.on("unmaximize", applyThinZoom);
     ipcMain.handle("window:is-thin", () => thin);
     ipcMain.handle("desktop:update-status", () => updates?.status ?? { status: "idle" });
     ipcMain.handle("desktop:check-updates", () => updates?.check());
@@ -644,7 +634,7 @@ if (!app.requestSingleInstanceLock()) {
   let reallyQuitting = false;
   let warnedAboutTray = false;
   const THIN_WIDTH = 420;
-  const MAX_THIN_ZOOM = 2.4;
+  const MAX_THIN_ZOOM = 1.75;
   let thin = false;
   let wideWidth = 1180;
   let toasts = null;
@@ -662,6 +652,16 @@ if (!app.requestSingleInstanceLock()) {
   const isOurs = (url) => isOwnUrl(url, port);
   const openExternally = (url) => {
     void shell.openExternal(url);
+  };
+  const applyThinZoom = () => {
+    if (!win) return;
+    if (!thin) {
+      win.webContents.setZoomFactor(1);
+      return;
+    }
+    const { width } = win.getContentBounds();
+    const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
+    win.webContents.setZoomFactor(factor);
   };
   app.setAppUserModelId("com.sluice.desktop");
   app.whenReady().then(
