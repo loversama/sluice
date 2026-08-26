@@ -30,6 +30,7 @@ const form = reactive({
     telegramChatId: "",
     discordWebhookUrl: "",
     desktopNotifications: true,
+    desktopNotificationStyle: "native",
     soundsEnabled: true,
     soundsVolume: 0.5,
     discordBotToken: "",
@@ -265,6 +266,7 @@ watch(
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
             desktopNotifications: config.desktopNotifications ?? true,
+            desktopNotificationStyle: config.desktopNotificationStyle ?? "native",
             soundsEnabled: config.sounds?.enabled ?? true,
             soundsVolume: config.sounds?.volume ?? 0.5,
             discordBotToken: config.notifications?.discord?.botToken ?? "",
@@ -324,6 +326,7 @@ async function save() {
             logLevel: form.logLevel,
             allowStreamEmbed: form.allowStreamEmbed,
             desktopNotifications: form.desktopNotifications,
+            desktopNotificationStyle: form.desktopNotificationStyle,
             sounds: { enabled: form.soundsEnabled, volume: Number(form.soundsVolume) },
             notifications,
         });
@@ -1011,9 +1014,9 @@ const inputStyle = {
                     <span>
                         <span class="text-[12px] font-medium">Pop-up notifications</span>
                         <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                            A card in the corner of the screen when a drop is claimed, with the
-                            reward's art. Shown by the desktop app over whatever you are doing,
-                            so it does not need the window to be open or in front.
+                            A pop-up when a drop is claimed, carrying the reward's art. Shown by
+                            the desktop app over whatever you are doing, so it does not need the
+                            window open or in front.
                             <template v-if="!isDesktop">
                                 This setting only affects the desktop app; the browser shows its
                                 own notice inside the page instead.
@@ -1022,6 +1025,18 @@ const inputStyle = {
                     </span>
                     <el-switch v-model="form.desktopNotifications" />
                 </label>
+
+                <div v-if="form.desktopNotifications" class="flex items-center justify-between gap-4">
+                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">Style</span>
+                    <select
+                        v-model="form.desktopNotificationStyle"
+                        class="px-2 py-1.5 rounded-lg text-[12px] outline-none"
+                        :style="inputStyle"
+                    >
+                        <option value="native">Match the system</option>
+                        <option value="themed">Match Sluice</option>
+                    </select>
+                </div>
 
                 <label
                     class="flex items-center justify-between gap-4 pt-2.5"

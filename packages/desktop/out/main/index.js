@@ -1,11 +1,12 @@
-import { app, screen, BrowserWindow, shell, nativeImage, Tray, Menu, dialog, ipcMain } from "electron";
-import { join, dirname } from "node:path";
+import { app, screen, BrowserWindow, shell, nativeImage, Tray, Menu, dialog, ipcMain, Notification } from "electron";
+import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@sluice/core";
 import { ApiServer } from "@sluice/server";
-import { mkdirSync, statSync, renameSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, renameSync, appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { inspect } from "node:util";
-import { stat, readdir, cp } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, writeFile, readdir, stat, unlink, cp } from "node:fs/promises";
 const MAX_BYTES = 5 * 1024 * 1024;
 const ANSI = /\x1b\[[0-9;]*m/g;
 function render(value) {
@@ -235,6 +236,60 @@ const PAGE = `<!doctype html>
   }
 <\/script>
 </body>`;
+const MAX_FILES = 200;
+const EXTENSIONS = /* @__PURE__ */ new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+function nameFor(url) {
+  const hash = createHash("sha1").update(url).digest("hex").slice(0, 16);
+  const suffix = extname(new URL(url).pathname).toLowerCase();
+  return `${hash}${EXTENSIONS.has(suffix) ? suffix : ".png"}`;
+}
+class IconCache {
+  constructor(dir) {
+    this.dir = dir;
+  }
+  dir;
+  /**
+   * A local path for the art, or null if it cannot be had.
+   *
+   * Never throws. A notification without its picture is a great deal better than a claim
+   * that goes unannounced because a CDN was slow.
+   */
+  async pathFor(url) {
+    if (!url || !/^https?:\/\//i.test(url)) return null;
+    try {
+      const target = join(this.dir, nameFor(url));
+      if (existsSync(target)) return target;
+      await mkdir(this.dir, { recursive: true });
+      const response = await fetch(url, { signal: AbortSignal.timeout(5e3) });
+      if (!response.ok) return null;
+      const body = Buffer.from(await response.arrayBuffer());
+      if (body.byteLength < 64 || body.byteLength > 4e6) return null;
+      await writeFile(target, body);
+      void this.prune();
+      return target;
+    } catch {
+      return null;
+    }
+  }
+  /** Oldest first, once there are more than a campaign's worth. */
+  async prune() {
+    try {
+      const names = await readdir(this.dir);
+      if (names.length <= MAX_FILES) return;
+      const entries = await Promise.all(
+        names.map(async (name) => {
+          const path = join(this.dir, name);
+          return { path, at: (await stat(path)).mtimeMs };
+        })
+      );
+      entries.sort((a, b) => a.at - b.at);
+      await Promise.all(
+        entries.slice(0, entries.length - MAX_FILES).map((entry) => unlink(entry.path))
+      );
+    } catch {
+    }
+  }
+}
 const DEFAULTS = {
   runAtLogin: false,
   closeToTray: true
@@ -578,6 +633,7 @@ if (!app.requestSingleInstanceLock()) {
   let thin = false;
   let wideWidth = 1180;
   let toasts = null;
+  let icons = null;
   let updates = null;
   app.on("second-instance", () => {
     if (win) {
@@ -650,16 +706,39 @@ if (!app.requestSingleInstanceLock()) {
       } catch (error) {
         logger.warn(`No system tray available: ${error.message}`);
       }
-      toasts = new ToastOverlay(() => {
+      const focusApp = () => {
         win?.show();
         win?.focus();
-      });
-      const popupsWanted = () => handle?.context.getConfig().desktopNotifications !== false;
+      };
+      icons = new IconCache(join(dataDir, "reward-icons"));
+      toasts = new ToastOverlay(focusApp);
+      const announce = async (toast) => {
+        const config = handle?.context.getConfig();
+        if (config?.desktopNotifications === false) return;
+        const icon = await icons?.pathFor(toast.imageUrl) ?? void 0;
+        if (config?.desktopNotificationStyle === "themed") {
+          toasts?.show({ ...toast, imageUrl: toast.imageUrl ?? null });
+          return;
+        }
+        if (!Notification.isSupported()) {
+          toasts?.show({ ...toast, imageUrl: toast.imageUrl ?? null });
+          return;
+        }
+        const notification = new Notification({
+          title: toast.title,
+          body: toast.game ? `${toast.name}
+${toast.game}` : toast.name,
+          icon,
+          silent: true
+          // The dashboard already plays its own sound, if enabled.
+        });
+        notification.on("click", focusApp);
+        notification.show();
+      };
       handle.bus.on(
         "drop-claimed",
         (payload) => {
-          if (!popupsWanted()) return;
-          toasts?.show({
+          void announce({
             kind: "claim",
             title: "Drop claimed",
             name: payload.dropName ?? "Reward claimed",
@@ -669,8 +748,7 @@ if (!app.requestSingleInstanceLock()) {
         }
       );
       handle.bus.on("campaign-completed", (payload) => {
-        if (!popupsWanted()) return;
-        toasts?.show({
+        void announce({
           kind: "complete",
           title: "Campaign complete",
           name: payload.gameName ?? "Campaign complete",

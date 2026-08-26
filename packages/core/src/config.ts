@@ -166,6 +166,11 @@ export interface Config {
      */
     desktopNotifications: boolean;
     /**
+     * How those pop-ups look. Native matches everything else on the machine, which is what
+     * a notification is usually expected to do; themed matches the app instead.
+     */
+    desktopNotificationStyle: "native" | "themed";
+    /**
      * Audible feedback in the dashboard. Held here rather than in the browser so the
      * choice follows the account to whatever is showing the dashboard.
      */
@@ -203,6 +208,7 @@ export const DEFAULT_CONFIG: Config = {
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: false,
     desktopNotifications: true,
+    desktopNotificationStyle: "native",
     sounds: { enabled: true, volume: 0.5 },
     allowedHosts: [],
     logLevel: "info",

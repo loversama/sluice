@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,7 @@ import { createFileSink, logDirectory } from "./log-file-sink.js";
 import { resolveWebDist } from "./resolve-web-dist.js";
 import { isOwnUrl } from "./navigation.js";
 import { ToastOverlay } from "./toasts.js";
+import { IconCache } from "./icon-cache.js";
 import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
 import { createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { importFromDockerData } from "./import-docker.js";
@@ -40,6 +41,7 @@ if (!app.requestSingleInstanceLock()) {
     let wideWidth = 1180;
     /** Built once the app handle exists, so update state rides the dashboard's own stream. */
     let toasts: ToastOverlay | null = null;
+let icons: IconCache | null = null;
 let updates: AutoUpdate | null = null;
 
     app.on("second-instance", () => {
@@ -231,20 +233,59 @@ let updates: AutoUpdate | null = null;
             // Claims are the whole point of the app, and the app is usually behind
             // something else when one lands. The dashboard's own notification only exists
             // while a window is looking at it; this one does not need one.
-            toasts = new ToastOverlay(() => {
+            const focusApp = (): void => {
                 win?.show();
                 win?.focus();
-            });
+            };
 
-            /** Pop-ups are a setting, and it is read at the moment one would appear. */
-            const popupsWanted = (): boolean =>
-                handle?.context.getConfig().desktopNotifications !== false;
+            icons = new IconCache(join(dataDir, "reward-icons"));
+            toasts = new ToastOverlay(focusApp);
+
+            /**
+             * Announce a claim, in whichever style is configured.
+             *
+             * Native is the default and looks like everything else on the machine, which is
+             * what most people want from a notification. The themed card remains for anyone
+             * who would rather it matched the app.
+             */
+            const announce = async (toast: {
+                kind: "claim" | "complete";
+                title: string;
+                name: string;
+                game?: string | null;
+                imageUrl?: string | null;
+            }): Promise<void> => {
+                const config = handle?.context.getConfig();
+                if (config?.desktopNotifications === false) return;
+
+                // Downloaded before showing either way: a native notification cannot fetch
+                // a URL, and the art is the most recognisable part of a claim.
+                const icon = (await icons?.pathFor(toast.imageUrl)) ?? undefined;
+
+                if (config?.desktopNotificationStyle === "themed") {
+                    toasts?.show({ ...toast, imageUrl: toast.imageUrl ?? null });
+                    return;
+                }
+
+                if (!Notification.isSupported()) {
+                    toasts?.show({ ...toast, imageUrl: toast.imageUrl ?? null });
+                    return;
+                }
+
+                const notification = new Notification({
+                    title: toast.title,
+                    body: toast.game ? `${toast.name}\n${toast.game}` : toast.name,
+                    icon,
+                    silent: true, // The dashboard already plays its own sound, if enabled.
+                });
+                notification.on("click", focusApp);
+                notification.show();
+            };
 
             handle.bus.on(
                 "drop-claimed",
                 (payload: { dropName?: string; gameName?: string; rewardImageURL?: string | null }) => {
-                    if (!popupsWanted()) return;
-                    toasts?.show({
+                    void announce({
                         kind: "claim",
                         title: "Drop claimed",
                         name: payload.dropName ?? "Reward claimed",
@@ -255,8 +296,7 @@ let updates: AutoUpdate | null = null;
             );
 
             handle.bus.on("campaign-completed", (payload: { name?: string; gameName?: string }) => {
-                if (!popupsWanted()) return;
-                toasts?.show({
+                void announce({
                     kind: "complete",
                     title: "Campaign complete",
                     name: payload.gameName ?? "Campaign complete",
