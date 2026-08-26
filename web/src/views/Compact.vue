@@ -222,9 +222,18 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         </span>
                     </div>
 
-                    <p v-if="campaign && !campaign.isDeliverable" class="text-[10px] mt-1" :style="{ color: 'var(--warn)' }">
-                        Not linked &mdash; the reward will not reach the game.
-                    </p>
+                    <!-- The warning is also the fix: it goes to the publisher's own
+                         linking page rather than leaving the user to find it. -->
+                    <a
+                        v-if="campaign && !campaign.isDeliverable"
+                        :href="campaign.accountLinkUrl"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-[10px] mt-1 block underline underline-offset-2"
+                        :style="{ color: 'var(--warn)' }"
+                    >
+                        Not linked &mdash; the reward will not reach the game. Link it &rarr;
+                    </a>
                 </template>
 
                 <template v-else-if="loading || store.loading">
@@ -418,12 +427,16 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                             </p>
                         </div>
 
-                        <span
+                        <a
                             v-if="!item.isDeliverable"
-                            class="text-[9px] shrink-0"
+                            :href="item.accountLinkUrl"
+                            target="_blank"
+                            rel="noreferrer"
+                            class="text-[9px] shrink-0 hover:brightness-125"
                             :style="{ color: 'var(--warn)' }"
-                            title="Account not linked"
-                        >&#9675;</span>
+                            title="Not linked - open the publisher's linking page"
+                            @click.stop
+                        >&#9888;</a>
 
                         <!-- Trailing, not leading: the row is read left to right for what
                              it is, and the grip is a control you reach for afterwards. -->
