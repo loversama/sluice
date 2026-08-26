@@ -161,6 +161,11 @@ export interface Config {
         refreshHours: number;
     };
     /**
+     * Pop-up notifications from the desktop app, shown by the operating system rather than
+     * inside the window. Ignored by the container build, which has no desktop to pop up on.
+     */
+    desktopNotifications: boolean;
+    /**
      * Audible feedback in the dashboard. Held here rather than in the browser so the
      * choice follows the account to whatever is showing the dashboard.
      */
@@ -197,6 +202,7 @@ export const DEFAULT_CONFIG: Config = {
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: false,
+    desktopNotifications: true,
     sounds: { enabled: true, volume: 0.5 },
     allowedHosts: [],
     logLevel: "info",

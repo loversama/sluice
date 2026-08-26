@@ -8,6 +8,7 @@ import { ApiServer } from "@sluice/server";
 import { createFileSink, logDirectory } from "./log-file-sink.js";
 import { resolveWebDist } from "./resolve-web-dist.js";
 import { isOwnUrl } from "./navigation.js";
+import { ToastOverlay } from "./toasts.js";
 import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
 import { createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { importFromDockerData } from "./import-docker.js";
@@ -38,7 +39,8 @@ if (!app.requestSingleInstanceLock()) {
     /** What to go back to, so leaving thin does not forget the size you had. */
     let wideWidth = 1180;
     /** Built once the app handle exists, so update state rides the dashboard's own stream. */
-    let updates: AutoUpdate | null = null;
+    let toasts: ToastOverlay | null = null;
+let updates: AutoUpdate | null = null;
 
     app.on("second-instance", () => {
         if (win) {
@@ -140,6 +142,10 @@ if (!app.requestSingleInstanceLock()) {
         void win.loadURL(`http://127.0.0.1:${port}/`);
     }
 
+    // Windows identifies an app by this for notifications and taskbar grouping; without
+    // it both attach to "electron.app.Electron" instead of Sluice.
+    app.setAppUserModelId("com.sluice.desktop");
+
     app.whenReady().then(
         async () => {
             const dataDir = app.getPath("userData");
@@ -222,6 +228,42 @@ if (!app.requestSingleInstanceLock()) {
 
             // Keep the tooltip honest: it is the only status anyone sees while the window
             // is hidden, which is most of the time.
+            // Claims are the whole point of the app, and the app is usually behind
+            // something else when one lands. The dashboard's own notification only exists
+            // while a window is looking at it; this one does not need one.
+            toasts = new ToastOverlay(() => {
+                win?.show();
+                win?.focus();
+            });
+
+            /** Pop-ups are a setting, and it is read at the moment one would appear. */
+            const popupsWanted = (): boolean =>
+                handle?.context.getConfig().desktopNotifications !== false;
+
+            handle.bus.on(
+                "drop-claimed",
+                (payload: { dropName?: string; gameName?: string; rewardImageURL?: string | null }) => {
+                    if (!popupsWanted()) return;
+                    toasts?.show({
+                        kind: "claim",
+                        title: "Drop claimed",
+                        name: payload.dropName ?? "Reward claimed",
+                        game: payload.gameName ?? null,
+                        imageUrl: payload.rewardImageURL ?? null,
+                    });
+                },
+            );
+
+            handle.bus.on("campaign-completed", (payload: { name?: string; gameName?: string }) => {
+                if (!popupsWanted()) return;
+                toasts?.show({
+                    kind: "complete",
+                    title: "Campaign complete",
+                    name: payload.gameName ?? "Campaign complete",
+                    game: payload.name ?? null,
+                });
+            });
+
             handle.bus.on("watching", (payload: { channel?: { displayName?: string; game?: string } }) => {
                 const channel = payload?.channel;
                 setTrayStatus(

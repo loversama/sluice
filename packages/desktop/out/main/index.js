@@ -1,4 +1,4 @@
-import { app, nativeImage, Tray, Menu, dialog, BrowserWindow, ipcMain, shell } from "electron";
+import { app, screen, BrowserWindow, shell, nativeImage, Tray, Menu, dialog, ipcMain } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@sluice/core";
@@ -66,6 +66,175 @@ function isOwnUrl(url, port) {
   }
   return parsed.protocol === "http:" && parsed.host === `127.0.0.1:${port}`;
 }
+const WIDTH = 380;
+const HEIGHT = 330;
+const DISMISS_MS = 6500;
+class ToastOverlay {
+  constructor(focusMain) {
+    this.focusMain = focusMain;
+  }
+  focusMain;
+  win = null;
+  queued = [];
+  ready = false;
+  hideTimer;
+  show(toast) {
+    this.queued.push(toast);
+    this.ensureWindow();
+    if (this.ready) this.flush();
+  }
+  destroy() {
+    clearTimeout(this.hideTimer);
+    this.win?.destroy();
+    this.win = null;
+    this.ready = false;
+  }
+  ensureWindow() {
+    if (this.win && !this.win.isDestroyed()) {
+      if (!this.win.isVisible()) this.win.showInactive();
+      return;
+    }
+    const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
+    this.win = new BrowserWindow({
+      width: WIDTH,
+      height: HEIGHT,
+      x: x + width - WIDTH - 12,
+      y: y + height - HEIGHT - 12,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      // Never steals focus: a claim arriving must not interrupt what is being typed.
+      focusable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      hasShadow: false,
+      show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
+    });
+    this.win.setAlwaysOnTop(true, "screen-saver");
+    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    this.win.webContents.setWindowOpenHandler(({ url }) => {
+      if (url === "sluice://focus") this.focusMain();
+      else void shell.openExternal(url);
+      return { action: "deny" };
+    });
+    this.win.once("ready-to-show", () => {
+      this.ready = true;
+      this.win?.showInactive();
+      this.flush();
+    });
+    void this.win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(PAGE)}`);
+  }
+  flush() {
+    const pending = this.queued;
+    this.queued = [];
+    if (!this.win || this.win.isDestroyed()) return;
+    if (!this.win.isVisible()) this.win.showInactive();
+    for (const toast of pending) {
+      void this.win.webContents.executeJavaScript(
+        `window.addToast(${JSON.stringify(toast)})`,
+        true
+      );
+    }
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => this.win?.hide(), DISMISS_MS + 600);
+  }
+}
+const PAGE = `<!doctype html>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0; overflow: hidden; background: transparent;
+    display: flex; flex-direction: column; justify-content: flex-end; height: 100vh; gap: 8px;
+    font: 13px/1.4 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  .toast {
+    display: flex; gap: 12px; align-items: center;
+    padding: 12px 14px; margin: 0 4px;
+    border-radius: 12px;
+    background: rgba(23, 21, 32, 0.96);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-left: 3px solid var(--accent, #a970ff);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.55);
+    cursor: pointer;
+    animation: in 260ms cubic-bezier(.2,.9,.3,1) both;
+  }
+  .toast.out { animation: out 260ms ease forwards; }
+  .toast.complete { --accent: #3ddc84; }
+  @keyframes in  { from { opacity: 0; transform: translateX(24px) scale(.98); } }
+  @keyframes out { to   { opacity: 0; transform: translateX(24px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .toast, .toast.out { animation: none; }
+  }
+  .art {
+    width: 48px; height: 48px; flex: 0 0 auto; border-radius: 8px; object-fit: cover;
+    background: rgba(255,255,255,0.06);
+  }
+  .text { min-width: 0; flex: 1; }
+  .kind {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--accent, #a970ff); font-weight: 600;
+  }
+  .name {
+    color: #f2f0f6; font-weight: 600; font-size: 14px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+  }
+  .game {
+    color: #a9a4b8; font-size: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+</style>
+<body>
+<script>
+  const DISMISS = ${DISMISS_MS};
+
+  window.addToast = function (toast) {
+    const el = document.createElement("div");
+    el.className = "toast" + (toast.kind === "complete" ? " complete" : "");
+
+    if (toast.imageUrl) {
+      const img = document.createElement("img");
+      img.className = "art";
+      img.src = toast.imageUrl;
+      // A CDN that refuses leaves a neat empty tile rather than a broken-image glyph.
+      img.onerror = () => img.remove();
+      el.appendChild(img);
+    }
+
+    const text = document.createElement("div");
+    text.className = "text";
+    for (const [cls, value] of [["kind", toast.title], ["name", toast.name], ["game", toast.game]]) {
+      if (!value) continue;
+      const line = document.createElement("div");
+      line.className = cls;
+      line.textContent = value;
+      text.appendChild(line);
+    }
+    el.appendChild(text);
+
+    // window.open is intercepted by the main process; the page opens nothing itself.
+    el.onclick = () => { window.open(toast.url || "sluice://focus"); dismiss(el); };
+    document.body.appendChild(el);
+
+    // Only ever three on screen; the oldest goes rather than the stack growing off-screen.
+    while (document.body.children.length > 3) document.body.firstElementChild.remove();
+
+    setTimeout(() => dismiss(el), DISMISS);
+  };
+
+  function dismiss(el) {
+    if (!el.isConnected || el.classList.contains("out")) return;
+    el.classList.add("out");
+    setTimeout(() => el.remove(), 280);
+  }
+<\/script>
+</body>`;
 const DEFAULTS = {
   runAtLogin: false,
   closeToTray: true
@@ -408,6 +577,7 @@ if (!app.requestSingleInstanceLock()) {
   const THIN_WIDTH = 350;
   let thin = false;
   let wideWidth = 1180;
+  let toasts = null;
   let updates = null;
   app.on("second-instance", () => {
     if (win) {
@@ -422,6 +592,7 @@ if (!app.requestSingleInstanceLock()) {
   const openExternally = (url) => {
     void shell.openExternal(url);
   };
+  app.setAppUserModelId("com.sluice.desktop");
   app.whenReady().then(
     async () => {
       const dataDir = app.getPath("userData");
@@ -479,6 +650,33 @@ if (!app.requestSingleInstanceLock()) {
       } catch (error) {
         logger.warn(`No system tray available: ${error.message}`);
       }
+      toasts = new ToastOverlay(() => {
+        win?.show();
+        win?.focus();
+      });
+      const popupsWanted = () => handle?.context.getConfig().desktopNotifications !== false;
+      handle.bus.on(
+        "drop-claimed",
+        (payload) => {
+          if (!popupsWanted()) return;
+          toasts?.show({
+            kind: "claim",
+            title: "Drop claimed",
+            name: payload.dropName ?? "Reward claimed",
+            game: payload.gameName ?? null,
+            imageUrl: payload.rewardImageURL ?? null
+          });
+        }
+      );
+      handle.bus.on("campaign-completed", (payload) => {
+        if (!popupsWanted()) return;
+        toasts?.show({
+          kind: "complete",
+          title: "Campaign complete",
+          name: payload.gameName ?? "Campaign complete",
+          game: payload.name ?? null
+        });
+      });
       handle.bus.on("watching", (payload) => {
         const channel = payload?.channel;
         setTrayStatus(

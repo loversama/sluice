@@ -29,6 +29,7 @@ const form = reactive({
     telegramBotToken: "",
     telegramChatId: "",
     discordWebhookUrl: "",
+    desktopNotifications: true,
     soundsEnabled: true,
     soundsVolume: 0.5,
     discordBotToken: "",
@@ -42,6 +43,9 @@ const form = reactive({
 const canEmbedAnonymously = supportsAnonymousEmbed();
 
 const { isCompact } = useViewport();
+
+/** The desktop build injects this bridge; the container build has no such object. */
+const isDesktop = typeof window !== "undefined" && Boolean(window.desktopBridge);
 
 /**
  * The page is long enough that everything at once is a scroll hunt on a wide screen, so it
@@ -260,6 +264,7 @@ watch(
             telegramBotToken: config.notifications?.telegram?.botToken ?? "",
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
+            desktopNotifications: config.desktopNotifications ?? true,
             soundsEnabled: config.sounds?.enabled ?? true,
             soundsVolume: config.sounds?.volume ?? 0.5,
             discordBotToken: config.notifications?.discord?.botToken ?? "",
@@ -318,6 +323,7 @@ async function save() {
             attemptImpossibleCampaigns: form.attemptImpossibleCampaigns,
             logLevel: form.logLevel,
             allowStreamEmbed: form.allowStreamEmbed,
+            desktopNotifications: form.desktopNotifications,
             sounds: { enabled: form.soundsEnabled, volume: Number(form.soundsVolume) },
             notifications,
         });
@@ -1002,6 +1008,25 @@ const inputStyle = {
             -->
             <div class="rounded-lg p-3 space-y-2.5" :style="{ background: 'var(--surface-2)' }">
                 <label class="flex items-center justify-between gap-4">
+                    <span>
+                        <span class="text-[12px] font-medium">Pop-up notifications</span>
+                        <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                            A card in the corner of the screen when a drop is claimed, with the
+                            reward's art. Shown by the desktop app over whatever you are doing,
+                            so it does not need the window to be open or in front.
+                            <template v-if="!isDesktop">
+                                This setting only affects the desktop app; the browser shows its
+                                own notice inside the page instead.
+                            </template>
+                        </span>
+                    </span>
+                    <el-switch v-model="form.desktopNotifications" />
+                </label>
+
+                <label
+                    class="flex items-center justify-between gap-4 pt-2.5"
+                    :style="{ borderTop: '1px solid var(--border)' }"
+                >
                     <span>
                         <span class="text-[12px] font-medium">Sounds</span>
                         <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">

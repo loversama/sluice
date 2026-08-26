@@ -75,6 +75,12 @@ watch(
         if (!claim || !previous || claim.at === previous.at) {
             return;
         }
+        // The desktop build raises a real toast from the main process, which survives the
+        // window being hidden or behind something. Doing both would announce every claim
+        // twice to anyone actually looking at the dashboard.
+        if (window.desktopBridge) {
+            return;
+        }
         ElNotification({
             title: "Drop claimed",
             message: `${claim.dropName} — ${claim.gameName}`,
