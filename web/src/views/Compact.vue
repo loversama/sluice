@@ -75,6 +75,25 @@ const heroStyle = computed(() => ({
 /* Preview                                                                     */
 /* -------------------------------------------------------------------------- */
 
+const paused = computed(() => Boolean(store.daemon?.paused));
+const busy = ref(false);
+
+/**
+ * The same transport controls as the wide dashboard. They live here rather than in a
+ * shared component because the two headers are laid out for different amounts of room -
+ * but they drive exactly the same actions, so the behaviour cannot drift.
+ */
+async function run(name) {
+    busy.value = true;
+    try {
+        await store.action(name);
+    } catch (error) {
+        ElMessage.error(error.message);
+    } finally {
+        busy.value = false;
+    }
+}
+
 const { height: windowHeight } = useViewport();
 
 /**
@@ -203,7 +222,7 @@ function move(index, delta) {
         <!-- Now mining. Tinted by state, so the header reads at a glance. -->
         <section class="shrink-0" :style="heroStyle">
             <div class="px-3 pt-2.5 pb-2">
-                <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="flex items-center gap-2 mb-1">
                     <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                         Now mining
                     </span>
@@ -215,6 +234,31 @@ function move(index, delta) {
                     >
                         {{ tone.label }}
                     </span>
+
+                    <!-- Same controls as the wide dashboard: at this width they are the
+                         only way to reach pause or next at all. -->
+                    <div class="ml-auto flex items-center gap-1">
+                        <button
+                            class="w-6 h-6 rounded-full grid place-items-center text-[11px]"
+                            :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                            :disabled="busy"
+                            :title="paused ? 'Resume mining' : 'Pause mining'"
+                            :aria-label="paused ? 'Resume mining' : 'Pause mining'"
+                            @click="run(paused ? 'resume' : 'pause')"
+                        >
+                            {{ paused ? "\u25B6" : "\u23F8" }}
+                        </button>
+                        <button
+                            class="w-6 h-6 rounded-full grid place-items-center text-[11px]"
+                            :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                            :disabled="busy || paused || !channel"
+                            title="Next campaign - sends this one to the back of the queue"
+                            aria-label="Next campaign"
+                            @click="run('next')"
+                        >
+                            {{ "\u23ED" }}
+                        </button>
+                    </div>
                 </div>
 
                 <template v-if="channel">
