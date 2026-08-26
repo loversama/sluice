@@ -2,6 +2,8 @@
 import { computed } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
+import draggable from "vuedraggable";
+import { useQueueOrder } from "@/composables/useQueueOrder.js";
 import { formatDuration, formatRelative, formatUntil, totalRemainingMinutes } from "@/lib/format.js";
 import NowMining from "@/components/NowMining.vue";
 import LiveChannel from "@/components/LiveChannel.vue";
@@ -12,6 +14,9 @@ import StatusChip from "@/components/StatusChip.vue";
 const store = useMinerStore();
 
 /** Max five, since this is a preview of the queue rather than the full list. */
+const { order, saving, onReorder, move } = useQueueOrder();
+
+/** The queue as the daemon sees it, for the count; `order` is what is rendered. */
 const queue = computed(() => store.upNext);
 const claims = computed(() => store.claims);
 
@@ -57,7 +62,9 @@ const deliverableShare = computed(() => {
                         {{ queue.length }} queued &rarr;
                     </RouterLink>
                 </header>
-
+                <p v-if="queue.length" class="text-[10px] -mt-2 mb-2" :style="{ color: 'var(--muted)' }">
+                    {{ saving ? "Saving…" : "Drag to rank. Whatever is mining now stays first." }}
+                </p>
                 <p v-if="!queue.length" class="text-[12px] py-4 text-center" :style="{ color: 'var(--muted)' }">
                     <template v-if="store.loading">
                         Working out what to queue&hellip;
@@ -67,12 +74,24 @@ const deliverableShare = computed(() => {
 
                 <!-- Scrolls rather than truncating: the queue routinely runs past a
                      hundred campaigns and the count is itself informative. -->
-                <ul v-else class="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin">
-                    <li
-                        v-for="(campaign, index) in queue"
-                        :key="campaign.id"
+                <!-- Scrolls rather than truncating, and drags to rank: the same list and
+                     the same rule as the narrow layout, which had this first. -->
+                <draggable
+                    v-else
+                    v-model="order"
+                    item-key="id"
+                    handle=".drag-handle"
+                    :animation="150"
+                    class="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin"
+                    @end="onReorder"
+                >
+                    <template #item="{ element: campaign, index }">
+                    <div
                         class="flex items-center gap-3 py-2 px-2 rounded-lg"
                         :style="{ background: 'var(--surface-2)' }"
+                        tabindex="0"
+                        @keydown.ctrl.up.prevent="move(index, -1)"
+                        @keydown.ctrl.down.prevent="move(index, 1)"
                     >
                         <!-- Box art with the rank as a corner tag, so the number rides
                              with the game rather than taking a column of its own. -->
@@ -122,8 +141,17 @@ const deliverableShare = computed(() => {
                                 ends {{ formatUntil(campaign.endAt) }}
                             </p>
                         </div>
-                    </li>
-                </ul>
+
+                        <!-- Trailing, as on the priorities page: the row reads as what it
+                             is before offering a control to move it. -->
+                        <span
+                            class="drag-handle cursor-grab select-none shrink-0 text-[12px]"
+                            :style="{ color: 'var(--muted)' }"
+                            title="Drag to rank"
+                        >&#10287;</span>
+                    </div>
+                    </template>
+                </draggable>
             </section>
 
             <section class="card p-3 lg:col-span-5 xl:col-span-3 xl:order-2 flex flex-col min-h-0 max-h-[560px] xl:max-h-none">
