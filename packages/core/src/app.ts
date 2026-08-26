@@ -180,7 +180,7 @@ export function createApp(options: AppOptions): AppHandle {
             miner?.applyConfig(next);
             if (miner) {
                 bus.emit("campaigns", {
-                    campaigns: miner.getCampaigns().map((c) => serializeCampaign(c, next)),
+                    campaigns: miner.getCampaigns().map((c) => serializeCampaign(c, next, miner?.ownsPredicate ?? null)),
                     queue: miner.getMineableCampaigns().map((c) => c.id),
                 });
             }

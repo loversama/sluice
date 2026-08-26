@@ -28,6 +28,21 @@ const watchedMinutes = computed(() => {
 });
 
 const queue = computed(() => store.upNext);
+
+/**
+ * Campaigns the ranking puts in the queue but the policy will not let it mine.
+ *
+ * The queue is ordered by what would be mined first, and the ownership and exclusion
+ * filters are applied later - so a library policy of "owned or on my list" left dozens of
+ * rows in the list that were never going to be touched. They stay visible, because knowing
+ * a campaign exists and is being passed over is useful, but they are dimmed and counted.
+ */
+const skipped = computed(
+    () => queue.value.filter((campaign) => !campaign.inLibraryScope || campaign.isExcluded).length,
+);
+
+const limitedToOwned = computed(() => store.config?.libraryPolicy === "ownedOrListed");
+
 const claims = computed(() => store.claims);
 
 /** Of the time invested, how much went to campaigns that can actually pay out. */
@@ -75,7 +90,12 @@ const deliverableShare = computed(() => {
                     </RouterLink>
                 </header>
                 <p v-if="queue.length" class="text-[10px] -mt-2 mb-2" :style="{ color: 'var(--muted)' }">
-                    {{ saving ? "Saving…" : "Drag to rank. Whatever is mining now stays first." }}
+                    <template v-if="saving">Saving&hellip;</template>
+                    <template v-else-if="skipped">
+                        Drag to rank. {{ skipped }} dimmed &mdash; not in your Steam library or
+                        your <RouterLink to="/priorities" class="underline">priority list</RouterLink>.
+                    </template>
+                    <template v-else>Drag to rank. Whatever is mining now stays first.</template>
                 </p>
                 <p v-if="!queue.length" class="text-[12px] py-4 text-center" :style="{ color: 'var(--muted)' }">
                     <template v-if="store.loading">
@@ -101,6 +121,14 @@ const deliverableShare = computed(() => {
                     <template #item="{ element: campaign, index }">
                     <div
                         class="flex items-center gap-3 py-2 px-2 rounded-lg"
+                        :class="campaign.inLibraryScope && !campaign.isExcluded ? '' : 'opacity-45'"
+                        :title="
+                            campaign.isExcluded
+                                ? 'On your excluded list, so it will not be mined'
+                                : campaign.inLibraryScope
+                                  ? undefined
+                                  : 'Not in your Steam library or priority list, so it will not be mined'
+                        "
                         :style="{ background: 'var(--surface-2)' }"
                         tabindex="0"
                         @keydown.ctrl.up.prevent="move(index, -1)"

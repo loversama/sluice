@@ -683,7 +683,7 @@ export class ApiServer {
                 ? new Date(miner.getNextRefreshAt()!).toISOString()
                 : null,
             campaigns:
-                miner?.getCampaigns().map((campaign) => serializeCampaign(campaign, config)) ?? [],
+                miner?.getCampaigns().map((campaign) => serializeCampaign(campaign, config, miner?.ownsPredicate ?? null)) ?? [],
             claims: miner?.getRecentClaims() ?? [],
             stats: miner?.getClaimStats() ?? null,
             feed: miner?.getFeed() ?? [],

@@ -856,6 +856,16 @@ export class Miner extends EventEmitter {
      * Inert until a Steam library is loaded. Without one there is nothing to test ownership
      * against, and applying the rule would silently reduce mining to the priority list.
      */
+    /**
+     * Ownership test for the dashboard, so the queue can say which campaigns the library
+     * policy will actually let it mine rather than listing everything and quietly skipping
+     * most of it.
+     */
+    get ownsPredicate(): ((name: string) => boolean) | null {
+        const steam = this.steam;
+        return steam?.isLoaded ? (name: string) => steam.owns(name) : null;
+    }
+
     private isInLibraryScope(campaign: Campaign): boolean {
         const steam = this.steam;
         return isInLibraryScope(campaign, {

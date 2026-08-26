@@ -399,6 +399,12 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                 <template #item="{ element: item, index }">
                     <div
                         class="flex items-center gap-2 py-1.5 px-1.5 rounded-lg"
+                        :class="item.inLibraryScope && !item.isExcluded ? '' : 'opacity-45'"
+                        :title="
+                            item.inLibraryScope && !item.isExcluded
+                                ? undefined
+                                : 'Will not be mined - outside your library policy'
+                        "
                         :style="{ background: 'var(--surface)' }"
                         tabindex="0"
                         @keydown.ctrl.up.prevent="move(index, -1)"

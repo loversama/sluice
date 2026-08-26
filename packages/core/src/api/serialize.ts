@@ -7,6 +7,7 @@
  * exclusion) so the client stays free of ranking logic.
  */
 import type { Config } from "../config.js";
+import { isInLibraryScope } from "../models/campaign.js";
 import type { Campaign, Drop } from "../models/campaign.js";
 
 export interface RewardJson {
@@ -46,6 +47,9 @@ export interface CampaignJson {
     /** Empty means any drops-enabled channel streaming the game qualifies. */
     allowedChannels: string[];
     inPriorities: boolean;
+    /** False when the library policy will make the miner skip it. */
+    inLibraryScope: boolean;
+    /** True when the game is on the never-mine list. */
     priorityRank: number | null;
     isExcluded: boolean;
     isCompleted: boolean;
@@ -76,7 +80,11 @@ export function serializeDrop(drop: Drop): DropJson {
     };
 }
 
-export function serializeCampaign(campaign: Campaign, config: Config): CampaignJson {
+export function serializeCampaign(
+    campaign: Campaign,
+    config: Config,
+    owns: ((name: string) => boolean) | null = null,
+): CampaignJson {
     const rank = config.priorityGames.findIndex((game) => matchesGame(game, campaign));
     return {
         id: campaign.id,
@@ -96,6 +104,14 @@ export function serializeCampaign(campaign: Campaign, config: Config): CampaignJ
         accountLinkUrl: campaign.accountLinkUrl,
         allowedChannels: campaign.allowedChannelLogins,
         inPriorities: rank !== -1,
+        // Why the miner will pass over this one, if it will. The queue is ranked by what
+        // would be mined first, but the policy filters are applied later - so without this
+        // the list showed dozens of campaigns it was never going to touch.
+        inLibraryScope: isInLibraryScope(campaign, {
+            policy: config.libraryPolicy,
+            priorityGames: config.priorityGames,
+            owns,
+        }),
         priorityRank: rank === -1 ? null : rank,
         isExcluded: config.excludedGames.some((game) => matchesGame(game, campaign)),
         isCompleted: campaign.isCompleted,

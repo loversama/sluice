@@ -98,7 +98,7 @@ export function wireMinerToBus(deps: {
     });
     miner.on("campaigns-updated", (campaigns: Campaign[]) => {
         bus.emit("campaigns", {
-            campaigns: campaigns.map((campaign) => serializeCampaign(campaign, deps.getConfig())),
+            campaigns: campaigns.map((campaign) => serializeCampaign(campaign, deps.getConfig(), miner?.ownsPredicate ?? null)),
             queue: miner?.getMineableCampaigns().map((campaign) => campaign.id) ?? [],
             nextRefreshAt: miner?.getNextRefreshAt()
                 ? new Date(miner.getNextRefreshAt()!).toISOString()
