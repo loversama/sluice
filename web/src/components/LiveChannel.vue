@@ -3,6 +3,8 @@ import { computed, ref } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
 import StreamPreview from "@/components/StreamPreview.vue";
+import CameraPlaceholder from "@/components/CameraPlaceholder.vue";
+import Skeleton from "@/components/Skeleton.vue";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 
 const store = useMinerStore();
@@ -29,7 +31,7 @@ const watchingFor = computed(() => {
 </script>
 
 <template>
-    <section v-if="channel" class="card overflow-hidden">
+    <section class="card overflow-hidden">
         <header class="flex items-center gap-2 px-3 py-2">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Live channel
@@ -38,7 +40,7 @@ const watchingFor = computed(() => {
                 &mdash; the stream currently being mined
             </span>
             <button
-                v-if="store.allowStreamEmbed && anonymous"
+                v-if="channel && store.allowStreamEmbed && anonymous"
                 class="text-[11px] hover:underline shrink-0"
                 :style="{ color: 'var(--text-2)' }"
                 @click="playing = !playing"
@@ -55,9 +57,17 @@ const watchingFor = computed(() => {
         </header>
 
         <template v-if="!collapsed">
-            <StreamPreview v-model:playing="playing" :channel="channel" />
+            <StreamPreview v-if="channel" v-model:playing="playing" :channel="channel" />
+            <div v-else class="aspect-video">
+                <CameraPlaceholder :label="store.loading ? 'Finding a channel…' : 'Nothing being watched'" />
+            </div>
 
-            <div class="p-3 space-y-1">
+            <div v-if="!channel" class="p-3 space-y-2">
+                <Skeleton width="45%" height="12px" />
+                <Skeleton width="70%" height="10px" />
+            </div>
+
+            <div v-else class="p-3 space-y-1">
                 <div class="flex items-center gap-2">
                     <a
                         :href="channel.url"

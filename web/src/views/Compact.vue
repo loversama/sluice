@@ -9,6 +9,7 @@ import { formatRelative } from "@/lib/format.js";
 import { useQueueOrder } from "@/composables/useQueueOrder.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import Skeleton from "@/components/Skeleton.vue";
+import StatusChip from "@/components/StatusChip.vue";
 import StartupProgress from "@/components/StartupProgress.vue";
 import StreamPreview from "@/components/StreamPreview.vue";
 
@@ -231,18 +232,18 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         </span>
                     </div>
 
-                    <!-- The warning is also the fix: it goes to the publisher's own
-                         linking page rather than leaving the user to find it. -->
-                    <a
+                    <!--
+                        The same tag as everywhere else rather than a sentence. At this
+                        width a line of prose about undelivered rewards dominated the
+                        banner, and it still links to the page that fixes it.
+                    -->
+                    <StatusChip
                         v-if="campaign && !campaign.isDeliverable"
+                        status="unlinked"
+                        small
+                        class="mt-1.5"
                         :href="campaign.accountLinkUrl"
-                        target="_blank"
-                        rel="noreferrer"
-                        class="text-[10px] mt-1 block underline underline-offset-2"
-                        :style="{ color: 'var(--warn)' }"
-                    >
-                        Not linked &mdash; the reward will not reach the game. Link it &rarr;
-                    </a>
+                    />
                 </template>
 
                 <template v-else-if="loading || store.loading">

@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
 import StatusChip from "./StatusChip.vue";
+import Skeleton from "@/components/Skeleton.vue";
 import { orderTiers, tierProgress } from "@/lib/tiers.js";
 
 const store = useMinerStore();
@@ -43,19 +44,31 @@ const progress = computed(() => tierProgress(campaign.value?.drops));
 </script>
 
 <template>
-    <section v-if="campaign && tiers.length" class="card p-3 flex flex-col min-h-0">
+    <section class="card p-3 flex flex-col min-h-0">
         <header class="flex items-baseline justify-between mb-2">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
-                {{ campaign.game.name }} tiers
+                {{ campaign ? `${campaign.game.name} tiers` : "Tiers" }}
             </h2>
-            <span class="text-[11px] tabular" :style="{ color: 'var(--text-2)' }">
+            <span v-if="tiers.length" class="text-[11px] tabular" :style="{ color: 'var(--text-2)' }">
                 {{ progress.claimed }}/{{ progress.total }} claimed
             </span>
         </header>
 
         <!-- Ladders run to six or more tiers, so this scrolls rather than pushing the
              column out of shape. -->
-        <ul class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin">
+        <!-- Placeholders in the shape of the ladder, so the panel does not resize under the
+             real thing when it lands. -->
+        <div v-if="!tiers.length" class="space-y-2 flex-1">
+            <div v-for="n in 3" :key="n" class="flex items-center gap-2">
+                <Skeleton width="32px" height="32px" />
+                <div class="flex-1 space-y-1.5">
+                    <Skeleton :width="`${72 - n * 9}%`" height="10px" />
+                    <Skeleton width="100%" height="4px" />
+                </div>
+            </div>
+        </div>
+
+        <ul v-else class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin">
             <li
                 v-for="tier in tiers"
                 :key="tier.id"

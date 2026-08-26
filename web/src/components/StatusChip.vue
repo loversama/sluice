@@ -44,11 +44,10 @@ const style = computed(() => STYLES[props.status] ?? STYLES.active);
         :target="href ? '_blank' : undefined"
         :rel="href ? 'noreferrer' : undefined"
         :title="href ? 'Open the publisher\'s account linking page' : undefined"
-        class="inline-flex items-center gap-1 border font-medium whitespace-nowrap"
+        class="inline-flex items-center gap-1 rounded-[5px] border font-medium whitespace-nowrap"
         :class="[
-            style.subtle ? 'rounded-[5px]' : 'rounded-full',
             small ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-[11px]',
-            href ? 'cursor-pointer hover:brightness-125 underline-offset-2 hover:underline' : '',
+            href ? 'cursor-pointer hover:brightness-125' : '',
         ]"
         :style="{
             color: style.subtle
