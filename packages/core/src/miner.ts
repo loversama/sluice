@@ -73,6 +73,16 @@ function mentionsDrops(channel: Channel): boolean {
     return DROPS_IN_TITLE.test(channel.stream?.title ?? "");
 }
 
+/**
+ * How many campaign detail requests are in flight at once.
+ *
+ * Four is a compromise, not a measurement: it takes the cold start from around 27s to
+ * around 7s on a busy account while staying modest against an API that is not published
+ * and not rate-limit documented. Raising it buys progressively less and risks a 429, whose
+ * cost is a sweep that finds nothing rather than a sweep that is slow.
+ */
+const CAMPAIGN_DETAIL_CONCURRENCY = 4;
+
 export interface MinerEvents {
     "campaigns-updated": [Campaign[]];
     "watching": [{ channel: Channel; campaign: Campaign; drop: Drop }];
@@ -1991,57 +2001,106 @@ export class Miner extends EventEmitter {
         logger.debug(`Campaign list fetched in ${((listedAt - startedAt) / 1000).toFixed(1)}s.`);
         this.emit("loading", { phase: "details", done: 0, total: interesting.length });
 
+        let cursor = 0;
         let fetched = 0;
-        for (const campaign of interesting) {
-            // One request per campaign, sequentially, over however many are active - which
-            // can be minutes of work. Without a check here, stopping or signing out waited
-            // for all of it, and an abandoned session carried on spending requests against
-            // an account its successor was already using.
-            if (this.stopping) {
-                logger.debug("Campaign refresh abandoned: stopping.");
-                return;
-            }
-            try {
-                const details = await this.gql.getCampaignDetails(campaign.id);
-                if (details) {
-                    next.set(campaign.id, campaign.merge(details));
-                }
-            } catch (error) {
-                logger.debug(`Could not fetch details for ${campaign.name}:`, error);
-            }
+        let failures = 0;
+        let abandoned = false;
 
-            fetched += 1;
-            // Every few rather than every one: the browser only needs to see it moving,
-            // and one frame per request would be a message every quarter second.
-            if (fetched % 5 === 0 || fetched === interesting.length) {
-                this.emit("loading", {
-                    phase: "details",
-                    done: fetched,
-                    total: interesting.length,
-                });
-            }
-
-            // Hand over what is known so far at intervals, so the queue fills in as it is
-            // learned instead of staying blank and then arriving all at once. Coarser than
-            // the progress ticks above because this payload is the whole campaign list,
-            // not a counter.
-            if (fetched % 25 === 0 && fetched < interesting.length) {
-                // Publishing partway is only safe on the very first sweep, when there is
-                // nothing to disturb. On a later refresh the miner is already watching
-                // something, and letting it rank against a half-fetched list could make it
-                // switch away on evidence that is about to change.
-                if (firstSweep) {
-                    this.campaigns = new Map(next);
+        /**
+         * One worker takes the next campaign until there are none left.
+         *
+         * A few at a time rather than one: the list is fetched in rank order, so the
+         * campaigns that decide what gets mined first are still fetched first. Kept
+         * deliberately low - this is Twitch's private API, and the failure mode for asking
+         * too hard is being rate limited into fetching nothing at all, which is far worse
+         * than being slow.
+         */
+        const worker = async (): Promise<void> => {
+            for (;;) {
+                // Without this check, stopping or signing out waited for the whole sweep,
+                // and an abandoned session carried on spending requests against an account
+                // its successor was already using.
+                if (this.stopping) {
+                    abandoned = true;
+                    return;
                 }
-                this.emit("campaigns-updated", [...next.values()]);
+
+                const index = cursor;
+                cursor += 1;
+                const campaign = interesting[index];
+                if (!campaign) {
+                    return;
+                }
+
+                try {
+                    const details = await this.gql.getCampaignDetails(campaign.id);
+                    if (details) {
+                        next.set(campaign.id, campaign.merge(details));
+                    }
+                } catch (error) {
+                    failures += 1;
+                    logger.debug(`Could not fetch details for ${campaign.name}:`, error);
+                }
+
+                fetched += 1;
+                // Every few rather than every one: the browser only needs to see it moving,
+                // and one frame per request would be a message every quarter second.
+                if (fetched % 5 === 0 || fetched === interesting.length) {
+                    this.emit("loading", {
+                        phase: "details",
+                        done: fetched,
+                        total: interesting.length,
+                    });
+                }
+
+                // Hand over what is known so far at intervals, so the queue fills in as it
+                // is learned instead of staying blank and then arriving all at once.
+                // Coarser than the progress ticks above because this payload is the whole
+                // campaign list, not a counter.
+                if (fetched % 25 === 0 && fetched < interesting.length) {
+                    // Publishing partway is only safe on the very first sweep, when there
+                    // is nothing to disturb. On a later refresh the miner is already
+                    // watching something, and letting it rank against a half-fetched list
+                    // could make it switch away on evidence that is about to change.
+                    if (firstSweep) {
+                        this.campaigns = new Map(next);
+                    }
+                    this.emit("campaigns-updated", [...next.values()]);
+                }
+            }
+        };
+
+        await Promise.all(
+            Array.from({ length: Math.min(CAMPAIGN_DETAIL_CONCURRENCY, interesting.length) }, () =>
+                worker(),
+            ),
+        );
+
+        if (abandoned) {
+            logger.debug("Campaign refresh abandoned: stopping.");
+            return;
+        }
+
+        const elapsed = (Date.now() - listedAt) / 1000;
+        logger.info(
+            `Campaign details: ${interesting.length} fetched in ${elapsed.toFixed(1)}s ` +
+                `(list took ${((listedAt - startedAt) / 1000).toFixed(1)}s).`,
+        );
+
+        // Loud on purpose. A rate-limited sweep still "succeeds" - the campaigns simply
+        // arrive without their drops, drop out of the queue, and the bot looks like it has
+        // decided there is nothing to mine. That is the one failure worth reading a log for.
+        if (failures > 0) {
+            const share = Math.round((failures / interesting.length) * 100);
+            const message = `${failures} of ${interesting.length} campaign details failed (${share}%).`;
+            if (share >= 20) {
+                logger.warn(`${message} Twitch may be rate limiting; queue will be short.`);
+                this.pushFeed("warn", message);
+            } else {
+                logger.debug(message);
             }
         }
 
-        logger.info(
-            `Campaign details: ${interesting.length} fetched in ` +
-                `${((Date.now() - listedAt) / 1000).toFixed(1)}s ` +
-                `(list took ${((listedAt - startedAt) / 1000).toFixed(1)}s).`,
-        );
         this.emit("loading", { phase: "choosing" });
 
         // A fully claimed campaign disappears from dropCampaignsInProgress, and
