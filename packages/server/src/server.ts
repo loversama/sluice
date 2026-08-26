@@ -675,6 +675,7 @@ export class ApiServer {
             mining: miner?.getMiningState() ?? null,
             allowStreamEmbed: config.allowStreamEmbed,
             sounds: config.sounds,
+            sidebarMode: config.sidebarMode,
             desktopNotifications: config.desktopNotifications,
             desktopNotificationStyle: config.desktopNotificationStyle,
             queue: miner?.getMineableCampaigns().map((campaign) => campaign.id) ?? [],

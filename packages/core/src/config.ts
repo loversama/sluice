@@ -164,6 +164,11 @@ export interface Config {
      * Pop-up notifications from the desktop app, shown by the operating system rather than
      * inside the window. Ignored by the container build, which has no desktop to pop up on.
      */
+    /**
+     * How the sidebar behaves. Auto collapses it when the window is too narrow to spare the
+     * rail's width, which is most of the time on a side-by-side desktop.
+     */
+    sidebarMode: "expanded" | "collapsed" | "auto";
     desktopNotifications: boolean;
     /**
      * How those pop-ups look. Native matches everything else on the machine, which is what
@@ -207,6 +212,7 @@ export const DEFAULT_CONFIG: Config = {
     unlinkedExpiryWarningHours: 12,
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: false,
+    sidebarMode: "auto",
     desktopNotifications: true,
     desktopNotificationStyle: "native",
     sounds: { enabled: true, volume: 0.5 },

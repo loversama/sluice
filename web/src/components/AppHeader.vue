@@ -158,15 +158,33 @@ async function toggleMaximize() {
         <!-- Only in the desktop build, and only where the platform expects them: macOS
              keeps its own traffic lights on the left. -->
         <div v-if="desktop" class="app-no-drag flex items-stretch self-stretch ml-2 shrink-0">
+            <!--
+                A toggle rather than an action, so it is drawn as one: lit while the window
+                is in the side panel, plain while it is not. The icon does not change with
+                it - a control whose picture changes on press asks to be re-read every time,
+                and the state is already carried by the highlight.
+
+                Deliberately not the sidebar's own highlight. Both are "this is on", but
+                they are not the same kind of thing, and sharing a treatment would imply
+                this is another place to navigate to.
+            -->
             <button
-                class="win-btn"
+                class="self-center flex items-center justify-center w-7 h-6 mr-1 rounded-md transition-colors"
                 :title="thin ? 'Back to the full window' : 'Shrink to a side panel'"
-                :style="thin ? { color: 'var(--accent)' } : undefined"
+                :aria-pressed="thin"
+                :style="
+                    thin
+                        ? {
+                              background: 'color-mix(in srgb, var(--accent) 24%, transparent)',
+                              color: 'var(--accent)',
+                          }
+                        : { color: 'var(--text-2)' }
+                "
                 @click="toggleThin"
             >
                 <svg width="10" height="10" viewBox="0 0 10 10">
                     <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" />
-                    <rect :x="thin ? 0.5 : 6.5" y="0.5" :width="thin ? 9 : 3" height="9" fill="currentColor" opacity="0.55" />
+                    <rect x="6.5" y="0.5" width="3" height="9" fill="currentColor" opacity="0.55" />
                 </svg>
             </button>
             <button class="win-btn" title="Minimise" @click="desktop.minimize()">

@@ -22,7 +22,9 @@ const STYLES = {
     upcoming: { label: "Upcoming", icon: "◷", color: "var(--info)" },
     completed: { label: "Completed", icon: "✓", color: "var(--muted)" },
     stalled: { label: "Stalled", icon: "⏸", color: "var(--warn)", pulse: true },
-    unlinked: { label: "Not linked", icon: "⚠", color: "var(--warn)" },
+    // Quieter and squarer than the rest: it appears on most rows of a long queue, and at
+    // that density a full-strength pill reads as a list of alarms rather than a caveat.
+    unlinked: { label: "Not linked", icon: "⚠", color: "var(--warn)", subtle: true },
     unfinishable: { label: "Can't finish", icon: "⏳", color: "var(--warn)" },
     excluded: { label: "Excluded", icon: "⊘", color: "var(--muted)" },
     claimed: { label: "Claimed", icon: "✓", color: "var(--success)" },
@@ -42,15 +44,18 @@ const style = computed(() => STYLES[props.status] ?? STYLES.active);
         :target="href ? '_blank' : undefined"
         :rel="href ? 'noreferrer' : undefined"
         :title="href ? 'Open the publisher\'s account linking page' : undefined"
-        class="inline-flex items-center gap-1 rounded-full border font-medium whitespace-nowrap"
+        class="inline-flex items-center gap-1 border font-medium whitespace-nowrap"
         :class="[
+            style.subtle ? 'rounded-[5px]' : 'rounded-full',
             small ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-[11px]',
             href ? 'cursor-pointer hover:brightness-125 underline-offset-2 hover:underline' : '',
         ]"
         :style="{
-            color: style.color,
-            borderColor: `color-mix(in srgb, ${style.color} 40%, transparent)`,
-            background: `color-mix(in srgb, ${style.color} 12%, transparent)`,
+            color: style.subtle
+                ? `color-mix(in srgb, ${style.color} 78%, var(--text-2))`
+                : style.color,
+            borderColor: `color-mix(in srgb, ${style.color} ${style.subtle ? 24 : 40}%, transparent)`,
+            background: `color-mix(in srgb, ${style.color} ${style.subtle ? 7 : 12}%, transparent)`,
         }"
         @click.stop
     >

@@ -29,6 +29,7 @@ const form = reactive({
     telegramBotToken: "",
     telegramChatId: "",
     discordWebhookUrl: "",
+    sidebarMode: "auto",
     desktopNotifications: true,
     desktopNotificationStyle: "native",
     soundsEnabled: true,
@@ -265,6 +266,7 @@ watch(
             telegramBotToken: config.notifications?.telegram?.botToken ?? "",
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
+            sidebarMode: config.sidebarMode ?? "auto",
             desktopNotifications: config.desktopNotifications ?? true,
             desktopNotificationStyle: config.desktopNotificationStyle ?? "native",
             soundsEnabled: config.sounds?.enabled ?? true,
@@ -325,6 +327,7 @@ async function save() {
             attemptImpossibleCampaigns: form.attemptImpossibleCampaigns,
             logLevel: form.logLevel,
             allowStreamEmbed: form.allowStreamEmbed,
+            sidebarMode: form.sidebarMode,
             desktopNotifications: form.desktopNotifications,
             desktopNotificationStyle: form.desktopNotificationStyle,
             sounds: { enabled: form.soundsEnabled, volume: Number(form.soundsVolume) },
@@ -745,7 +748,7 @@ const inputStyle = {
             </span>
         </div>
         <section v-if="visible('notifications')" class="card p-4 space-y-3 break-inside-avoid mb-4">
-            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Notifications</h2>
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Telegram</h2>
             <!--
                 Numbered rather than two bare boxes. Creating the bot is easy; finding the
                 chat ID is where people give up, so that step does the work itself instead
@@ -849,6 +852,10 @@ const inputStyle = {
                     {{ testing && testingService === "telegram" ? "Sending&hellip;" : "Test Telegram" }}
                 </button>
             </div>
+        </section>
+
+        <section v-if="visible('notifications')" class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Discord</h2>
             <!--
                 Two routes, because they suit different people. A webhook is a URL out of
                 channel settings and needs no bot at all; a bot posts under an identity you
@@ -1005,9 +1012,13 @@ const inputStyle = {
                 </button>
             </div>
 
+        </section>
+
+        <section v-if="visible('notifications')" class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">On this machine</h2>
             <!--
-                Sounds sit with the other ways of being told something happened, rather than
-                off in Advanced - it is the same question asked a different way.
+                Sounds and pop-ups are the same question as Telegram and Discord asked a
+                different way, so they sit alongside them rather than off in Advanced.
             -->
             <div class="rounded-lg p-3 space-y-2.5" :style="{ background: 'var(--surface-2)' }">
                 <label class="flex items-center justify-between gap-4">
@@ -1369,6 +1380,22 @@ const inputStyle = {
                     </span>
                 </span>
                 <el-switch v-model="form.allowStreamEmbed" :disabled="!canEmbedAnonymously" />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Sidebar</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Collapsed leaves the icons, so it costs width without costing you the
+                        way around. Automatic collapses it once the window is too narrow to
+                        spare the rail.
+                    </span>
+                </span>
+                <select v-model="form.sidebarMode" class="px-2 py-1.5 rounded-lg text-[12px] outline-none" :style="inputStyle">
+                    <option value="auto">Collapse automatically</option>
+                    <option value="expanded">Always expanded</option>
+                    <option value="collapsed">Always collapsed</option>
+                </select>
             </label>
 
             <label class="flex items-center justify-between gap-4">

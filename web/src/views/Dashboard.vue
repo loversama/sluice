@@ -17,6 +17,16 @@ const store = useMinerStore();
 const { order, saving, dragging, onReorder, move } = useQueueOrder();
 
 /** The queue as the daemon sees it, for the count; `order` is what is rendered. */
+/**
+ * Watched time, split so the minutes can be dropped when the column is too narrow to hold
+ * them on one line.
+ */
+const watchedHours = computed(() => `${Math.floor((store.stats?.minutesEarned ?? 0) / 60)}h`);
+const watchedMinutes = computed(() => {
+    const minutes = (store.stats?.minutesEarned ?? 0) % 60;
+    return minutes ? ` ${minutes}m` : "";
+});
+
 const queue = computed(() => store.upNext);
 const claims = computed(() => store.claims);
 
@@ -189,8 +199,11 @@ const deliverableShare = computed(() => {
                         </p>
                     </div>
                     <div>
-                        <p class="text-[18px] font-semibold tabular">
-                            {{ formatDuration(store.stats.minutesEarned) }}
+                        <!-- "184h 30m" wraps to two lines once this column narrows, which
+                             makes the row of three sit unevenly. The minutes are the part
+                             nobody reads, so they are what goes. -->
+                        <p class="text-[18px] font-semibold tabular whitespace-nowrap">
+                            {{ watchedHours }}<span class="hidden 2xl:inline">{{ watchedMinutes }}</span>
                         </p>
                         <p class="text-[10px] uppercase tracking-wide" :style="{ color: 'var(--text-2)' }">
                             watched

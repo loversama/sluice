@@ -11,16 +11,38 @@ import Compact from "@/views/Compact.vue";
 
 const store = useMinerStore();
 const route = useRoute();
-const { isCompact } = useViewport();
+const { width, isCompact } = useViewport();
 
 /**
  * Collapsing leaves the icons rather than removing the rail: it buys back width without
  * taking away the way around, which is what a disappearing sidebar does.
  */
-const sidebarCollapsed = ref(localStorage.getItem("sluice.sidebar") === "collapsed");
-watch(sidebarCollapsed, (value) =>
-    localStorage.setItem("sluice.sidebar", value ? "collapsed" : "open"),
-);
+/**
+ * Collapsing leaves the icons rather than removing the rail: it buys back width without
+ * taking away the way around, which is what a disappearing sidebar does.
+ *
+ * Auto is the default and collapses below the width where the rail stops earning its
+ * keep - a desktop window parked beside something else spends most of its life there.
+ * Choosing either state explicitly, from here or from Settings, wins over that.
+ */
+const AUTO_COLLAPSE_BELOW = 1180;
+
+const sidebarCollapsed = computed(() => {
+    if (store.sidebarMode === "collapsed") return true;
+    if (store.sidebarMode === "expanded") return false;
+    return width.value < AUTO_COLLAPSE_BELOW;
+});
+
+/** Toggling from the header is a decision, so it is stored as one. */
+async function toggleSidebar() {
+    const next = sidebarCollapsed.value ? "expanded" : "collapsed";
+    store.sidebarMode = next;
+    try {
+        await store.saveConfig({ sidebarMode: next });
+    } catch {
+        /* The rail still moved; it simply will not be remembered. */
+    }
+}
 
 /** The rail is only worth its width when there is width; below that the header takes over. */
 const hasSidebar = computed(() => !isCompact.value);
@@ -129,7 +151,7 @@ onUnmounted(() => store.disconnect());
             :nav="NAV"
             :compact="isCompact"
             :has-sidebar="hasSidebar"
-            @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
+            @toggle-sidebar="toggleSidebar"
         />
 
         <div class="flex-1 flex min-h-0">
