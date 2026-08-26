@@ -187,6 +187,14 @@ export class Miner extends EventEmitter {
     private currentChannel: Channel | null = null;
     private currentDrop: Drop | null = null;
     private lastProgressAt = 0;
+    /**
+     * Campaigns pushed to the back by the Next button, by id, valued with when.
+     *
+     * Held in memory rather than config: it is a "not right now", not a preference, and
+     * surviving a restart would silently sink a campaign the user had forgotten skipping.
+     */
+    private readonly deferredCampaigns = new Map<string, number>();
+
     /** Set when a better campaign appears, so the watch loop yields at its next beat. */
     private switchRequested = false;
     private stopping = false;
@@ -430,6 +438,36 @@ export class Miner extends EventEmitter {
         return true;
     }
 
+    /**
+     * Move on to the next campaign, sending this one to the back of the queue.
+     *
+     * Distinct from skipChannel, which keeps the campaign and finds another streamer for
+     * it. This is "I do not want this reward right now" - the campaign keeps its progress
+     * and stays eligible, it simply stops being chosen ahead of everything else.
+     */
+    skipCampaign(): boolean {
+        const campaign = this.currentCampaign;
+        if (!campaign) {
+            return false;
+        }
+
+        this.deferredCampaigns.set(campaign.id, Date.now());
+        this.switchRequested = true;
+        logger.info(`Deferring ${campaign.gameName} - ${campaign.name} by request.`);
+        this.pushFeed("info", `Moved ${campaign.gameName} to the back of the queue`);
+        return true;
+    }
+
+    /** Put everything skipped by hand back in its usual place. */
+    clearDeferrals(): number {
+        const count = this.deferredCampaigns.size;
+        this.deferredCampaigns.clear();
+        if (count) {
+            this.pushFeed("info", `Restored ${count} skipped campaign${count === 1 ? "" : "s"}`);
+        }
+        return count;
+    }
+
     /** Refresh campaigns immediately rather than waiting for the next scheduled sweep. */
     async refreshNow(): Promise<void> {
         await this.refreshCampaigns();
@@ -449,6 +487,7 @@ export class Miner extends EventEmitter {
             mode,
             randomKeys: this.randomKeys,
             focusGameId: this.currentCampaign?.gameId ?? null,
+            deferred: this.deferredCampaigns,
             steamScore:
                 steam && (mode === "steam_playtime" || mode === "steam_recent")
                     ? (campaign) =>

@@ -176,14 +176,34 @@ const idleReason = computed(() => {
                 >
                     Skip channel
                 </button>
-                <button
-                    class="px-2 py-1 rounded text-[11px]"
-                    :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"
-                    :disabled="busy"
-                    @click="run('pause')"
-                >
-                    Pause
-                </button>
+                <!--
+                    Transport controls, because that is the mental model people already
+                    have for "this is playing and I want the next one". Pause toggles
+                    rather than always reading Pause, which said the wrong thing outright
+                    once the miner was already stopped.
+                -->
+                <div class="flex items-center gap-1 ml-1">
+                    <button
+                        class="w-7 h-7 rounded-full grid place-items-center text-[12px] transition-colors"
+                        :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                        :disabled="busy"
+                        :title="paused ? 'Resume mining' : 'Pause mining'"
+                        :aria-label="paused ? 'Resume mining' : 'Pause mining'"
+                        @click="run(paused ? 'resume' : 'pause')"
+                    >
+                        {{ paused ? "\u25B6" : "\u23F8" }}
+                    </button>
+                    <button
+                        class="w-7 h-7 rounded-full grid place-items-center text-[12px] transition-colors"
+                        :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                        :disabled="busy || paused"
+                        title="Move on to the next campaign, sending this one to the back of the queue"
+                        aria-label="Next campaign"
+                        @click="run('next')"
+                    >
+                        {{ "\u23ED" }}
+                    </button>
+                </div>
             </div>
         </header>
 

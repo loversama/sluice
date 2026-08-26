@@ -401,6 +401,14 @@ export interface RankingOptions {
      * not owned. Supplied by the caller so this module stays free of Steam concerns.
      */
     steamScore?: (campaign: Campaign) => number;
+    /**
+     * Campaigns the user pressed Next on, by id, valued with when they did it.
+     *
+     * These sort behind everything else regardless of how they rank otherwise - the point
+     * of the button is "not this one, now", and a campaign that came straight back because
+     * it is top of the priority list would make it look broken.
+     */
+    deferred?: Map<string, number>;
 }
 
 function priorityRank(campaign: Campaign, priorityGames: string[]): number {
@@ -417,6 +425,18 @@ function priorityRank(campaign: Campaign, priorityGames: string[]): number {
  */
 export function compareCampaigns(a: Campaign, b: Campaign, options: RankingOptions): number {
     const { priorityGames, mode = "ending_soonest" } = options;
+
+    // Skipped-by-hand goes last, above every other consideration including the priority
+    // list. Among themselves the earliest skip comes first, so pressing Next repeatedly
+    // walks down the queue instead of shuffling the same few.
+    const deferredA = options.deferred?.get(a.id) ?? 0;
+    const deferredB = options.deferred?.get(b.id) ?? 0;
+    if ((deferredA === 0) !== (deferredB === 0)) {
+        return deferredA === 0 ? -1 : 1;
+    }
+    if (deferredA !== deferredB) {
+        return deferredA - deferredB;
+    }
 
     const rankDelta = priorityRank(a, priorityGames) - priorityRank(b, priorityGames);
     if (rankDelta !== 0) {

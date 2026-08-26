@@ -376,3 +376,53 @@ describe("isInLibraryScope", () => {
         ).toBe(true);
     });
 });
+
+/**
+ * The Next button works by pushing a campaign to the back of the ranking rather than
+ * excluding it, so its progress and eligibility are untouched. The ordering is the whole
+ * feature: a campaign that came straight back because it tops the priority list would make
+ * the button look broken.
+ */
+describe("compareCampaigns with deferrals", () => {
+    const rank = (options: RankingOptions, ...campaigns: Campaign[]) =>
+        [...campaigns].sort((a, b) => compareCampaigns(a, b, options)).map((c) => c.id);
+
+    const campaign = (id: string, game: string) =>
+        new Campaign(makeCampaign({ id, game: { id: `g-${id}`, name: game, boxArtURL: "" } }));
+
+    const a = campaign("a", "Rust");
+    const b = campaign("b", "Dota 2");
+    const c = campaign("c", "Apex Legends");
+
+    it("sends a skipped campaign behind the others", () => {
+        const deferred = new Map([["a", 1000]]);
+
+        expect(rank({ priorityGames: [], deferred }, a, b, c)).toEqual(["b", "c", "a"]);
+    });
+
+    it("outranks the priority list, so Next is not undone by it", () => {
+        // Without this the top priority game would be re-selected immediately and the
+        // button would appear to do nothing at all.
+        const deferred = new Map([["a", 1000]]);
+
+        expect(rank({ priorityGames: ["Rust"], deferred }, a, b)).toEqual(["b", "a"]);
+    });
+
+    it("keeps skipped campaigns in the order they were skipped", () => {
+        // So pressing Next repeatedly walks down the queue rather than cycling two.
+        const deferred = new Map([
+            ["b", 2000],
+            ["a", 1000],
+        ]);
+
+        expect(rank({ priorityGames: [], deferred }, a, b)).toEqual(["a", "b"]);
+    });
+
+    it("changes nothing when nothing has been skipped", () => {
+        const withMap = rank({ priorityGames: ["Rust"], deferred: new Map() }, a, b, c);
+        const without = rank({ priorityGames: ["Rust"] }, a, b, c);
+
+        expect(withMap).toEqual(without);
+        expect(withMap[0]).toBe("a");
+    });
+});

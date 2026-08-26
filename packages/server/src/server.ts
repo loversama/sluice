@@ -366,6 +366,10 @@ export class ApiServer {
                     return sendJson(response, 200, { paused: false });
                 case "skip":
                     return sendJson(response, 200, { skipped: miner.skipChannel() });
+                case "next":
+                    return sendJson(response, 200, { skipped: miner.skipCampaign() });
+                case "restore":
+                    return sendJson(response, 200, { restored: miner.clearDeferrals() });
                 case "refresh":
                     await miner.refreshNow();
                     return sendJson(response, 200, { ok: true });
