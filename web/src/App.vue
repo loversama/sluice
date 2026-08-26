@@ -194,7 +194,16 @@ onUnmounted(() => store.disconnect());
                 </div>
 
                 <Compact v-if="showCompactHome" />
-                <div v-else class="p-4 max-w-[1800px] mx-auto [&_.sticky]:backdrop-blur">
+                <!--
+                    The dashboard opts out of the centred column so its banner can reach
+                    both window edges. Centring is reapplied inside it, to the panels below
+                    the banner, which is where it was doing the work anyway.
+                -->
+                <div
+                    v-else
+                    class="p-4 [&_.sticky]:backdrop-blur"
+                    :class="route.path === '/' ? '' : 'max-w-[1800px] mx-auto'"
+                >
                     <RouterView />
                 </div>
             </main>

@@ -36,8 +36,10 @@ const deliverableShare = computed(() => {
 
 <template>
     <div class="space-y-4">
+        <!-- Outside the centred wrapper on purpose: the banner spans the window. -->
         <NowMining />
 
+        <!-- Centring returns here, so only the banner is full width. -->
         <!-- A fixed row height on wide screens so the three columns end level; each
              panel scrolls inside itself rather than stretching the row. -->
         <!--
@@ -47,7 +49,7 @@ const deliverableShare = computed(() => {
             thousands of pixels instead of scrolling.
         -->
         <div
-            class="grid grid-cols-1 lg:grid-cols-12 gap-4
+            class="grid grid-cols-1 lg:grid-cols-12 gap-4 max-w-[1800px] mx-auto
                    xl:h-[calc(100vh-34rem)] xl:min-h-[320px] xl:max-h-[880px]
                    xl:grid-rows-[minmax(0,1fr)] xl:items-stretch"
         >
@@ -265,6 +267,6 @@ const deliverableShare = computed(() => {
 
         <!-- Also desktop-only: on a small screen the log is noise below the two lists
              that actually answer "what is it doing". -->
-        <EventFeed class="hidden lg:block" :entries="store.feed" />
+        <EventFeed class="hidden lg:block max-w-[1800px] mx-auto" :entries="store.feed" />
     </div>
 </template>

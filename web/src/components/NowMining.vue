@@ -14,6 +14,22 @@ const busy = ref(false);
  * The header carries its state as a colour as well as a word, as the narrow layout does.
  * Mixed into the surface rather than used neat: it sits behind body text for hours.
  */
+/** Mining proper, as opposed to starting up or having nothing to do. */
+const active = computed(() => Boolean(store.mining && drop.value));
+
+/**
+ * What the bar at the foot of the band is measuring.
+ *
+ * The drop while mining, the campaign sweep while starting up, and nothing at all when
+ * idle - one bar reporting whatever is currently in progress, rather than three bars that
+ * come and go with the panel above them.
+ */
+const barFraction = computed(() => {
+    if (active.value) return progress.value;
+    const { done, total } = store.loading ?? {};
+    return total ? Math.min(1, done / total) : null;
+});
+
 const accent = computed(() => (store.isStalled ? "var(--warn)" : "var(--accent)"));
 
 const heroStyle = computed(() => ({
@@ -116,81 +132,39 @@ const idleReason = computed(() => {
     </section>
 
     <!--
-        Starting up is not the same as having nothing to mine, and saying the latter during
-        the former is simply wrong - on a busy account the wait is half a minute.
-    -->
-    <section v-else-if="store.loading && !store.mining" class="card p-4">
-        <h2 class="text-[15px] font-semibold mb-2">Starting up</h2>
-        <StartupProgress />
-    </section>
-
-    <!-- Idle: never a blank card; always say why, and where to look next. -->
-    <section v-else-if="!store.mining || !drop" class="card p-4">
-        <div class="flex items-center justify-between">
-            <div>
-                <h2 class="text-[15px] font-semibold">
-                    {{ paused ? "Paused" : "Nothing to mine right now" }}
-                </h2>
-                <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
-                    {{ paused ? "Nothing is being watched or claimed until you resume." : idleReason }}
-                </p>
-            </div>
-            <RouterLink
-                v-if="store.upcomingCampaigns.length"
-                to="/campaigns"
-                class="text-[12px] hover:underline"
-                :style="{ color: 'var(--accent)' }"
-            >
-                See upcoming &rarr;
-            </RouterLink>
-        </div>
-        <div class="flex items-center gap-2 mt-3">
-            <button
-                v-if="paused"
-                class="px-3 py-1.5 rounded-lg text-[12px] text-white"
-                :style="{ background: 'var(--accent)' }"
-                :disabled="busy"
-                @click="run('resume')"
-            >
-                Resume
-            </button>
-            <button
-                class="px-3 py-1.5 rounded-lg text-[12px]"
-                :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
-                :disabled="busy"
-                @click="run('refresh')"
-            >
-                Refresh campaigns now
-            </button>
-            <span v-if="refreshIn" class="text-[11px] tabular ml-auto" :style="{ color: 'var(--muted)' }">
-                next refresh in {{ refreshIn }}
-            </span>
-        </div>
-    </section>
-
-    <!-- Active mining. -->
-    <!--
-        Full bleed and tinted, following the narrow layout. The panel spans the window while
-        its contents keep the same left edge as every other panel, so it reads as a banner
-        for the page rather than a card that has escaped its column.
+        One band, whatever the state. Starting up, idling and mining are the same thing at
+        different moments - the panel that reports what the bot is doing - and giving each a
+        card of its own made the page rearrange itself as they changed.
     -->
     <section v-else class="-mx-4 -mt-4 overflow-hidden" :style="heroStyle">
         <div class="px-4 pt-3 pb-3">
             <header class="flex items-center justify-between gap-3 mb-2">
                 <div class="flex items-center gap-2 min-w-0">
-                    <StatusChip :status="store.isStalled ? 'stalled' : 'mining'" />
-                    <span class="text-[12px] truncate" :style="{ color: 'var(--text-2)' }">
+                    <StatusChip
+                        v-if="active"
+                        :status="store.isStalled ? 'stalled' : 'mining'"
+                    />
+                    <span
+                        v-else
+                        class="text-[10px] uppercase tracking-wider"
+                        :style="{ color: 'var(--text-2)' }"
+                    >
+                        {{ store.loading ? "Starting up" : paused ? "Paused" : "Idle" }}
+                    </span>
+                    <span v-if="active" class="text-[12px] truncate" :style="{ color: 'var(--text-2)' }">
                         <strong :style="{ color: 'var(--text)' }">{{ campaign?.game?.name }}</strong>
                         &mdash; {{ campaign?.name }}
                     </span>
                 </div>
+
                 <div class="flex items-center gap-2 shrink-0">
                     <StatusChip
-                        v-if="campaign && !campaign.isAccountLinked"
+                        v-if="active && campaign && !campaign.isAccountLinked"
                         status="unlinked"
                         :href="campaign.accountLinkUrl"
                     />
                     <button
+                        v-if="active"
                         class="px-2 py-1 rounded text-[11px]"
                         :style="{ background: 'var(--surface-2)', color: 'var(--text-2)' }"
                         :disabled="busy"
@@ -219,7 +193,7 @@ const idleReason = computed(() => {
                         <button
                             class="w-7 h-7 rounded-full grid place-items-center text-[12px] transition-colors"
                             :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
-                            :disabled="busy || paused"
+                            :disabled="busy || paused || !active"
                             title="Move on to the next campaign, sending this one to the back of the queue"
                             aria-label="Next campaign"
                             @click="run('next')"
@@ -230,8 +204,9 @@ const idleReason = computed(() => {
                 </div>
             </header>
 
-            <!-- The reward is the headline. Users care about the item, not the streamer. -->
-            <div class="flex items-start gap-4">
+            <!-- Mining: the reward is the headline. Users care about the item, not the
+                 streamer. -->
+            <div v-if="active" class="flex items-start gap-4">
                 <img
                     v-if="reward?.imageURL"
                     :src="reward.imageURL"
@@ -317,15 +292,44 @@ const idleReason = computed(() => {
                     </div>
                 </div>
             </div>
+
+            <!-- Starting up: what it is doing, and how far through. -->
+            <div v-else-if="store.loading" class="max-w-[520px]">
+                <StartupProgress />
+            </div>
+
+            <!-- Idle: never a blank band; always say why, and where to look next. -->
+            <div v-else class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <h1 class="text-[20px] font-semibold leading-tight">
+                        {{ paused ? "Paused" : "Nothing to mine right now" }}
+                    </h1>
+                    <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
+                        {{ paused ? "Nothing is being watched or claimed until you resume." : idleReason }}
+                    </p>
+                </div>
+                <RouterLink
+                    v-if="store.upcomingCampaigns.length"
+                    to="/campaigns"
+                    class="text-[12px] hover:underline shrink-0"
+                    :style="{ color: 'var(--accent)' }"
+                >
+                    See what is coming &rarr;
+                </RouterLink>
+            </div>
         </div>
 
-        <!-- Edge to edge and flush with the bottom, as in the narrow layout: this is the one
-             number the panel exists to report, and a boxed bar was losing that argument. -->
+        <!--
+            Edge to edge and flush with the bottom, as in the narrow layout. It always means
+            the same thing - how far through whatever is happening - so it stays put while
+            the band above it changes, rather than appearing and disappearing.
+        -->
         <div class="h-[7px]" :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }">
             <div
+                v-if="barFraction !== null"
                 class="h-full transition-[width] duration-700"
                 :style="{
-                    width: `${progress * 100}%`,
+                    width: `${barFraction * 100}%`,
                     background: accent,
                     boxShadow: `0 0 10px color-mix(in srgb, ${accent} 70%, transparent)`,
                 }"
