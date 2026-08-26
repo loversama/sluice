@@ -14,7 +14,7 @@ import StatusChip from "@/components/StatusChip.vue";
 const store = useMinerStore();
 
 /** Max five, since this is a preview of the queue rather than the full list. */
-const { order, saving, onReorder, move } = useQueueOrder();
+const { order, saving, dragging, onReorder, move } = useQueueOrder();
 
 /** The queue as the daemon sees it, for the count; `order` is what is rendered. */
 const queue = computed(() => store.upNext);
@@ -85,7 +85,8 @@ const deliverableShare = computed(() => {
                     handle=".drag-handle"
                     :animation="150"
                     class="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 scroll-thin"
-                    @end="onReorder"
+                    @start="dragging = true"
+                    @end="dragging = false; onReorder($event)"
                 >
                     <template #item="{ element: campaign, index }">
                     <div

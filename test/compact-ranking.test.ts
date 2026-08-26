@@ -1,64 +1,98 @@
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error - plain JS module shared with the dashboard build.
-import { gamesIn, nextPriorityGames } from "../web/src/lib/ranking.js";
+import { gamesIn, pinDraggedGame } from "../web/src/lib/ranking.js";
 
-const campaign = (game: string, id = `${game}-1`) => ({ id, game: { name: game } });
+const campaign = (game: string, id = game) => ({ id, game: { name: game } });
 
 /**
- * Dragging the queue in the narrow window edits the priority list, because the queue itself
- * is computed by the daemon and cannot be written to. That indirection is where the bugs
- * are, so the rule is pinned here rather than left to be noticed in use.
+ * Dragging a queue row edits the priority list, because the queue itself is computed by the
+ * daemon and cannot be written to. The rule has to be minimal: exactly one game moves.
+ *
+ * The version this replaced snapshotted the whole visible queue into the list, which on the
+ * full dashboard meant one drag pinned about fifty games - freezing ranking to that moment
+ * and disabling whichever ordering mode was chosen. These tests exist mostly to stop that
+ * coming back.
  */
-describe("nextPriorityGames", () => {
-    it("puts the dragged order into the priority list", () => {
+describe("pinDraggedGame", () => {
+    it("pins only the game that moved", () => {
         const queue = [campaign("Rust"), campaign("Dota 2"), campaign("Apex")];
 
-        expect(nextPriorityGames(queue, [], null)).toEqual(["Rust", "Dota 2", "Apex"]);
+        // Apex dragged to the top.
+        expect(pinDraggedGame([queue[2], queue[0], queue[1]], [], 0)).toEqual(["Apex"]);
     });
 
-    it("keeps the game being mined ahead of the queue, so a drag cannot abandon it", () => {
-        // The daemon re-ranks on every config change and switches channel if the top
-        // campaign moved. Pinning the queue above the current game would do exactly that.
-        const queue = [campaign("Rust"), campaign("Apex")];
+    it("does not pin the world, however long the queue is", () => {
+        // The regression that prompted this rewrite: a seventy-row queue, one drag.
+        const queue = Array.from({ length: 70 }, (_, i) => campaign(`Game ${i}`));
+        const dragged = [queue[40], ...queue.filter((_, i) => i !== 40)];
 
-        expect(nextPriorityGames(queue, [], "Valorant")[0]).toBe("Valorant");
+        const next = pinDraggedGame(dragged, [], 0);
+
+        expect(next).toEqual(["Game 40"]);
+        expect(next).toHaveLength(1);
     });
 
-    it("does not duplicate the current game when it is already ranked", () => {
-        const queue = [campaign("Rust")];
-        const next = nextPriorityGames(queue, ["Valorant"], "Valorant");
+    it("leaves games the user never touched unpinned, so the ordering mode still decides them", () => {
+        // Anything absent from the list is ranked by mode - ending soonest, Steam playtime,
+        // whatever was chosen. Pinning everything is what silently disabled that.
+        const queue = [campaign("Rust"), campaign("Dota 2"), campaign("Apex")];
 
-        expect(next.filter((game) => game === "Valorant")).toHaveLength(1);
-        expect(next).toEqual(["Valorant", "Rust"]);
+        expect(pinDraggedGame(queue, [], 1)).toEqual(["Rust", "Dota 2"].slice(1, 2));
     });
 
-    it("matches the current game case-insensitively", () => {
-        const next = nextPriorityGames([campaign("Rust")], ["valorant"], "Valorant");
+    it("drops below the pinned game it was dropped under", () => {
+        const queue = [campaign("Rust"), campaign("Apex"), campaign("Dota 2")];
 
-        expect(next).toEqual(["valorant", "Rust"]);
-    });
-
-    it("leaves ranked games with no live campaign where they were", () => {
-        // These cannot appear in the queue, so arranging the queue must not reshuffle them.
-        const queue = [campaign("Rust"), campaign("Apex")];
-        const existing = ["Off-season A", "Off-season B", "Apex", "Rust"];
-
-        expect(nextPriorityGames(queue, existing, null)).toEqual([
-            "Off-season A",
-            "Off-season B",
+        // Apex dropped below Rust, which is already pinned.
+        expect(pinDraggedGame(queue, ["Rust", "Valorant"], 1)).toEqual([
             "Rust",
             "Apex",
+            "Valorant",
         ]);
     });
 
-    it("collapses several campaigns of one game to a single entry", () => {
-        const queue = [campaign("Rust", "a"), campaign("Rust", "b"), campaign("Apex")];
+    it("goes to the top when nothing pinned sits above the drop", () => {
+        const queue = [campaign("Apex"), campaign("Rust")];
 
-        expect(nextPriorityGames(queue, [], null)).toEqual(["Rust", "Apex"]);
+        expect(pinDraggedGame(queue, ["Rust"], 0)).toEqual(["Apex", "Rust"]);
     });
 
-    it("ignores queue entries with no game name", () => {
+    it("moves rather than duplicates a game already in the list", () => {
+        const queue = [campaign("Rust"), campaign("Apex")];
+        const next = pinDraggedGame(queue, ["Apex", "Rust"], 1);
+
+        expect(next.filter((game) => game === "Apex")).toHaveLength(1);
+        expect(next).toEqual(["Rust", "Apex"]);
+    });
+
+    it("matches existing entries case-insensitively rather than adding a second spelling", () => {
+        const queue = [campaign("Rust"), campaign("Apex")];
+        const next = pinDraggedGame(queue, ["apex"], 1);
+
+        expect(next).toHaveLength(1);
+    });
+
+    it("returns the list untouched when the drop makes no sense", () => {
+        expect(pinDraggedGame([], ["Rust"], 0)).toEqual(["Rust"]);
+        expect(pinDraggedGame([{ id: "x" }], ["Rust"], 0)).toEqual(["Rust"]);
+    });
+
+    it("does not mutate the list it was given", () => {
+        const existing = ["Rust"];
+        pinDraggedGame([campaign("Apex")], existing, 0);
+
+        expect(existing).toEqual(["Rust"]);
+    });
+});
+
+describe("gamesIn", () => {
+    it("collapses several campaigns of one game", () => {
+        expect(gamesIn([campaign("Rust", "a"), campaign("Rust", "b"), campaign("Apex")]))
+            .toEqual(["Rust", "Apex"]);
+    });
+
+    it("ignores entries with no game name", () => {
         expect(gamesIn([{ id: "x" }, campaign("Rust")])).toEqual(["Rust"]);
     });
 });

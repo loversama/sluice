@@ -2,7 +2,7 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
-import { nextPriorityGames } from "@/lib/ranking.js";
+import { pinDraggedGame } from "@/lib/ranking.js";
 
 /**
  * Dragging the queue into a different order, from either layout.
@@ -22,10 +22,13 @@ export function useQueueOrder() {
     const saving = ref(false);
     let settleTimer = null;
 
+    /** True while a row is actually held, so an inbound snapshot cannot re-render under it. */
+    const dragging = ref(false);
+
     watch(
         () => store.upNext,
         (next) => {
-            if (!pending.value) order.value = [...next];
+            if (!pending.value && !dragging.value) order.value = [...next];
         },
         { immediate: true },
     );
@@ -37,16 +40,30 @@ export function useQueueOrder() {
 
     onUnmounted(() => clearTimeout(settleTimer));
 
-    /** Persist a drag by rewriting the priority list - see nextPriorityGames for the rule. */
-    async function onReorder() {
+    /**
+     * Persist a drag by pinning the game that moved - see pinDraggedGame for the rule.
+     *
+     * Refuses to write if the priority list was never loaded. Treating a failed fetch as an
+     * empty list would make the next drag delete every entry the user had.
+     */
+    async function onReorder(event) {
+        const existing = store.config?.priorityGames;
+        if (!existing) {
+            ElMessage.error("Settings have not loaded yet, so the order was not saved.");
+            order.value = [...store.upNext];
+            return;
+        }
+
+        const movedIndex = event?.newIndex ?? event?.newDraggableIndex;
+        if (movedIndex === undefined || movedIndex === null) {
+            order.value = [...store.upNext];
+            return;
+        }
+
         pending.value = true;
         saving.value = true;
 
-        const next = nextPriorityGames(
-            order.value,
-            store.config?.priorityGames ?? [],
-            store.currentCampaign?.game?.name ?? store.mining?.channel?.game ?? null,
-        );
+        const next = pinDraggedGame(order.value, existing, movedIndex);
 
         try {
             await store.saveConfig({ priorityGames: next });
@@ -70,8 +87,8 @@ export function useQueueOrder() {
         if (target < 0 || target >= order.value.length) return;
         const [item] = order.value.splice(index, 1);
         order.value.splice(target, 0, item);
-        onReorder();
+        onReorder({ newIndex: target });
     }
 
-    return { order, saving, onReorder, move };
+    return { order, saving, dragging, onReorder, move };
 }

@@ -154,7 +154,7 @@ async function setLive(value) {
  * only durable way to hold an order is the priority list. So this mirrors the queue until
  * the user drags, and then briefly holds their arrangement while it is persisted.
  */
-const { order, saving, onReorder, move } = useQueueOrder();
+const { order, saving, dragging, onReorder, move } = useQueueOrder();
 </script>
 
 <template>
@@ -375,7 +375,8 @@ const { order, saving, onReorder, move } = useQueueOrder();
                 handle=".drag-handle"
                 :animation="150"
                 class="flex flex-col gap-1"
-                @end="onReorder"
+                @start="dragging = true"
+                    @end="dragging = false; onReorder($event)"
             >
                 <template #item="{ element: item, index }">
                     <div
