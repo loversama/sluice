@@ -161,12 +161,24 @@ export const useMinerStore = defineStore("miner", {
             return body;
         },
 
-        async testNotification() {
-            const response = await fetch("/api/notify/test", { method: "POST" });
+        /**
+         * Send a test notification, optionally to one service only.
+         *
+         * Returns what each configured notifier made of it: a 200 means the attempt was
+         * made, not that anything arrived, and the difference is the whole point of the
+         * button.
+         */
+        async testNotification(service) {
+            const response = await fetch("/api/notify/test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(service ? { service } : {}),
+            });
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
                 throw new Error(body.error ?? "Test failed");
             }
+            return body;
         },
 
         connect() {

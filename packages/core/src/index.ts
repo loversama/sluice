@@ -41,7 +41,7 @@ export { InstanceLock, instanceLockPath, findConflictingInstance } from "./insta
 // implementations it never constructs.
 export type { Miner } from "./miner.js";
 export type { AuthState } from "./twitch/auth.js";
-export type { NotifierGroup } from "./notifiers/index.js";
+export type { NotifierGroup, NotifierService, DeliveryResult } from "./notifiers/index.js";
 export {
     botFromGetMe,
     chatFromUpdates,
@@ -49,5 +49,12 @@ export {
     looksLikeBotToken,
 } from "./notifiers/telegram-setup.js";
 export type { TelegramBot, TelegramChat } from "./notifiers/telegram-setup.js";
+export {
+    botFromUser,
+    describeDiscordError,
+    guildsFrom,
+    textChannelsFrom,
+} from "./notifiers/discord-setup.js";
+export type { DiscordBot, DiscordChannel } from "./notifiers/discord-setup.js";
 export type { SteamLibrary } from "./steam/library.js";
 export type { Campaign, Drop, PriorityMode } from "./models/campaign.js";

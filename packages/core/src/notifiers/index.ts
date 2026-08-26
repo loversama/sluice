@@ -108,23 +108,29 @@ class TelegramNotifier implements Notifier {
     }
 }
 
+/** Discord renders both routes from the same embed, so it is built in one place. */
+export function discordEmbed(notification: Notification): Record<string, unknown> {
+    const embed: Record<string, unknown> = {
+        title: notification.title,
+        color: KIND_COLOR[notification.kind ?? "info"] ?? KIND_COLOR.info,
+    };
+    if (notification.lines?.length) {
+        embed["description"] = notification.lines.join("\n");
+    }
+    if (notification.imageUrl) {
+        embed["thumbnail"] = { url: notification.imageUrl };
+    }
+    if (notification.url) {
+        embed["url"] = notification.url;
+    }
+    return embed;
+}
+
 class DiscordNotifier implements Notifier {
     constructor(private readonly webhookUrl: string) {}
 
     async send(notification: Notification): Promise<void> {
-        const embed: Record<string, unknown> = {
-            title: notification.title,
-            color: KIND_COLOR[notification.kind ?? "info"] ?? KIND_COLOR.info,
-        };
-        if (notification.lines?.length) {
-            embed["description"] = notification.lines.join("\n");
-        }
-        if (notification.imageUrl) {
-            embed["thumbnail"] = { url: notification.imageUrl };
-        }
-        if (notification.url) {
-            embed["url"] = notification.url;
-        }
+        const embed = discordEmbed(notification);
 
         const response = await request(this.webhookUrl, {
             method: "POST",
@@ -139,19 +145,81 @@ class DiscordNotifier implements Notifier {
 }
 
 /**
+ * Posting through a bot rather than a webhook.
+ *
+ * Same embed, different door: a webhook is bound to one channel and belongs to nobody,
+ * whereas a bot posts under an identity you own and can be moved between channels without
+ * reissuing anything.
+ */
+class DiscordBotNotifier implements Notifier {
+    constructor(
+        private readonly botToken: string,
+        private readonly channelId: string,
+    ) {}
+
+    async send(notification: Notification): Promise<void> {
+        const response = await request(
+            `https://discord.com/api/v10/channels/${this.channelId}/messages`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    // "Bot " is not optional - Discord reads the scheme, and without it the
+                    // token is treated as a user token and refused.
+                    Authorization: `Bot ${this.botToken}`,
+                },
+                body: JSON.stringify({ embeds: [discordEmbed(notification)] }),
+            },
+        );
+        await response.body.dump();
+        if (response.statusCode >= 300) {
+            throw new Error(`Discord returned ${response.statusCode}`);
+        }
+    }
+}
+
+/**
  * Fans a notification out to every configured service. Delivery failures are logged rather
  * than thrown - a broken webhook must never interrupt mining.
  */
+export type NotifierService = "telegram" | "discord";
+
+/** What one service made of a delivery. Only a test has any use for the failures. */
+export interface DeliveryResult {
+    service: NotifierService;
+    label: string;
+    ok: boolean;
+    error?: string;
+}
+
 export class NotifierGroup implements Notifier {
-    private readonly notifiers: Notifier[] = [];
+    private readonly notifiers: { service: NotifierService; label: string; notifier: Notifier }[] =
+        [];
 
     constructor(config: Config) {
         const { telegram, discord } = config.notifications;
         if (telegram?.botToken && telegram.chatId) {
-            this.notifiers.push(new TelegramNotifier(telegram.botToken, telegram.chatId));
+            this.notifiers.push({
+                service: "telegram",
+                label: "Telegram",
+                notifier: new TelegramNotifier(telegram.botToken, telegram.chatId),
+            });
         }
         if (discord?.webhookUrl) {
-            this.notifiers.push(new DiscordNotifier(discord.webhookUrl));
+            this.notifiers.push({
+                service: "discord",
+                label: "Discord webhook",
+                notifier: new DiscordNotifier(discord.webhookUrl),
+            });
+        }
+        // Both may be set, and then both send: someone who has configured a webhook and a
+        // bot has said they want it in two places.
+        if (discord?.botToken && discord.channelId) {
+            this.notifiers.push({
+                service: "discord",
+                label: "Discord bot",
+                notifier: new DiscordBotNotifier(discord.botToken, discord.channelId),
+            });
         }
     }
 
@@ -159,13 +227,49 @@ export class NotifierGroup implements Notifier {
         return this.notifiers.length === 0;
     }
 
-    async send(notification: Notification): Promise<void> {
-        await Promise.all(
-            this.notifiers.map((notifier) =>
-                notifier.send(notification).catch((error) => {
-                    logger.debug("Notification failed:", error);
-                }),
-            ),
+    /** True if anything is configured for this service. */
+    has(service: NotifierService): boolean {
+        return this.notifiers.some((entry) => entry.service === service);
+    }
+
+    /**
+     * Send, and say what happened to each.
+     *
+     * Mining calls send() and ignores this; a test button is the one caller that needs the
+     * failures, because "sent" with nothing arriving is exactly the bug it exists to catch.
+     */
+    async deliver(
+        notification: Notification,
+        service?: NotifierService,
+    ): Promise<DeliveryResult[]> {
+        const targets = service
+            ? this.notifiers.filter((entry) => entry.service === service)
+            : this.notifiers;
+
+        return Promise.all(
+            targets.map(async ({ service: name, label, notifier }) => {
+                try {
+                    await notifier.send(notification);
+                    return { service: name, label, ok: true };
+                } catch (error) {
+                    return {
+                        service: name,
+                        label,
+                        ok: false,
+                        error: error instanceof Error ? error.message : String(error),
+                    };
+                }
+            }),
         );
+    }
+
+    async send(notification: Notification): Promise<void> {
+        // Delivery failures are logged rather than thrown - a broken webhook must never
+        // interrupt mining.
+        for (const result of await this.deliver(notification)) {
+            if (!result.ok) {
+                logger.debug(`Notification via ${result.label} failed:`, result.error);
+            }
+        }
     }
 }

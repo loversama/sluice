@@ -13,6 +13,12 @@ import {
     botFromGetMe,
     chatFromUpdates,
     describeTelegramError,
+    botFromUser,
+    describeDiscordError,
+    guildsFrom,
+    textChannelsFrom,
+    type DiscordChannel,
+    type NotifierService,
     serializeCampaign,
     type Config,
     type DeviceCodeInfo,
@@ -20,6 +26,9 @@ import {
 } from "@sluice/core";
 
 export type { DeviceCodeInfo, ServerContext };
+
+/** A bot in more servers than this lists the first few rather than stalling the button. */
+const MAX_GUILDS_SCANNED = 10;
 
 const MIME: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
@@ -54,6 +63,22 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
         "Cache-Control": "no-store",
     });
     response.end(payload);
+}
+
+/** One call to Discord's REST API as a bot. */
+async function callDiscord(
+    token: string,
+    path: string,
+): Promise<{ status: number; payload: unknown }> {
+    try {
+        const response = await fetch(`https://discord.com/api/v10${path}`, {
+            headers: { Authorization: `Bot ${token}` },
+            signal: AbortSignal.timeout(10_000),
+        });
+        return { status: response.status, payload: await response.json().catch(() => null) };
+    } catch {
+        return { status: 0, payload: { message: "Could not reach Discord." } };
+    }
 }
 
 /**
@@ -480,17 +505,76 @@ export class ApiServer {
                 : sendJson(response, 200, { ok: false, error: describeTelegramError(status, payload) });
         }
 
-        if (path === "/api/notify/test" && method === "POST") {
-            const notifier = this.context.getNotifier();
-            if (notifier.isEmpty) {
-                return sendJson(response, 400, { error: "No notifiers are configured." });
+        if (path === "/api/notify/discord/check" && method === "POST") {
+            const token = this.discordToken(await readBody(request));
+            if (!token) {
+                return sendJson(response, 400, { error: "Paste a bot token first." });
             }
-            await notifier.send({
-                kind: "info",
-                title: "Test notification",
-                lines: ["Sluice is connected and can reach you here."],
+            const { status, payload } = await callDiscord(token, "/users/@me");
+            const bot = botFromUser(payload);
+            return bot
+                ? sendJson(response, 200, { ok: true, ...bot })
+                : sendJson(response, 200, { ok: false, error: describeDiscordError(status, payload) });
+        }
+
+        if (path === "/api/notify/discord/channels" && method === "POST") {
+            const token = this.discordToken(await readBody(request));
+            if (!token) {
+                return sendJson(response, 400, { error: "Paste a bot token first." });
+            }
+
+            const guilds = await callDiscord(token, "/users/@me/guilds");
+            const list = guildsFrom(guilds.payload);
+            if (!list.length) {
+                return sendJson(response, 200, {
+                    ok: false,
+                    error:
+                        guilds.status === 200
+                            ? "That bot is not in any server yet. Invite it to one, then try again."
+                            : describeDiscordError(guilds.status, guilds.payload),
+                });
+            }
+
+            // One request per guild, so a bot sitting in a hundred servers cannot turn a
+            // button press into a hundred round trips.
+            const shown = list.slice(0, MAX_GUILDS_SCANNED);
+            const channels: DiscordChannel[] = [];
+            for (const guild of shown) {
+                const result = await callDiscord(token, `/guilds/${guild.id}/channels`);
+                channels.push(...textChannelsFrom(result.payload, guild.name));
+            }
+
+            return sendJson(response, 200, {
+                ok: true,
+                channels,
+                truncated: list.length > shown.length,
             });
-            return sendJson(response, 200, { ok: true });
+        }
+
+        if (path === "/api/notify/test" && method === "POST") {
+            const body = (await readBody(request)) as { service?: NotifierService } | null;
+            const service = body?.service;
+            const notifier = this.context.getNotifier();
+
+            if (service ? !notifier.has(service) : notifier.isEmpty) {
+                return sendJson(response, 400, {
+                    error: service
+                        ? `Nothing is configured for ${service} yet.`
+                        : "No notifiers are configured.",
+                });
+            }
+
+            // Report what each one did rather than a bare ok. "Sent" while nothing arrives
+            // is precisely the failure a test button exists to catch.
+            const results = await notifier.deliver(
+                {
+                    kind: "info",
+                    title: "Test notification",
+                    lines: ["Sluice is connected and can reach you here."],
+                },
+                service,
+            );
+            return sendJson(response, 200, { ok: results.every((r) => r.ok), results });
         }
 
         return sendJson(response, 404, { error: "Not found" });
@@ -509,6 +593,15 @@ export class ApiServer {
             return supplied.trim();
         }
         return this.context.getConfig().notifications.telegram?.botToken ?? "";
+    }
+
+    /** As telegramToken, for Discord's bot token. */
+    private discordToken(body: unknown): string {
+        const supplied = (body as { botToken?: unknown } | null)?.botToken;
+        if (typeof supplied === "string" && supplied.trim() && !isMasked(supplied)) {
+            return supplied.trim();
+        }
+        return this.context.getConfig().notifications.discord?.botToken ?? "";
     }
 
     /** Best-effort origin for OpenID return URLs, from the Host header the browser used. */
@@ -533,6 +626,9 @@ export class ApiServer {
         const discord = merged.notifications.discord;
         if (discord && isMasked(discord.webhookUrl)) {
             discord.webhookUrl = current.notifications.discord?.webhookUrl ?? "";
+        }
+        if (discord && isMasked(discord.botToken)) {
+            discord.botToken = current.notifications.discord?.botToken ?? "";
         }
         if (merged.steam && isMasked(merged.steam.apiKey)) {
             merged.steam.apiKey = current.steam.apiKey;

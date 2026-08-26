@@ -162,7 +162,11 @@ export interface Config {
     };
     notifications: {
         telegram?: { botToken: string; chatId: string };
-        discord?: { webhookUrl: string };
+        /**
+         * Either half works on its own. A webhook is the simpler route and needs no bot;
+         * a bot token plus channel posts under an identity you already own.
+         */
+        discord?: { webhookUrl: string; botToken?: string; channelId?: string };
     };
 }
 

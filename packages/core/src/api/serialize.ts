@@ -124,7 +124,11 @@ export function maskConfig(config: Config): Config {
                 },
             }),
             ...(config.notifications.discord && {
-                discord: { webhookUrl: mask(config.notifications.discord.webhookUrl) },
+                discord: {
+                    webhookUrl: mask(config.notifications.discord.webhookUrl),
+                    botToken: mask(config.notifications.discord.botToken ?? ""),
+                    channelId: config.notifications.discord.channelId ?? "",
+                },
             }),
         },
     };

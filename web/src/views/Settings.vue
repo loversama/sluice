@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
@@ -27,6 +27,8 @@ const form = reactive({
     telegramBotToken: "",
     telegramChatId: "",
     discordWebhookUrl: "",
+    discordBotToken: "",
+    discordChannelId: "",
 });
 
 /**
@@ -35,6 +37,77 @@ const form = reactive({
  */
 const canEmbedAnonymously = supportsAnonymousEmbed();
 
+const testingService = ref("");
+
+/** Which route the Discord panel is showing. Follows whatever is already configured. */
+const discordMode = ref("webhook");
+const dcChecking = ref(false);
+const dcLoadingChannels = ref(false);
+const dcBot = ref(null);
+const dcBotError = ref("");
+const dcChannels = ref([]);
+const dcChannelError = ref("");
+const dcTruncated = ref(false);
+
+/**
+ * An invite link built from the bot's own id, which for a bot is also its application id.
+ * Send Messages and Embed Links, and nothing else - a notifier has no business asking for
+ * more, and a permissions integer copied off a forum usually does.
+ */
+const discordInviteUrl = computed(() =>
+    dcBot.value
+        ? `https://discord.com/oauth2/authorize?client_id=${dcBot.value.id}&scope=bot&permissions=18432`
+        : null,
+);
+
+async function postDiscord(path) {
+    const response = await fetch(`/api/notify/discord/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botToken: form.discordBotToken }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Failed (${response.status})`);
+    return body;
+}
+
+async function checkDiscordBot() {
+    dcChecking.value = true;
+    dcBot.value = null;
+    dcBotError.value = "";
+    try {
+        const body = await postDiscord("check");
+        if (body.ok) dcBot.value = body;
+        else dcBotError.value = body.error ?? "Discord did not recognise that token.";
+    } catch (error) {
+        dcBotError.value = error.message;
+    } finally {
+        dcChecking.value = false;
+    }
+}
+
+async function loadDiscordChannels() {
+    dcLoadingChannels.value = true;
+    dcChannelError.value = "";
+    dcChannels.value = [];
+    try {
+        const body = await postDiscord("channels");
+        if (body.ok) {
+            dcChannels.value = body.channels ?? [];
+            dcTruncated.value = Boolean(body.truncated);
+            if (!dcChannels.value.length) {
+                dcChannelError.value = "That bot cannot see any text channels it may post in.";
+            }
+        } else {
+            dcChannelError.value = body.error ?? "Could not list channels.";
+        }
+    } catch (error) {
+        dcChannelError.value = error.message;
+    } finally {
+        dcLoadingChannels.value = false;
+    }
+}
+
 const tgChecking = ref(false);
 const tgDetecting = ref(false);
 const tgBot = ref(null);
@@ -42,12 +115,8 @@ const tgChat = ref(null);
 const tgBotError = ref("");
 const tgChatError = ref("");
 
-/** Steps light up as they are satisfied, so the panel shows how far along you are. */
-function stepStyle(step) {
-    const done =
-        (step === 1 && Boolean(form.telegramBotToken)) ||
-        (step === 2 && Boolean(tgBot.value)) ||
-        (step === 3 && Boolean(form.telegramChatId));
+/** Steps light up as they are satisfied, so a panel shows how far along you are. */
+function stepStyle(done) {
     return done
         ? { background: "var(--accent)", color: "white" }
         : { background: "var(--surface)", color: "var(--text-2)" };
@@ -159,7 +228,12 @@ watch(
             telegramBotToken: config.notifications?.telegram?.botToken ?? "",
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
+            discordBotToken: config.notifications?.discord?.botToken ?? "",
+            discordChannelId: config.notifications?.discord?.channelId ?? "",
         });
+        // Arrive on whichever route is already configured, rather than always the first.
+        discordMode.value = form.discordBotToken && !form.discordWebhookUrl ? "bot" : "webhook";
+
         // Let the assignment settle before the watcher starts treating edits as user intent.
         setTimeout(() => (hydrating = false), 0);
     },
@@ -186,8 +260,12 @@ async function save() {
     if (form.telegramBotToken || form.telegramChatId) {
         notifications.telegram = { botToken: form.telegramBotToken, chatId: form.telegramChatId };
     }
-    if (form.discordWebhookUrl) {
-        notifications.discord = { webhookUrl: form.discordWebhookUrl };
+    if (form.discordWebhookUrl || form.discordBotToken) {
+        notifications.discord = {
+            webhookUrl: form.discordWebhookUrl,
+            botToken: form.discordBotToken,
+            channelId: form.discordChannelId,
+        };
     }
     try {
         await store.saveConfig({
@@ -356,13 +434,33 @@ async function signOut() {
     }
 }
 
-async function test() {
+/**
+ * Save first, then send. The fields autosave on a debounce, so testing without waiting for
+ * that would quietly test the previous value - which looks like the new one failing.
+ */
+async function test(service) {
     testing.value = true;
+    testingService.value = service ?? "";
     try {
-        await store.testNotification();
-        ElMessage.success("Test notification sent.");
-    } catch (error) { ElMessage.error(error.message); }
-    finally { testing.value = false; }
+        clearTimeout(saveTimer);
+        await persist();
+        const body = await store.testNotification(service);
+
+        const failed = (body.results ?? []).filter((result) => !result.ok);
+        if (!failed.length) {
+            const sent = (body.results ?? []).map((result) => result.label).join(", ");
+            ElMessage.success(sent ? `Sent via ${sent}.` : "Test notification sent.");
+        } else {
+            for (const result of failed) {
+                ElMessage.error(`${result.label}: ${result.error ?? "failed"}`);
+            }
+        }
+    } catch (error) {
+        ElMessage.error(error.message);
+    } finally {
+        testing.value = false;
+        testingService.value = "";
+    }
 }
 
 const inputStyle = {
@@ -783,7 +881,7 @@ const inputStyle = {
                 </div>
 
                 <div class="flex gap-2">
-                    <span class="tg-step" :style="stepStyle(1)">1</span>
+                    <span class="tg-step" :style="stepStyle(Boolean(form.telegramBotToken))">1</span>
                     <div class="flex-1 min-w-0">
                         <p class="text-[12px]">Make a bot for yourself</p>
                         <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
@@ -801,7 +899,7 @@ const inputStyle = {
                 </div>
 
                 <div class="flex gap-2">
-                    <span class="tg-step" :style="stepStyle(2)">2</span>
+                    <span class="tg-step" :style="stepStyle(Boolean(tgBot))">2</span>
                     <div class="flex-1 min-w-0">
                         <p class="text-[12px] mb-1.5">Paste the token</p>
                         <div class="flex gap-2">
@@ -831,7 +929,7 @@ const inputStyle = {
                 </div>
 
                 <div class="flex gap-2">
-                    <span class="tg-step" :style="stepStyle(3)">3</span>
+                    <span class="tg-step" :style="stepStyle(Boolean(form.telegramChatId))">3</span>
                     <div class="flex-1 min-w-0">
                         <p class="text-[12px]">Say hello to it</p>
                         <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
@@ -862,14 +960,175 @@ const inputStyle = {
                         </p>
                     </div>
                 </div>
+
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px]"
+                    :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                    :disabled="testing"
+                    @click="test('telegram')"
+                >
+                    {{ testing && testingService === "telegram" ? "Sending&hellip;" : "Test Telegram" }}
+                </button>
             </div>
-            <label class="block">
-                <span class="text-[12px]">Discord webhook URL</span>
-                <input v-model="form.discordWebhookUrl" type="password" class="w-full mt-1 px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-            </label>
+            <!--
+                Two routes, because they suit different people. A webhook is a URL out of
+                channel settings and needs no bot at all; a bot posts under an identity you
+                already own. Whichever is configured is the one shown on arrival.
+            -->
+            <div class="rounded-lg p-3 space-y-3" :style="{ background: 'var(--surface-2)' }">
+                <div class="flex items-baseline gap-2 flex-wrap">
+                    <span class="text-[12px] font-medium">Discord</span>
+                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        The same messages, in a channel.
+                    </span>
+                    <div class="ml-auto flex gap-1">
+                        <button
+                            v-for="mode in [{ id: 'webhook', label: 'Webhook' }, { id: 'bot', label: 'Bot' }]"
+                            :key="mode.id"
+                            class="text-[10px] px-2 py-0.5 rounded"
+                            :style="
+                                discordMode === mode.id
+                                    ? { background: 'var(--surface)', color: 'var(--text)' }
+                                    : { color: 'var(--muted)' }
+                            "
+                            @click="discordMode = mode.id"
+                        >
+                            {{ mode.label }}
+                        </button>
+                    </div>
+                </div>
+
+                <template v-if="discordMode === 'webhook'">
+                    <div>
+                        <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
+                            In Discord, open the channel's settings &rarr; Integrations &rarr;
+                            Webhooks &rarr; New Webhook, then Copy Webhook URL. No bot needed.
+                        </p>
+                        <input
+                            v-model="form.discordWebhookUrl"
+                            type="password"
+                            placeholder="https://discord.com/api/webhooks/..."
+                            class="w-full px-3 py-2 rounded-lg text-[12px] outline-none"
+                            :style="inputStyle"
+                        />
+                    </div>
+                </template>
+
+                <template v-else>
+                    <div class="flex gap-2">
+                        <span class="tg-step" :style="stepStyle(Boolean(form.discordBotToken))">1</span>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-[12px]">Make an application</p>
+                            <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
+                                In the Developer Portal: New Application &rarr; Bot &rarr; Reset
+                                Token, and copy what it shows you. It is only shown once.
+                            </p>
+                            <a
+                                href="https://discord.com/developers/applications"
+                                target="_blank"
+                                rel="noreferrer"
+                                class="text-[11px] underline"
+                                :style="{ color: 'var(--accent)' }"
+                            >Open the Developer Portal</a>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <span class="tg-step" :style="stepStyle(Boolean(dcBot))">2</span>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-[12px] mb-1.5">Paste the bot token</p>
+                            <div class="flex gap-2">
+                                <input
+                                    v-model="form.discordBotToken"
+                                    type="password"
+                                    class="flex-1 min-w-0 px-3 py-2 rounded-lg text-[12px] outline-none"
+                                    :style="inputStyle"
+                                />
+                                <button
+                                    class="px-3 py-2 rounded-lg text-[12px] shrink-0"
+                                    :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                                    :disabled="dcChecking || !form.discordBotToken"
+                                    @click="checkDiscordBot"
+                                >
+                                    {{ dcChecking ? "Checking&hellip;" : "Check" }}
+                                </button>
+                            </div>
+                            <p v-if="dcBot" class="text-[11px] mt-1" :style="{ color: 'var(--text-2)' }">
+                                Connected to {{ dcBot.username }}.
+                                <a
+                                    v-if="discordInviteUrl"
+                                    :href="discordInviteUrl"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    class="underline"
+                                    :style="{ color: 'var(--accent)' }"
+                                >Invite it to a server</a>
+                            </p>
+                            <p v-else-if="dcBotError" class="text-[11px] mt-1" :style="{ color: 'var(--warn)' }">
+                                {{ dcBotError }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <span class="tg-step" :style="stepStyle(Boolean(form.discordChannelId))">3</span>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-[12px]">Pick a channel</p>
+                            <p class="text-[11px] mb-1.5" :style="{ color: 'var(--text-2)' }">
+                                Once the bot is in your server, ask it what it can see &mdash;
+                                Discord hides channel IDs unless you turn on Developer Mode.
+                            </p>
+                            <div class="flex gap-2">
+                                <select
+                                    v-if="dcChannels.length"
+                                    v-model="form.discordChannelId"
+                                    class="flex-1 min-w-0 px-2 py-2 rounded-lg text-[12px] outline-none"
+                                    :style="inputStyle"
+                                >
+                                    <option value="">Choose a channel&hellip;</option>
+                                    <option v-for="channel in dcChannels" :key="channel.id" :value="channel.id">
+                                        {{ channel.guild }} &middot; #{{ channel.name }}
+                                    </option>
+                                </select>
+                                <input
+                                    v-else
+                                    v-model="form.discordChannelId"
+                                    placeholder="Channel ID"
+                                    class="flex-1 min-w-0 px-3 py-2 rounded-lg text-[12px] outline-none"
+                                    :style="inputStyle"
+                                />
+                                <button
+                                    class="px-3 py-2 rounded-lg text-[12px] shrink-0"
+                                    :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                                    :disabled="dcLoadingChannels || !form.discordBotToken"
+                                    @click="loadDiscordChannels"
+                                >
+                                    {{ dcLoadingChannels ? "Looking&hellip;" : "List channels" }}
+                                </button>
+                            </div>
+                            <p v-if="dcTruncated && dcChannels.length" class="text-[11px] mt-1" :style="{ color: 'var(--muted)' }">
+                                Showing the first few servers only.
+                            </p>
+                            <p v-if="dcChannelError" class="text-[11px] mt-1" :style="{ color: 'var(--warn)' }">
+                                {{ dcChannelError }}
+                            </p>
+                        </div>
+                    </div>
+                </template>
+
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px]"
+                    :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                    :disabled="testing"
+                    @click="test('discord')"
+                >
+                    {{ testing && testingService === "discord" ? "Sending&hellip;" : "Test Discord" }}
+                </button>
+            </div>
+
             <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
-                    :disabled="testing" @click="test">
-                {{ testing ? "Sending..." : "Send test notification" }}
+                    :disabled="testing" @click="test()">
+                {{ testing && !testingService ? "Sending&hellip;" : "Send test notification" }}
             </button>
         </section>
 
