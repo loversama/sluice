@@ -32,6 +32,12 @@ export const useMinerStore = defineStore("miner", {
          * has started, or when the dashboard connects to an already-running daemon.
          */
         loading: null,
+        /**
+         * A sweep running while something is already being mined - after a claim, or on the
+         * timer. Kept apart from `loading` because it warrants a quiet note, not the whole
+         * starting-up treatment.
+         */
+        refreshing: false,
         auth: { status: "pending", user: null, device: null },
         mining: null,
         queue: [],
@@ -293,6 +299,12 @@ export const useMinerStore = defineStore("miner", {
             });
 
             on("loading", (payload) => {
+                if (payload.background) {
+                    this.refreshing = payload.phase !== "ready";
+                    this.loading = null;
+                    return;
+                }
+                this.refreshing = false;
                 this.loading = payload.phase === "ready" ? null : payload;
             });
 

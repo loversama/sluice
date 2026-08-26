@@ -214,8 +214,17 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                     </p>
 
                     <div v-if="drop" class="flex items-baseline justify-between gap-2 mt-1.5">
-                        <span class="text-[11px] font-medium" :style="{ color: remaining === 0 ? 'var(--accent)' : 'var(--text-2)' }">
-                            {{ remaining === 0 ? "Ready to claim" : `${remaining} min left` }}
+                        <span
+                            class="text-[11px] font-medium"
+                            :style="{ color: drop.isClaimed ? 'var(--success)' : remaining === 0 ? 'var(--accent)' : 'var(--text-2)' }"
+                        >
+                            {{
+                                drop.isClaimed
+                                    ? "Claimed — choosing next…"
+                                    : remaining === 0
+                                      ? "Ready to claim"
+                                      : `${remaining} min left`
+                            }}
                         </span>
                         <span class="text-[11px] tabular shrink-0" :style="{ color: 'var(--text-2)' }">
                             {{ drop.currentMinutes }}/{{ drop.requiredMinutes }}m &middot; {{ progress }}%

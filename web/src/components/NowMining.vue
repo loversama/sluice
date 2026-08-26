@@ -17,6 +17,15 @@ const busy = ref(false);
 /** Mining proper, as opposed to starting up or having nothing to do. */
 const active = computed(() => Boolean(store.mining && drop.value));
 
+/**
+ * The drop on screen has been claimed and the miner has not yet moved on.
+ *
+ * Twitch announces the reward, which triggers a campaign sweep, and only after that is the
+ * next drop picked - some seconds later. Showing the finished drop as though it were still
+ * counting up for all of that is the part that reads as stuck.
+ */
+const claimedAndWaiting = computed(() => Boolean(active.value && drop.value?.isClaimed));
+
 const accent = computed(() => (store.isStalled ? "var(--warn)" : "var(--accent)"));
 
 const heroStyle = computed(() => ({
@@ -132,7 +141,7 @@ const idleReason = computed(() => {
                 <div class="flex items-center gap-2 min-w-0">
                     <StatusChip
                         v-if="active"
-                        :status="store.isStalled ? 'stalled' : 'mining'"
+                        :status="claimedAndWaiting ? 'claimed' : store.isStalled ? 'stalled' : 'mining'"
                     />
                     <span
                         v-else
@@ -234,7 +243,17 @@ const idleReason = computed(() => {
                         </span>
                     </div>
 
+                    <!-- Once claimed the countdown has stopped meaning anything; say what is
+                         actually happening rather than leave a finished drop ticking. -->
                     <p
+                        v-if="claimedAndWaiting"
+                        class="text-[12px] mt-1.5"
+                        :style="{ color: 'var(--success)' }"
+                    >
+                        Claimed &mdash; choosing what to mine next&hellip;
+                    </p>
+                    <p
+                        v-else
                         class="text-[12px] tabular mt-1.5"
                         :style="{ color: etaBeyondCampaign ? 'var(--warn)' : 'var(--text-2)' }"
                     >

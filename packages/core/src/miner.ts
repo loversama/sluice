@@ -104,7 +104,7 @@ export interface MinerEvents {
      * account that is half a minute during which the dashboard otherwise shows nothing and
      * looks broken. This is what it shows instead.
      */
-    loading: [{ phase: LoadingPhase; done?: number; total?: number }];
+    loading: [{ phase: LoadingPhase; done?: number; total?: number; background?: boolean }];
     /** Human-readable activity line for the dashboard feed. */
     feed: [FeedEntry];
     error: [Error];
@@ -1963,7 +1963,11 @@ export class Miner extends EventEmitter {
 
     private async refreshCampaigns(): Promise<void> {
         const startedAt = Date.now();
-        this.emit("loading", { phase: "campaigns" });
+        // A sweep that runs while a channel is already being watched is background work -
+        // a claim triggers one, and the dashboard announcing "starting up" every time a
+        // drop lands is both wrong and alarming.
+        const background = this.currentChannel !== null;
+        this.emit("loading", { phase: "campaigns", background });
         logger.debug("Refreshing campaigns...");
         const [listed, inventory] = await Promise.all([
             this.gql.getCampaigns(),
@@ -2019,7 +2023,7 @@ export class Miner extends EventEmitter {
         const firstSweep = this.campaigns.size === 0;
         const listedAt = Date.now();
         logger.debug(`Campaign list fetched in ${((listedAt - startedAt) / 1000).toFixed(1)}s.`);
-        this.emit("loading", { phase: "details", done: 0, total: interesting.length });
+        this.emit("loading", { phase: "details", done: 0, total: interesting.length, background });
 
         let cursor = 0;
         let fetched = 0;
@@ -2070,6 +2074,7 @@ export class Miner extends EventEmitter {
                         phase: "details",
                         done: fetched,
                         total: interesting.length,
+                        background,
                     });
                 }
 
@@ -2125,7 +2130,7 @@ export class Miner extends EventEmitter {
         // while already watching is background work, and leaving the dashboard on a startup
         // message afterwards stranded it there: the ready signal rides on the watching
         // event, which a refresh that changes nothing never fires.
-        this.emit("loading", { phase: this.currentChannel ? "ready" : "choosing" });
+        this.emit("loading", { phase: this.currentChannel ? "ready" : "choosing", background });
 
         // A fully claimed campaign disappears from dropCampaignsInProgress, and
         // DropCampaignDetails carries no `self` block at all, so nothing above knows the

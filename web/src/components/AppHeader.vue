@@ -28,6 +28,9 @@ const activity = computed(() => {
     // Starting up is not idling. The gap is half a minute on a busy account, and calling it
     // idle for all of it is the same guess-as-fact as above.
     if (store.loading) return "Starting up…";
+    // A background sweep is not startup, and saying so every time a drop lands was both
+    // wrong and alarming. The channel keeps its place; the refresh is noted quietly below.
+    if (store.refreshing && !store.mining) return "Refreshing…";
     const channel = store.mining?.channel;
     if (!channel) return "Idle";
     return props.compact ? channel.game || channel.displayName : `${channel.game} · ${channel.displayName}`;
