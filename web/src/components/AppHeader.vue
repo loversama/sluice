@@ -25,6 +25,9 @@ const activity = computed(() => {
     // guess presented as fact - the miner may well already be working.
     if (!store.loaded) return "Connecting\u2026";
     if (store.daemon?.paused) return "Paused";
+    // Starting up is not idling. The gap is half a minute on a busy account, and calling it
+    // idle for all of it is the same guess-as-fact as above.
+    if (store.loading) return "Starting up…";
     const channel = store.mining?.channel;
     if (!channel) return "Idle";
     return props.compact ? channel.game || channel.displayName : `${channel.game} · ${channel.displayName}`;

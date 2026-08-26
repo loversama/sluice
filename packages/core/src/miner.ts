@@ -87,10 +87,21 @@ export interface MinerEvents {
     "unlinked-expiring": [
         { campaign: Campaign; earnedMinutes: number; rewards: string[]; hoursLeft: number },
     ];
+    /**
+     * How far through starting up we are.
+     *
+     * Fetching campaign details is one request per campaign, sequentially, and on a busy
+     * account that is half a minute during which the dashboard otherwise shows nothing and
+     * looks broken. This is what it shows instead.
+     */
+    loading: [{ phase: LoadingPhase; done?: number; total?: number }];
     /** Human-readable activity line for the dashboard feed. */
     feed: [FeedEntry];
     error: [Error];
 }
+
+/** Startup stages, in the order they happen. */
+export type LoadingPhase = "campaigns" | "details" | "choosing" | "ready";
 
 export type FeedLevel = "info" | "warn" | "error";
 
@@ -1125,6 +1136,8 @@ export class Miner extends EventEmitter {
                 `(${drop.currentMinutes}/${drop.requiredMinutes} min)`,
         );
         this.emit("watching", { channel, campaign, drop });
+        // Whatever the dashboard was showing about starting up, it is now out of date.
+        this.emit("loading", { phase: "ready" });
         this.pushFeed(
             "info",
             `Watching ${channel.displayName} for ${campaign.gameName} - ${drop.name}`,
@@ -1919,6 +1932,8 @@ export class Miner extends EventEmitter {
     }
 
     private async refreshCampaigns(): Promise<void> {
+        const startedAt = Date.now();
+        this.emit("loading", { phase: "campaigns" });
         logger.debug("Refreshing campaigns...");
         const [listed, inventory] = await Promise.all([
             this.gql.getCampaigns(),
@@ -1967,6 +1982,13 @@ export class Miner extends EventEmitter {
             )
             .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
 
+        // Timed and counted: this is the slow part, and a silent slow part is the reason
+        // the window looked broken on open.
+        const listedAt = Date.now();
+        logger.debug(`Campaign list fetched in ${((listedAt - startedAt) / 1000).toFixed(1)}s.`);
+        this.emit("loading", { phase: "details", done: 0, total: interesting.length });
+
+        let fetched = 0;
         for (const campaign of interesting) {
             // One request per campaign, sequentially, over however many are active - which
             // can be minutes of work. Without a check here, stopping or signing out waited
@@ -1984,7 +2006,25 @@ export class Miner extends EventEmitter {
             } catch (error) {
                 logger.debug(`Could not fetch details for ${campaign.name}:`, error);
             }
+
+            fetched += 1;
+            // Every few rather than every one: the browser only needs to see it moving,
+            // and one frame per request would be a message every quarter second.
+            if (fetched % 5 === 0 || fetched === interesting.length) {
+                this.emit("loading", {
+                    phase: "details",
+                    done: fetched,
+                    total: interesting.length,
+                });
+            }
         }
+
+        logger.info(
+            `Campaign details: ${interesting.length} fetched in ` +
+                `${((Date.now() - listedAt) / 1000).toFixed(1)}s ` +
+                `(list took ${((listedAt - startedAt) / 1000).toFixed(1)}s).`,
+        );
+        this.emit("loading", { phase: "choosing" });
 
         // A fully claimed campaign disappears from dropCampaignsInProgress, and
         // DropCampaignDetails carries no `self` block at all, so nothing above knows the

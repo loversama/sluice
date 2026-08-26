@@ -9,6 +9,7 @@ import { formatRelative } from "@/lib/format.js";
 import { nextPriorityGames } from "@/lib/ranking.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import Skeleton from "@/components/Skeleton.vue";
+import StartupProgress from "@/components/StartupProgress.vue";
 import StreamPreview from "@/components/StreamPreview.vue";
 
 /**
@@ -281,12 +282,8 @@ function move(index, delta) {
                     </p>
                 </template>
 
-                <template v-else-if="loading">
-                    <Skeleton width="60%" height="15px" />
-                    <Skeleton width="40%" height="10px" class="mt-1.5" />
-                    <p class="text-[10px] mt-2" :style="{ color: 'var(--muted)' }">
-                        Connecting to Twitch&hellip;
-                    </p>
+                <template v-else-if="loading || store.loading">
+                    <StartupProgress />
                 </template>
 
                 <p v-else class="text-[12px] py-1" :style="{ color: 'var(--text-2)' }">

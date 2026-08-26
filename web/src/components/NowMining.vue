@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
+import StartupProgress from "@/components/StartupProgress.vue";
 import { formatClock, formatDuration } from "@/lib/format.js";
 import StatusChip from "./StatusChip.vue";
 
@@ -101,6 +102,15 @@ const idleReason = computed(() => {
             <code class="font-mono" :style="{ color: 'var(--text)' }">npm run check-hashes</code>
             to see which are stale.
         </p>
+    </section>
+
+    <!--
+        Starting up is not the same as having nothing to mine, and saying the latter during
+        the former is simply wrong - on a busy account the wait is half a minute.
+    -->
+    <section v-else-if="store.loading && !store.mining" class="card p-4">
+        <h2 class="text-[15px] font-semibold mb-2">Starting up</h2>
+        <StartupProgress />
     </section>
 
     <!-- Idle: never a blank card; always say why, and where to look next. -->

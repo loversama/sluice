@@ -52,6 +52,7 @@ const RELAYED_EVENTS = [
     "campaigns",
     "beat",
     "feed",
+    "loading",
     "problem",
     "auth",
 ] as const;

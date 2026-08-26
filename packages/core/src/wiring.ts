@@ -77,6 +77,9 @@ export function wireMinerToBus(deps: {
             url: deliverable ? null : campaign.accountLinkUrl,
         });
     });
+    miner.on("loading", (payload) => {
+        bus.emit("loading", payload);
+    });
     miner.on("campaign-completed", (campaign) => {
         bus.emit("campaign-completed", {
             campaignId: campaign.id,

@@ -27,6 +27,11 @@ export const useMinerStore = defineStore("miner", {
         daemon: null,
         allowStreamEmbed: false,
         sounds: { enabled: true, volume: 0.5 },
+        /**
+         * What the daemon is doing while there is nothing to show yet. Null once mining
+         * has started, or when the dashboard connects to an already-running daemon.
+         */
+        loading: null,
         auth: { status: "pending", user: null, device: null },
         mining: null,
         queue: [],
@@ -135,6 +140,7 @@ export const useMinerStore = defineStore("miner", {
             this.sounds = snapshot.sounds ?? this.sounds;
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
+            if (snapshot.mining) this.loading = null;
             this.queue = snapshot.queue ?? [];
             this.nextRefreshAt = snapshot.nextRefreshAt;
             this.campaigns = snapshot.campaigns ?? [];
@@ -282,6 +288,10 @@ export const useMinerStore = defineStore("miner", {
                     drop.isClaimable = false;
                     drop.currentMinutes = drop.requiredMinutes;
                 }
+            });
+
+            on("loading", (payload) => {
+                this.loading = payload.phase === "ready" ? null : payload;
             });
 
             on("campaign-completed", (payload) => {
