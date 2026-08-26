@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { useViewport } from "@/lib/viewport.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import { formatRelative } from "@/lib/format.js";
 
@@ -36,6 +37,29 @@ const form = reactive({
  * is withdrawn rather than quietly downgraded - see lib/embed.js.
  */
 const canEmbedAnonymously = supportsAnonymousEmbed();
+
+const { isCompact } = useViewport();
+
+/**
+ * The page is long enough that everything at once is a scroll hunt on a wide screen, so it
+ * splits into tabs. A narrow window keeps everything on one page - there is no room for a
+ * tab strip, and a second level of navigation inside a 350px column is worse than scrolling
+ * - and the same categories become headings instead.
+ */
+const TABS = [
+    { id: "mining", label: "Mining" },
+    { id: "notifications", label: "Notifications" },
+    { id: "accounts", label: "Accounts" },
+    { id: "advanced", label: "Advanced" },
+];
+
+const activeTab = ref(localStorage.getItem("sluice.settingsTab") ?? "mining");
+watch(activeTab, (tab) => localStorage.setItem("sluice.settingsTab", tab));
+
+/** Narrow shows every section; wide shows the open tab's. */
+function visible(tab) {
+    return isCompact.value || activeTab.value === tab;
+}
 
 const testingService = ref("");
 
@@ -479,6 +503,22 @@ const inputStyle = {
             </span>
         </header>
 
+        <nav v-if="!isCompact" class="flex gap-1 flex-wrap">
+            <button
+                v-for="tab in TABS"
+                :key="tab.id"
+                class="px-3 py-1.5 rounded-lg text-[12px] transition-colors"
+                :style="
+                    activeTab === tab.id
+                        ? { background: 'var(--accent)', color: 'white' }
+                        : { background: 'var(--surface)', color: 'var(--text-2)' }
+                "
+                @click="activeTab = tab.id"
+            >
+                {{ tab.label }}
+            </button>
+        </nav>
+
         <!--
             Multi-column rather than a grid: a grid aligns rows to the tallest card, which
             left a short card like Claiming sitting above a large void. Columns let the cards
@@ -486,7 +526,19 @@ const inputStyle = {
         -->
         <div class="xl:columns-2 xl:gap-4">
 
-        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
+        <!-- In the narrow window everything is on one page, so the categories that
+             are tabs on a wide screen become the same full-bleed bands the compact
+             dashboard uses. -->
+        <div
+            v-if="isCompact"
+            class="-mx-4 px-4 py-1.5 mb-3"
+            :style="{ background: 'var(--surface-2)' }"
+        >
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Mining
+            </span>
+        </div>
+        <section v-if="visible('mining')" class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Claiming</h2>
             <label class="flex items-center justify-between gap-4">
                 <span class="text-[13px]">Claim drops automatically</span>
@@ -510,98 +562,7 @@ const inputStyle = {
                 <el-switch v-model="form.switchOnCategoryChange" />
             </label>
         </section>
-
-        <section v-if="desktop" class="card p-4 space-y-4 break-inside-avoid mb-4">
-            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
-                Desktop app
-            </h2>
-
-            <label class="flex items-center justify-between gap-4">
-                <span>
-                    <span class="text-[13px]">Start with Windows</span>
-                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Starts hidden in the tray, so mining resumes without a window
-                        appearing.
-                    </span>
-                </span>
-                <el-switch
-                    :model-value="desktopSettings.runAtLogin"
-                    @update:model-value="(v) => saveDesktop({ runAtLogin: v })"
-                />
-            </label>
-
-            <label class="flex items-center justify-between gap-4">
-                <span>
-                    <span class="text-[13px]">Close to tray</span>
-                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Closing the window keeps mining. Turn this off and the close button
-                        quits instead.
-                    </span>
-                </span>
-                <el-switch
-                    :model-value="desktopSettings.closeToTray"
-                    @update:model-value="(v) => saveDesktop({ closeToTray: v })"
-                />
-            </label>
-
-            <div class="flex items-center justify-between gap-4">
-                <span>
-                    <span class="text-[13px]">Import from a Docker install</span>
-                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Copies credentials and drop history across. Stop the container
-                        first &mdash; both mining one account is what corrupts progress.
-                    </span>
-                </span>
-                <button
-                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
-                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
-                    :disabled="importing"
-                    @click="importFromDocker"
-                >
-                    {{ importing ? "Importing..." : "Choose folder" }}
-                </button>
-            </div>
-
-            <div class="flex items-center justify-between gap-4">
-                <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                    Desktop build {{ desktopVersion }}
-                </span>
-                <button
-                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
-                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
-                    @click="desktop.openLogsFolder()"
-                >
-                    Open logs
-                </button>
-            </div>
-        </section>
-
-        <section class="card p-4 space-y-3 break-inside-avoid mb-4">
-            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
-                Twitch account
-            </h2>
-            <div class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
-                <div class="flex-1 min-w-0">
-                    <p class="text-[13px] font-medium">
-                        {{ store.auth.user?.displayName || "Not signed in" }}
-                    </p>
-                    <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Signing out revokes the token with Twitch. Your drops, settings and
-                        Steam library are kept for when you come back.
-                    </p>
-                </div>
-                <button
-                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
-                    :style="{ color: 'var(--danger)' }"
-                    :disabled="signingOut"
-                    @click="signOut"
-                >
-                    {{ signingOut ? "Signing out..." : "Sign out" }}
-                </button>
-            </div>
-        </section>
-
-        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
+        <section v-if="visible('mining')" class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Which games to mine
             </h2>
@@ -630,15 +591,21 @@ const inputStyle = {
             <p v-if="form.libraryPolicy === 'ownedOrListed' && !steam?.connected"
                class="text-[11px]" :style="{ color: 'var(--warn)' }">
                 No Steam library connected, so this is currently inactive &mdash; every game is
-                being mined. Connect Steam below to apply it.
+                being mined.
+                <!-- "below" was true on one long page and is not once this is a tab. -->
+                <button
+                    class="underline"
+                    :style="{ color: 'var(--accent)' }"
+                    @click="activeTab = 'accounts'"
+                >{{ isCompact ? "Connect Steam under Accounts" : "Connect Steam" }}</button>
+                to apply it.
             </p>
             <p v-else-if="form.libraryPolicy === 'ownedOrListed'"
                class="text-[11px]" :style="{ color: 'var(--text-2)' }">
                 Active &mdash; matching against {{ steam?.gameCount || 0 }} owned games.
             </p>
         </section>
-
-        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
+        <section v-if="visible('mining')" class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Unlinked rewards
             </h2>
@@ -689,8 +656,7 @@ const inputStyle = {
                 <el-switch v-model="form.warnUnlinkedAccounts" />
             </label>
         </section>
-
-        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
+        <section v-if="visible('mining')" class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Channels</h2>
 
             <div>
@@ -746,126 +712,19 @@ const inputStyle = {
                 </div>
             </div>
         </section>
-
-        <section class="card p-4 space-y-3 break-inside-avoid mb-4">
-            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Steam library</h2>
-            <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
-                Lets the miner rank campaigns by the games you actually own and play, and shows
-                which accounts are worth linking.
-            </p>
-
-            <div v-if="steam?.connected" class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
-                <div class="flex-1 min-w-0">
-                    <p class="text-[13px] font-medium">{{ steam.personaName || steam.steamId }}</p>
-                    <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        {{ steam.gameCount }} games
-                        &middot; via {{ steam.provider === "sinfulshadows" ? "SinfulShadows" : "your Steam key" }}
-                        <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt) }}</template>
-
-                        <template v-if="steam.stale"> &middot; cached</template>
-                    </p>
-                </div>
-                <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface)', color: 'var(--text)' }"
-                        :disabled="steamBusy" @click="refreshSteam">
-                    {{ steamBusy ? "Syncing..." : "Sync now" }}
-                </button>
-                <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ color: 'var(--danger)' }" @click="disconnectSteam">
-                    Disconnect
-                </button>
-            </div>
-
-            <!-- Steam only reports a last-played time to the key that owns the account, so a
-                 borrowed key cannot rank by recency and quietly falls back. Say so. -->
-            <p v-if="steam?.connected && steam?.recencySignal && steam.recencySignal !== 'lastPlayed'"
-               class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                &ldquo;Recently played&rdquo; ranking is using
-                {{ steam.recencySignal === "playtimeRecent" ? "two-week playtime" : "total playtime" }}
-                &mdash; Steam only reveals last-played times to the key that owns the account.
-            </p>
-
-            <!-- Two ways in. The SinfulShadows one is first because it asks for less. -->
-            <div class="flex gap-1 p-1 rounded-lg" :style="{ background: 'var(--surface-2)' }">
-                <button
-                    v-for="option in [['sinfulshadows', 'SinfulShadows account'], ['direct', 'Your own Steam key']]"
-                    :key="option[0]"
-                    class="flex-1 px-3 py-1.5 rounded-md text-[12px]"
-                    :style="steamProvider === option[0]
-                        ? { background: 'var(--surface)', color: 'var(--text)' }
-                        : { color: 'var(--text-2)' }"
-                    @click="steamProvider = option[0]"
-                >
-                    {{ option[1] }}
-                </button>
-            </div>
-
-            <template v-if="steamProvider === 'sinfulshadows'">
-                <label class="block">
-                    <span class="text-[12px]">SinfulShadows API key</span>
-                    <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
-                        No Steam key needed. Create one at
-                        <a href="https://sinfulshadows.com/settings/api" target="_blank" rel="noreferrer" class="underline">sinfulshadows.com &rarr; Settings &rarr; API keys</a>.
-                        Your library comes from the Steam account linked there, so link Steam
-                        on the site first.
-                    </span>
-                    <input v-model="ssApiKey" type="password" placeholder="ss_..."
-                           class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </label>
-                <div class="flex items-center gap-2 flex-wrap">
-                    <button
-                        class="px-3 py-1.5 rounded-lg text-[12px] text-white"
-                        :style="{ background: 'var(--accent)' }"
-                        :disabled="steamBusy"
-                        @click="connectSinfulShadows"
-                    >
-                        {{ steamBusy ? "Connecting..." : steam?.hasSinfulShadowsKey ? "Update key" : "Connect" }}
-                    </button>
-                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Not autosaved &mdash; press Connect to apply.
-                    </span>
-                </div>
-            </template>
-
-            <template v-else>
-                <template v-if="!steam?.connected || steam?.provider !== 'direct'">
-                    <a href="/api/steam/login" class="inline-block px-3 py-2 rounded-lg text-[13px] font-medium text-white" :style="{ background: '#1b2838' }">
-                        Sign in through Steam
-                    </a>
-                    <input v-model="steamAccount" placeholder="Or paste a profile URL / 17-digit Steam ID"
-                           class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </template>
-
-                <label class="block">
-                    <span class="text-[12px]">Steam Web API key</span>
-                    <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
-                        Required to read your library. Your profile URL alone identifies the
-                        account, but only a key grants access to what is in it. Get one at
-                        <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer" class="underline">steamcommunity.com/dev/apikey</a>.
-                        Your profile's &ldquo;Game details&rdquo; must be public.
-                    </span>
-                    <input v-model="steamApiKey" type="password" class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </label>
-                <!-- Connecting makes live API calls, so it is an explicit action rather than
-                     part of the page's autosave. -->
-                <div class="flex items-center gap-2 flex-wrap">
-                    <button
-                        class="px-3 py-1.5 rounded-lg text-[12px] text-white"
-                        :style="{ background: 'var(--accent)' }"
-                        :disabled="steamBusy"
-                        @click="connectSteam"
-                    >
-                        {{ steamBusy ? "Connecting..." : steam?.hasApiKey ? "Update key" : "Connect Steam" }}
-                    </button>
-                    <span v-if="steam?.steamId && !steam?.hasApiKey" class="text-[11px]" :style="{ color: 'var(--warn)' }">
-                        Account identified. A key is still needed to read the library.
-                    </span>
-                    <span v-else class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Not autosaved &mdash; press Connect to apply.
-                    </span>
-                </div>
-            </template>
-        </section>
-
-        <section class="card p-4 space-y-3 break-inside-avoid mb-4">
+        <!-- In the narrow window everything is on one page, so the categories that
+             are tabs on a wide screen become the same full-bleed bands the compact
+             dashboard uses. -->
+        <div
+            v-if="isCompact"
+            class="-mx-4 px-4 py-1.5 mb-3"
+            :style="{ background: 'var(--surface-2)' }"
+        >
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Notifications
+            </span>
+        </div>
+        <section v-if="visible('notifications')" class="card p-4 space-y-3 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Notifications</h2>
             <!--
                 Numbered rather than two bare boxes. Creating the bot is easy; finding the
@@ -1131,9 +990,236 @@ const inputStyle = {
                 {{ testing && !testingService ? "Sending&hellip;" : "Send test notification" }}
             </button>
         </section>
+        <!-- In the narrow window everything is on one page, so the categories that
+             are tabs on a wide screen become the same full-bleed bands the compact
+             dashboard uses. -->
+        <div
+            v-if="isCompact"
+            class="-mx-4 px-4 py-1.5 mb-3"
+            :style="{ background: 'var(--surface-2)' }"
+        >
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Accounts
+            </span>
+        </div>
+        <section v-if="visible('accounts')" class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Twitch account
+            </h2>
+            <div class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
+                <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium">
+                        {{ store.auth.user?.displayName || "Not signed in" }}
+                    </p>
+                    <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Signing out revokes the token with Twitch. Your drops, settings and
+                        Steam library are kept for when you come back.
+                    </p>
+                </div>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+                    :style="{ color: 'var(--danger)' }"
+                    :disabled="signingOut"
+                    @click="signOut"
+                >
+                    {{ signingOut ? "Signing out..." : "Sign out" }}
+                </button>
+            </div>
+        </section>
+        <section v-if="visible('accounts')" class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Steam library</h2>
+            <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
+                Lets the miner rank campaigns by the games you actually own and play, and shows
+                which accounts are worth linking.
+            </p>
 
-        <!-- Walled off deliberately: nothing here needs changing in normal use. -->
-        <section class="card p-4 space-y-4 break-inside-avoid mb-4">
+            <div v-if="steam?.connected" class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
+                <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium">{{ steam.personaName || steam.steamId }}</p>
+                    <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        {{ steam.gameCount }} games
+                        &middot; via {{ steam.provider === "sinfulshadows" ? "SinfulShadows" : "your Steam key" }}
+                        <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt) }}</template>
+
+                        <template v-if="steam.stale"> &middot; cached</template>
+                    </p>
+                </div>
+                <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface)', color: 'var(--text)' }"
+                        :disabled="steamBusy" @click="refreshSteam">
+                    {{ steamBusy ? "Syncing..." : "Sync now" }}
+                </button>
+                <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ color: 'var(--danger)' }" @click="disconnectSteam">
+                    Disconnect
+                </button>
+            </div>
+
+            <!-- Steam only reports a last-played time to the key that owns the account, so a
+                 borrowed key cannot rank by recency and quietly falls back. Say so. -->
+            <p v-if="steam?.connected && steam?.recencySignal && steam.recencySignal !== 'lastPlayed'"
+               class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                &ldquo;Recently played&rdquo; ranking is using
+                {{ steam.recencySignal === "playtimeRecent" ? "two-week playtime" : "total playtime" }}
+                &mdash; Steam only reveals last-played times to the key that owns the account.
+            </p>
+
+            <!-- Two ways in. The SinfulShadows one is first because it asks for less. -->
+            <div class="flex gap-1 p-1 rounded-lg" :style="{ background: 'var(--surface-2)' }">
+                <button
+                    v-for="option in [['sinfulshadows', 'SinfulShadows account'], ['direct', 'Your own Steam key']]"
+                    :key="option[0]"
+                    class="flex-1 px-3 py-1.5 rounded-md text-[12px]"
+                    :style="steamProvider === option[0]
+                        ? { background: 'var(--surface)', color: 'var(--text)' }
+                        : { color: 'var(--text-2)' }"
+                    @click="steamProvider = option[0]"
+                >
+                    {{ option[1] }}
+                </button>
+            </div>
+
+            <template v-if="steamProvider === 'sinfulshadows'">
+                <label class="block">
+                    <span class="text-[12px]">SinfulShadows API key</span>
+                    <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
+                        No Steam key needed. Create one at
+                        <a href="https://sinfulshadows.com/settings/api" target="_blank" rel="noreferrer" class="underline">sinfulshadows.com &rarr; Settings &rarr; API keys</a>.
+                        Your library comes from the Steam account linked there, so link Steam
+                        on the site first.
+                    </span>
+                    <input v-model="ssApiKey" type="password" placeholder="ss_..."
+                           class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
+                </label>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <button
+                        class="px-3 py-1.5 rounded-lg text-[12px] text-white"
+                        :style="{ background: 'var(--accent)' }"
+                        :disabled="steamBusy"
+                        @click="connectSinfulShadows"
+                    >
+                        {{ steamBusy ? "Connecting..." : steam?.hasSinfulShadowsKey ? "Update key" : "Connect" }}
+                    </button>
+                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Not autosaved &mdash; press Connect to apply.
+                    </span>
+                </div>
+            </template>
+
+            <template v-else>
+                <template v-if="!steam?.connected || steam?.provider !== 'direct'">
+                    <a href="/api/steam/login" class="inline-block px-3 py-2 rounded-lg text-[13px] font-medium text-white" :style="{ background: '#1b2838' }">
+                        Sign in through Steam
+                    </a>
+                    <input v-model="steamAccount" placeholder="Or paste a profile URL / 17-digit Steam ID"
+                           class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
+                </template>
+
+                <label class="block">
+                    <span class="text-[12px]">Steam Web API key</span>
+                    <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
+                        Required to read your library. Your profile URL alone identifies the
+                        account, but only a key grants access to what is in it. Get one at
+                        <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer" class="underline">steamcommunity.com/dev/apikey</a>.
+                        Your profile's &ldquo;Game details&rdquo; must be public.
+                    </span>
+                    <input v-model="steamApiKey" type="password" class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
+                </label>
+                <!-- Connecting makes live API calls, so it is an explicit action rather than
+                     part of the page's autosave. -->
+                <div class="flex items-center gap-2 flex-wrap">
+                    <button
+                        class="px-3 py-1.5 rounded-lg text-[12px] text-white"
+                        :style="{ background: 'var(--accent)' }"
+                        :disabled="steamBusy"
+                        @click="connectSteam"
+                    >
+                        {{ steamBusy ? "Connecting..." : steam?.hasApiKey ? "Update key" : "Connect Steam" }}
+                    </button>
+                    <span v-if="steam?.steamId && !steam?.hasApiKey" class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                        Account identified. A key is still needed to read the library.
+                    </span>
+                    <span v-else class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Not autosaved &mdash; press Connect to apply.
+                    </span>
+                </div>
+            </template>
+        </section>
+        <!-- In the narrow window everything is on one page, so the categories that
+             are tabs on a wide screen become the same full-bleed bands the compact
+             dashboard uses. -->
+        <div
+            v-if="isCompact"
+            class="-mx-4 px-4 py-1.5 mb-3"
+            :style="{ background: 'var(--surface-2)' }"
+        >
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Advanced
+            </span>
+        </div>
+        <section v-if="desktop && visible('advanced')" class="card p-4 space-y-4 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Desktop app
+            </h2>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Start with Windows</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Starts hidden in the tray, so mining resumes without a window
+                        appearing.
+                    </span>
+                </span>
+                <el-switch
+                    :model-value="desktopSettings.runAtLogin"
+                    @update:model-value="(v) => saveDesktop({ runAtLogin: v })"
+                />
+            </label>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Close to tray</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Closing the window keeps mining. Turn this off and the close button
+                        quits instead.
+                    </span>
+                </span>
+                <el-switch
+                    :model-value="desktopSettings.closeToTray"
+                    @update:model-value="(v) => saveDesktop({ closeToTray: v })"
+                />
+            </label>
+
+            <div class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Import from a Docker install</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Copies credentials and drop history across. Stop the container
+                        first &mdash; both mining one account is what corrupts progress.
+                    </span>
+                </span>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                    :disabled="importing"
+                    @click="importFromDocker"
+                >
+                    {{ importing ? "Importing..." : "Choose folder" }}
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between gap-4">
+                <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                    Desktop build {{ desktopVersion }}
+                </span>
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                    @click="desktop.openLogsFolder()"
+                >
+                    Open logs
+                </button>
+            </div>
+        </section>
+        <section v-if="visible('advanced')" class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
                 Advanced
             </h2>
@@ -1209,6 +1295,29 @@ const inputStyle = {
 </template>
 
 <style scoped>
+/*
+ * Label beside control needs width this window does not have. Left alone, the control keeps
+ * its size and the explanation next to it is squeezed to two words a line, which is how the
+ * narrow settings page read before this. Same 560px the layout uses elsewhere.
+ */
+@media (max-width: 559px) {
+    label.flex.items-center.justify-between {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    label.flex.items-center.justify-between :is(select, input) {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* Switches would stretch to the full width and look like a bug, so they stay put. */
+    label.flex.items-center.justify-between :deep(.el-switch) {
+        align-self: flex-start;
+    }
+}
+
 .tg-step {
     display: grid;
     place-items: center;
