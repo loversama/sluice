@@ -36,9 +36,22 @@ const activity = computed(() => {
     return props.compact ? channel.game || channel.displayName : `${channel.game} · ${channel.displayName}`;
 });
 
-const connectionTone = computed(() =>
-    store.connection === "open" ? "var(--success)" : "var(--warn)",
-);
+/**
+ * Connection health, as a colour anyone already knows how to read.
+ *
+ * Red means the daemon cannot be reached at all, amber means the link dropped and is being
+ * re-established, green means it is live. It does not pulse: a light that moves reads as
+ * activity, and this reports a state that is usually not changing.
+ */
+const connection = computed(() => {
+    if (store.loadError || store.fatal) {
+        return { tone: "var(--danger)", label: "Daemon unreachable" };
+    }
+    if (store.connection !== "open") {
+        return { tone: "var(--warn)", label: "Reconnecting to the daemon" };
+    }
+    return { tone: "var(--success)", label: "Connected" };
+});
 
 /**
  * The window has no frame, so this header is the title bar: it provides the drag region and
@@ -128,9 +141,8 @@ async function toggleMaximize() {
             </span>
             <span
                 class="w-1.5 h-1.5 rounded-full shrink-0"
-                :class="store.connection === 'open' ? 'pulse' : ''"
-                :style="{ background: connectionTone }"
-                :title="`Daemon ${store.connection}`"
+                :style="{ background: connection.tone }"
+                :title="connection.label"
             />
             <span class="text-[11px] truncate max-w-[120px]" :style="{ color: 'var(--text-2)' }">
                 {{ store.auth.user?.displayName ?? "not signed in" }}
@@ -139,9 +151,8 @@ async function toggleMaximize() {
         <span
             v-else
             class="w-1.5 h-1.5 rounded-full shrink-0 ml-1"
-            :class="store.connection === 'open' ? 'pulse' : ''"
-            :style="{ background: connectionTone }"
-            :title="`Daemon ${store.connection}`"
+            :style="{ background: connection.tone }"
+            :title="connection.label"
         />
 
         <!-- Only in the desktop build, and only where the platform expects them: macOS

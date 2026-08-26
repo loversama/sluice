@@ -294,6 +294,7 @@ const idleReason = computed(() => {
                                     v-for="entry in campaign?.drops ?? []"
                                     :key="entry.id"
                                     class="w-2 h-2 rounded-full"
+                                    :class="entry.id === drop.id && !entry.isClaimed ? 'pulse' : ''"
                                     :title="entry.name"
                                     :style="{
                                         background: entry.isClaimed
@@ -311,7 +312,7 @@ const idleReason = computed(() => {
                             >
                                 {{ beatLabel }}
                             </span>
-                            <span class="flex items-end gap-[2px] h-3" :class="store.beatHealthy ? 'pulse' : ''">
+                            <span class="flex items-end gap-[2px] h-3">
                                 <span class="w-[3px] h-[5px] rounded-sm" :style="{ background: store.beatHealthy ? 'var(--accent)' : 'var(--muted)' }" />
                                 <span class="w-[3px] h-[9px] rounded-sm" :style="{ background: store.beatHealthy ? 'var(--accent)' : 'var(--muted)' }" />
                                 <span class="w-[3px] h-[12px] rounded-sm" :style="{ background: store.beatHealthy ? 'var(--accent)' : 'var(--muted)' }" />
