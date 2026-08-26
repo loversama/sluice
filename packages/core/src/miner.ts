@@ -497,6 +497,21 @@ export class Miner extends EventEmitter {
     /** Attach a Steam library so ownership and playtime can influence ranking. */
     setSteamLibrary(library: SteamLibrary | null): void {
         this.steam = library;
+        // Ownership and playtime feed the ranking, so a new library reorders the queue
+        // even though not one campaign has changed.
+        this.publishRanking();
+    }
+
+    /**
+     * Push the queue after something that changes the order without changing the campaigns.
+     *
+     * The queue is derived from the ranking rather than stored, so editing priorities used
+     * to change what the miner would do next without changing what the dashboard was
+     * showing. The list then sat wrong until the next sweep, which can be twenty minutes
+     * away - long enough to read as the setting having been ignored.
+     */
+    private publishRanking(): void {
+        this.emit("campaigns-updated", this.getCampaigns());
     }
 
     /** The ranking rules in force right now, including live focus and shuffle state. */
@@ -649,6 +664,11 @@ export class Miner extends EventEmitter {
             this.pushFeed("info", `Priorities changed - switching to ${best.gameName}`);
             this.switchRequested = true;
         }
+
+        // Whether or not it switches, the order has moved and the dashboard is showing the
+        // old one. Dragging a game to the top and watching the queue ignore you is the
+        // clearest possible way to look broken.
+        this.publishRanking();
     }
 
     /** Every campaign currently known, active and upcoming alike. */

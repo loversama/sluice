@@ -17,19 +17,6 @@ const busy = ref(false);
 /** Mining proper, as opposed to starting up or having nothing to do. */
 const active = computed(() => Boolean(store.mining && drop.value));
 
-/**
- * What the bar at the foot of the band is measuring.
- *
- * The drop while mining, the campaign sweep while starting up, and nothing at all when
- * idle - one bar reporting whatever is currently in progress, rather than three bars that
- * come and go with the panel above them.
- */
-const barFraction = computed(() => {
-    if (active.value) return progress.value;
-    const { done, total } = store.loading ?? {};
-    return total ? Math.min(1, done / total) : null;
-});
-
 const accent = computed(() => (store.isStalled ? "var(--warn)" : "var(--accent)"));
 
 const heroStyle = computed(() => ({
@@ -137,7 +124,10 @@ const idleReason = computed(() => {
         card of its own made the page rearrange itself as they changed.
     -->
     <section v-else class="-mx-4 -mt-4 overflow-hidden" :style="heroStyle">
-        <div class="px-4 pt-3 pb-3">
+        <!-- Background to the window edges, contents on the same column as the panels
+             below. Without the second half the text drifted out to the far edges while
+             everything under it stayed centred. -->
+        <div class="px-4 pt-3 pb-3 max-w-[1800px] mx-auto">
             <header class="flex items-center justify-between gap-3 mb-2">
                 <div class="flex items-center gap-2 min-w-0">
                     <StatusChip
@@ -320,16 +310,19 @@ const idleReason = computed(() => {
         </div>
 
         <!--
-            Edge to edge and flush with the bottom, as in the narrow layout. It always means
-            the same thing - how far through whatever is happening - so it stays put while
-            the band above it changes, rather than appearing and disappearing.
+            Edge to edge and flush with the bottom, as in the narrow layout - and only while
+            mining. Starting up already draws its own bar with a label and a count, and two
+            bars reporting the same thing invites you to work out which one to read.
         -->
-        <div class="h-[7px]" :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }">
+        <div
+            v-if="active"
+            class="h-[7px]"
+            :style="{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }"
+        >
             <div
-                v-if="barFraction !== null"
                 class="h-full transition-[width] duration-700"
                 :style="{
-                    width: `${barFraction * 100}%`,
+                    width: `${progress * 100}%`,
                     background: accent,
                     boxShadow: `0 0 10px color-mix(in srgb, ${accent} 70%, transparent)`,
                 }"
