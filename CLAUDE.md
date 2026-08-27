@@ -43,12 +43,40 @@ Then watch it: `gh run list --repo loversama/sluice --limit 1`.
 
 ### Writing the notes
 
-The tag message is the release notes verbatim, so write it for someone deciding whether to
-update — not for someone reading the diff. First line is the title. Then group under
-`Added`, `Changed`, `Fixed`, `Removed`, omitting any that are empty.
+The annotated tag's message becomes the release body verbatim, so it is written for someone
+deciding whether to update — not for someone reading the diff.
 
-Say what changed for the user and, where it is not obvious, why. "Claims no longer show a
-countdown after the drop is claimed" is useful; "refactor NowMining state handling" is not.
+Format:
+
+```
+Sluice 0.4.2
+
+One line of context, only if the release needs it.
+
+### Added
+- **The thing**, then what it does for you.
+
+### Changed
+- **What changed**, and why it is different now.
+
+### Fixed
+- **What was broken**, described as the person experiencing it would.
+```
+
+Rules that matter:
+
+- **Bullet points, always.** Prose paragraphs do not get read.
+- **Bold the subject** of each bullet so the list can be skimmed.
+- Omit any section with nothing in it. A release with only fixes has only `### Fixed`.
+- Describe **behaviour, not implementation**. "The stream preview plays signed out, so it no
+  longer stalls mining" — not "credentialless iframe".
+- Where a change has a cost, **say so in the same breath**. The guest player means ads; the
+  daily cap can overrun by half an hour. Users find these out anyway, and finding out from
+  the notes is better than finding out from the app.
+- **Never mention how the release was produced** — no tooling, no assistants, no session
+  references. The notes are about the software.
+- Group everything since the previous *published* release, not since the previous tag. A
+  release that never shipped has no audience and its changes belong here.
 
 ### If a release goes wrong
 
