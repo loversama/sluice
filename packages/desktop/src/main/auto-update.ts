@@ -25,8 +25,9 @@ export type UpdateStatus =
     | { status: "idle" }
     | { status: "checking" }
     | { status: "available"; version: string }
-    | { status: "downloading"; percent: number }
+    | { status: "downloading"; percent: number; bytesPerSecond?: number; transferred?: number; total?: number }
     | { status: "ready"; version: string }
+    | { status: "installing" }
     | { status: "error"; message: string };
 
 /**
@@ -78,9 +79,17 @@ export class AutoUpdate {
         );
         updater.on("update-not-available", () => this.publish({ status: "idle" }));
         updater.on("download-progress", (progress) =>
-            this.publish({ status: "downloading", percent: Math.round(progress?.percent ?? 0) }),
+            this.publish({
+                status: "downloading",
+                percent: Math.round(progress?.percent ?? 0),
+                bytesPerSecond: progress?.bytesPerSecond ?? 0,
+                transferred: progress?.transferred ?? 0,
+                total: progress?.total ?? 0,
+            }),
         );
         updater.on("update-downloaded", (info) => {
+            // Also fires on a later check when the download is already cached - which is
+            // how a pending update announces itself again after the app is reopened.
             logger.info(`Update ${info?.version ?? ""} downloaded; it will install on quit.`);
             this.publish({ status: "ready", version: info?.version ?? "" });
         });
@@ -146,6 +155,9 @@ export class AutoUpdate {
     /** Restart into the new version now, rather than waiting for the next quit. */
     installNow(): void {
         try {
+            // Said before quitting, so the window shows why it is about to disappear
+            // rather than simply vanishing mid-click.
+            this.publish({ status: "installing" });
             this.updater?.quitAndInstall();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

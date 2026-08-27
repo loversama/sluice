@@ -55,6 +55,7 @@ const changelogError = ref("");
 
 const updateLabel = computed(() => {
     const state = update.value;
+    if (state.status === "installing") return "Installing — the app will restart.";
     if (state.status === "ready") return `Version ${state.version} is ready to install.`;
     if (state.status === "downloading") return `Downloading… ${Math.round(state.percent ?? 0)}%`;
     if (state.status === "available") return `Version ${state.version} found; downloading.`;

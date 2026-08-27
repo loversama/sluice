@@ -52,11 +52,20 @@ describe("AutoUpdate", () => {
         updates.start(updater);
 
         updater.emit("update-available", { version: "1.2.0" });
-        updater.emit("download-progress", { percent: 41.6 });
+        updater.emit("download-progress", {
+            percent: 41.6,
+            bytesPerSecond: 2_500_000,
+            transferred: 42_000_000,
+            total: 101_000_000,
+        });
         updater.emit("update-downloaded", { version: "1.2.0" });
 
         expect(seen).toContainEqual({ status: "available", version: "1.2.0" });
-        expect(seen).toContainEqual({ status: "downloading", percent: 42 });
+        // Speed and size travel with it, so the banner can say how long this will take
+        // rather than only how far along it is.
+        expect(seen).toContainEqual(
+            expect.objectContaining({ status: "downloading", percent: 42, bytesPerSecond: 2_500_000 }),
+        );
         expect(updates.status).toEqual({ status: "ready", version: "1.2.0" });
     });
 
@@ -166,5 +175,21 @@ describe("nextCheckDelay", () => {
         const seen = new Set(Array.from({ length: 20 }, () => nextCheckDelay()));
 
         expect(seen.size).toBeGreaterThan(1);
+    });
+});
+
+describe("installing", () => {
+    it("says it is installing before it disappears", () => {
+        // quitAndInstall closes the window; without this the app simply vanishes mid-click.
+        const bus = new EventEmitter();
+        const seen: unknown[] = [];
+        bus.on("update", (status) => seen.push(status));
+
+        const updater = new FakeUpdater();
+        const updates = new AutoUpdate(bus);
+        updates.start(updater as never);
+        updates.installNow();
+
+        expect(seen).toContainEqual({ status: "installing" });
     });
 });

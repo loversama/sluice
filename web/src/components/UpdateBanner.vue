@@ -20,8 +20,22 @@ onMounted(async () => {
 });
 
 const shown = computed(() =>
-    ["available", "downloading", "ready"].includes(state.value.status),
+    ["available", "downloading", "ready", "installing"].includes(state.value.status),
 );
+
+/** Speed and size, when the download is far enough along for them to mean anything. */
+const rate = computed(() => {
+    const perSecond = state.value.bytesPerSecond ?? 0;
+    if (!perSecond) return "";
+    const mb = perSecond / 1_000_000;
+    return mb >= 1 ? `${mb.toFixed(1)} MB/s` : `${Math.round(perSecond / 1000)} kB/s`;
+});
+
+const size = computed(() => {
+    const { transferred = 0, total = 0 } = state.value;
+    if (!total) return "";
+    return `${(transferred / 1_000_000).toFixed(0)} of ${(total / 1_000_000).toFixed(0)} MB`;
+});
 
 const tone = computed(() => (state.value.status === "ready" ? "var(--success)" : "var(--accent)"));
 
@@ -55,6 +69,13 @@ async function install() {
             <span class="tabular shrink-0" :style="{ color: 'var(--text-2)' }">
                 {{ Math.round(state.percent ?? 0) }}%
             </span>
+            <span v-if="size" class="tabular shrink-0 hidden sm:inline" :style="{ color: 'var(--muted)' }">
+                {{ size }}<template v-if="rate"> &middot; {{ rate }}</template>
+            </span>
+        </template>
+
+        <template v-else-if="state.status === 'installing'">
+            <span :style="{ color: tone }">Installing&hellip; the app will restart.</span>
         </template>
 
         <template v-else>

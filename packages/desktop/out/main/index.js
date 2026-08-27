@@ -473,7 +473,13 @@ class AutoUpdate {
     updater.on("update-not-available", () => this.publish({ status: "idle" }));
     updater.on(
       "download-progress",
-      (progress) => this.publish({ status: "downloading", percent: Math.round(progress?.percent ?? 0) })
+      (progress) => this.publish({
+        status: "downloading",
+        percent: Math.round(progress?.percent ?? 0),
+        bytesPerSecond: progress?.bytesPerSecond ?? 0,
+        transferred: progress?.transferred ?? 0,
+        total: progress?.total ?? 0
+      })
     );
     updater.on("update-downloaded", (info) => {
       logger.info(`Update ${info?.version ?? ""} downloaded; it will install on quit.`);
@@ -527,6 +533,7 @@ class AutoUpdate {
   /** Restart into the new version now, rather than waiting for the next quit. */
   installNow() {
     try {
+      this.publish({ status: "installing" });
       this.updater?.quitAndInstall();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
