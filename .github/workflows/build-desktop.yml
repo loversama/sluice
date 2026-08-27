@@ -113,7 +113,31 @@ jobs:
           # Writes to the separate releases repo, so the built-in GITHUB_TOKEN - which only
           # covers this one - is not enough. Needs contents:write on sluice-releases.
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-        run: npx electron-builder --win --publish ${{ steps.publish.outputs.flag }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Clear any release for this tag first, then retry - the pattern taken from
+          # mt-database-v2, which has been publishing this way for a while.
+          #
+          # electron-builder creates the release, then uploads the installer, the blockmap
+          # and latest.yml to it. If a release for the tag already exists in any state -
+          # left by a failed run, or created twice by electron-builder itself - the uploads
+          # land inconsistently: a first attempt here produced two releases for one tag,
+          # holding a blockmap and nothing else. A release missing its exe is worse than no
+          # release, and one missing latest.yml is worse still, because updating then fails
+          # silently.
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt: clearing any existing release for $TAG"
+            gh release delete "$TAG" --repo loversama/sluice-releases --yes 2>/dev/null || true
+            sleep 2
+            if npx electron-builder --win --publish ${{ steps.publish.outputs.flag }}; then
+              echo "Published on attempt $attempt."
+              exit 0
+            fi
+            echo "Attempt $attempt failed; trying again."
+            sleep 5
+          done
+          echo "::error::Could not publish $TAG after three attempts."
+          exit 1
 
       # electron-builder writes no release body, so a published release arrives blank
       # unless something fills it. The annotated tag's own message is the obvious source:
@@ -131,7 +155,8 @@ jobs:
             exit 0
           fi
           printf '%s' "$NOTES" > notes.md
-          gh release edit "$TAG" --repo loversama/sluice-releases --notes-file notes.md
+          gh release edit "$TAG" --repo loversama/sluice-releases --notes-file notes.md \
+            || echo "::warning::Could not set the release notes; the release itself is fine."
 
       - name: Keep the installer as an artifact either way
         uses: actions/upload-artifact@v4
