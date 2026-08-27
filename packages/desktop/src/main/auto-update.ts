@@ -67,6 +67,13 @@ export class AutoUpdate {
     }
 
     start(updater: UpdaterLike): void {
+        // Guarded because the caller loads this from a CommonJS module across an ESM
+        // boundary, and got undefined in the packaged build while working in development.
+        if (!updater || typeof updater.on !== "function") {
+            logger.warn("No usable updater was provided; automatic updates are off.");
+            this.publish({ status: "idle" });
+            return;
+        }
         this.updater = updater;
         // Downloading is fine unattended; installing is not, since it restarts the app and
         // would end a mining session without warning.

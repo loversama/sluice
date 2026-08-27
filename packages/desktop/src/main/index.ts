@@ -242,10 +242,25 @@ let updates: AutoUpdate | null = null;
             // Only a packaged build can update itself; in development this would report
             // failures against a version that was never released.
             if (app.isPackaged) {
-                const { autoUpdater } = await import("electron-updater");
-                // No credential: the releases repository is public, so the updater reads
-                // it anonymously. Nothing to embed, leak, expire or rotate.
-                updates.start(autoUpdater as never);
+                // electron-updater is CommonJS. Bundled as ESM, the named import comes
+                // back undefined in the packaged app - which is exactly where it cannot be
+                // caught in development - so the interop default is unwrapped by hand.
+                // 0.4.0 shipped without this and crashed on first launch.
+                const updaterModule = (await import("electron-updater")) as unknown as {
+                    autoUpdater?: unknown;
+                    default?: { autoUpdater?: unknown };
+                };
+                const autoUpdater = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater;
+
+                if (!autoUpdater) {
+                    // Never fatal. Not being able to update is a bad day; refusing to start
+                    // because of it is a worse one.
+                    logger.warn("electron-updater did not load; automatic updates are off.");
+                } else {
+                    // No credential: the releases repository is public, so the updater reads
+                    // it anonymously. Nothing to embed, leak, expire or rotate.
+                    updates.start(autoUpdater as never);
+                }
             }
 
             // A tray is a nicety; a window is the app. On a desktop with no system tray -

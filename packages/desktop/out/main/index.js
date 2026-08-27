@@ -462,6 +462,11 @@ class AutoUpdate {
     this.bus.emit("update", status);
   }
   start(updater) {
+    if (!updater || typeof updater.on !== "function") {
+      logger.warn("No usable updater was provided; automatic updates are off.");
+      this.publish({ status: "idle" });
+      return;
+    }
     this.updater = updater;
     updater.autoDownload = true;
     updater.autoInstallOnAppQuit = true;
@@ -759,8 +764,13 @@ if (!app.requestSingleInstanceLock()) {
       registerIpc();
       handle.start();
       if (app.isPackaged) {
-        const { autoUpdater } = await import("electron-updater");
-        updates.start(autoUpdater);
+        const updaterModule = await import("electron-updater");
+        const autoUpdater = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater;
+        if (!autoUpdater) {
+          logger.warn("electron-updater did not load; automatic updates are off.");
+        } else {
+          updates.start(autoUpdater);
+        }
       }
       try {
         createTray({

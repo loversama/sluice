@@ -193,3 +193,29 @@ describe("installing", () => {
         expect(seen).toContainEqual({ status: "installing" });
     });
 });
+
+/**
+ * 0.4.0 crashed on first launch here. electron-updater is CommonJS; bundled as ESM its
+ * named import came back undefined, and start() set a property on it - in the packaged
+ * build only, which is precisely where development never looks.
+ */
+describe("a missing updater", () => {
+    it("does not throw, so the app still starts", () => {
+        const updates = new AutoUpdate(new EventEmitter());
+
+        expect(() => updates.start(undefined as never)).not.toThrow();
+    });
+
+    it("does not throw on something that is not an updater", () => {
+        const updates = new AutoUpdate(new EventEmitter());
+
+        expect(() => updates.start({} as never)).not.toThrow();
+    });
+
+    it("says it is idle rather than pretending to work", () => {
+        const updates = new AutoUpdate(new EventEmitter());
+        updates.start(undefined as never);
+
+        expect(updates.status).toEqual({ status: "idle" });
+    });
+});
