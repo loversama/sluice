@@ -339,10 +339,13 @@ const idleReason = computed(() => {
             <div v-else class="flex items-center justify-between gap-3">
                 <div class="min-w-0">
                     <h1 class="text-[20px] font-semibold leading-tight">
-                        {{ paused ? "Paused" : outsideSchedule ? "Outside your hours" : "Nothing to mine right now" }}
+                        {{ paused ? "Paused" : store.atDailyLimit ? "Daily limit reached" : outsideSchedule ? "Outside your hours" : "Nothing to mine right now" }}
                     </h1>
                     <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
                         <template v-if="paused">Nothing is being watched or claimed until you resume.</template>
+                        <template v-else-if="store.atDailyLimit">
+                            Today's allowance is used up. Mining resumes tomorrow.
+                        </template>
                         <template v-else-if="outsideSchedule">
                             Mining is set to certain hours, and now is not one of them.
                         </template>

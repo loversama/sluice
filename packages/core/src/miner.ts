@@ -18,7 +18,7 @@ import { loadState, saveState } from "./state.js";
 import { loadClaims, saveClaims, summarise, type ClaimHistory, type ClaimStats } from "./claims.js";
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 import { detectForeignSession, type ProgressSnapshot } from "./foreign-session.js";
-import { isWithinSchedule } from "./schedule.js";
+import { dailyLimitVerdict, isWithinSchedule } from "./schedule.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -212,6 +212,17 @@ export class Miner extends EventEmitter {
     private foreignSessionAt: number | null = null;
     /** Whether the schedule allowed mining last time it was looked at, for logging changes. */
     private scheduleAllowed = true;
+
+    /**
+     * Minutes mined so far today, and which local day that is.
+     *
+     * Held in memory: a restart forgets the day's tally, which is a real hole for anyone
+     * using the limit to divide time between machines. Persisting it belongs with the rest
+     * of the daily bookkeeping rather than bolted on here.
+     */
+    private minedToday = 0;
+    private minedTodayOn = new Date().toDateString();
+    private limitReported = false;
     private lastProgressAt = 0;
 
     /** Drop minutes as of the last sweep, for spotting another session earning as us. */
@@ -433,6 +444,38 @@ export class Miner extends EventEmitter {
      * Logged on change rather than every call: this is asked every few seconds, and the
      * interesting moment is the transition, not the state.
      */
+    /** One accepted beat is one minute watched. Rolls over at local midnight. */
+    private countMinuteMined(): void {
+        const today = new Date().toDateString();
+        if (today !== this.minedTodayOn) {
+            this.minedTodayOn = today;
+            this.minedToday = 0;
+            this.limitReported = false;
+        }
+        this.minedToday += 1;
+    }
+
+    /** Minutes mined today, for the dashboard. */
+    get minedTodayMinutes(): number {
+        return this.minedTodayOn === new Date().toDateString() ? this.minedToday : 0;
+    }
+
+    /**
+     * Whether the day's allowance still permits mining, and says so once when it does not.
+     */
+    withinDailyLimit(): boolean {
+        const drop = this.currentDrop;
+        const remaining = drop ? Math.max(0, drop.requiredMinutes - drop.currentMinutes) : null;
+        const verdict = dailyLimitVerdict(this.config.dailyLimit, this.minedTodayMinutes, remaining);
+
+        if (verdict === "stop" && !this.limitReported) {
+            this.limitReported = true;
+            logger.info("Daily mining limit reached; stopping until tomorrow.");
+            this.pushFeed("info", "Daily limit reached - mining again tomorrow");
+        }
+        return verdict !== "stop";
+    }
+
     withinSchedule(): boolean {
         const allowed = isWithinSchedule(this.config.schedule, new Date());
         if (allowed !== this.scheduleAllowed) {
@@ -786,9 +829,9 @@ export class Miner extends EventEmitter {
                     await sleep(5_000);
                     continue;
                 }
-                if (!this.withinSchedule()) {
+                if (!this.withinSchedule() || !this.withinDailyLimit()) {
                     // Checked here rather than on a timer: the loop already wakes every few
-                    // seconds, and a schedule that takes effect within that is plenty.
+                    // seconds, and a limit that takes effect within that is plenty.
                     await sleep(5_000);
                     continue;
                 }
@@ -1237,6 +1280,7 @@ export class Miner extends EventEmitter {
         }
         this.lastWatchedLogin = channel.login;
         this.lastProgressAt = Date.now();
+        this.countMinuteMined();
         this.lastBeatAt = null;
         this.unconfirmedBeats = 0;
         this.switchRequested = false;
@@ -1278,8 +1322,8 @@ export class Miner extends EventEmitter {
                     logger.info(`${channel.displayName} went offline.`);
                     return;
                 }
-                if (!this.withinSchedule()) {
-                    logger.info("Outside the mining schedule; leaving the channel.");
+                if (!this.withinSchedule() || !this.withinDailyLimit()) {
+                    logger.info("Outside the mining window; leaving the channel.");
                     this.switchRequested = true;
                     return;
                 }

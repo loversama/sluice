@@ -30,6 +30,8 @@ const form = reactive({
     telegramChatId: "",
     discordWebhookUrl: "",
     sidebarMode: "auto",
+    limitEnabled: false,
+    limitHours: 8,
     scheduleEnabled: false,
     scheduleWindows: [],
     autoUpdate: true,
@@ -325,6 +327,8 @@ watch(
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
             sidebarMode: config.sidebarMode ?? "auto",
+            limitEnabled: config.dailyLimit?.enabled ?? false,
+            limitHours: config.dailyLimit?.hours ?? 8,
             scheduleEnabled: config.schedule?.enabled ?? false,
             scheduleWindows: (config.schedule?.windows ?? []).map((w) => ({ ...w, days: [...w.days] })),
             autoUpdate: config.autoUpdate ?? true,
@@ -390,6 +394,7 @@ async function save() {
             allowStreamEmbed: form.allowStreamEmbed,
             sidebarMode: form.sidebarMode,
             schedule: { enabled: form.scheduleEnabled, windows: form.scheduleWindows },
+            dailyLimit: { enabled: form.limitEnabled, hours: Number(form.limitHours) },
             autoUpdate: form.autoUpdate,
             desktopNotifications: form.desktopNotifications,
             desktopNotificationStyle: form.desktopNotificationStyle,
@@ -896,6 +901,41 @@ const inputStyle = {
                     Add hours
                 </button>
             </template>
+
+            <label
+                class="flex items-center justify-between gap-4 pt-3"
+                :style="{ borderTop: '1px solid var(--border)' }"
+            >
+                <span>
+                    <span class="text-[13px]">Cap the hours per day</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Stops once it has mined this long in a day, whatever the schedule
+                        allows. It may run up to half an hour over to finish a drop already
+                        in progress &mdash; stopping five minutes short of a tier throws away
+                        every minute already spent on it.
+                    </span>
+                </span>
+                <el-switch v-model="form.limitEnabled" />
+            </label>
+
+            <div v-if="form.limitEnabled" class="flex items-center gap-3">
+                <input
+                    v-model="form.limitHours"
+                    type="number"
+                    min="1"
+                    max="24"
+                    step="0.5"
+                    class="w-20 px-2 py-1.5 rounded-lg text-[12px] outline-none"
+                    :style="inputStyle"
+                />
+                <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                    hours a day
+                    <template v-if="store.minedTodayMinutes">
+                        &middot; {{ Math.floor(store.minedTodayMinutes / 60) }}h
+                        {{ store.minedTodayMinutes % 60 }}m used today
+                    </template>
+                </span>
+            </div>
         </section>
 
         <section v-if="visible('notifications')" class="card p-4 space-y-3 break-inside-avoid mb-4">

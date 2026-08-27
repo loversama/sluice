@@ -85,3 +85,47 @@ export function minutesUntilChange(schedule: Schedule | undefined, now: Date): n
     }
     return MINUTES_PER_DAY;
 }
+
+/** A day's mining allowance, and how far past it a drop may be finished. */
+export interface DailyLimit {
+    enabled: boolean;
+    /** Hours per local day. */
+    hours: number;
+}
+
+/**
+ * Minutes of overrun allowed to finish what is already in progress.
+ *
+ * Stopping five minutes short of a drop wastes the whole session's watch time on it - the
+ * reward is all-or-nothing, so a hard cut is not the cautious choice it looks like. Half an
+ * hour covers the tail of a typical tier without meaningfully bending the limit.
+ */
+export const LIMIT_GRACE_MINUTES = 30;
+
+export type LimitVerdict = "allow" | "finishing" | "stop";
+
+/**
+ * Whether the day's allowance still permits mining.
+ *
+ * `remainingOnDrop` is how many more minutes the drop in progress needs, or null when
+ * nothing is in progress - in which case there is nothing to finish and the limit simply
+ * applies.
+ */
+export function dailyLimitVerdict(
+    limit: DailyLimit | undefined,
+    minedMinutes: number,
+    remainingOnDrop: number | null,
+): LimitVerdict {
+    if (!limit?.enabled || !(limit.hours > 0)) return "allow";
+
+    const allowance = limit.hours * 60;
+    if (minedMinutes < allowance) return "allow";
+
+    // Past the limit: keep going only if the drop in hand is genuinely nearly done.
+    if (remainingOnDrop !== null && remainingOnDrop > 0 && remainingOnDrop <= LIMIT_GRACE_MINUTES) {
+        // And only within the grace itself, so a drop that keeps not finishing cannot
+        // extend the day indefinitely.
+        return minedMinutes < allowance + LIMIT_GRACE_MINUTES ? "finishing" : "stop";
+    }
+    return "stop";
+}

@@ -1,4 +1,4 @@
-import type { Schedule } from "./schedule.js";
+import type { DailyLimit, Schedule } from "./schedule.js";
 import { readFile, rename } from "node:fs/promises";
 
 import { writeFileAtomic } from "./atomic-write.js";
@@ -185,6 +185,12 @@ export interface Config {
      * other. Giving each its own hours is how they stop competing.
      */
     schedule: Schedule;
+    /**
+     * A ceiling on how long it mines in a local day, with half an hour of latitude to
+     * finish a drop already in progress - cutting five minutes short of a tier wastes the
+     * whole session's watch time on it, since drops pay all or nothing.
+     */
+    dailyLimit: DailyLimit;
     autoUpdate: boolean;
     desktopNotifications: boolean;
     /**
@@ -231,6 +237,7 @@ export const DEFAULT_CONFIG: Config = {
     allowStreamEmbed: false,
     sidebarMode: "auto",
     schedule: { enabled: false, windows: [] },
+    dailyLimit: { enabled: false, hours: 8 },
     autoUpdate: true,
     desktopNotifications: true,
     desktopNotificationStyle: "native",
