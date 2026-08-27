@@ -12,6 +12,9 @@ const expiresIn = computed(() => {
         return null;
     }
     const seconds = Math.max(0, Math.round((new Date(device.value.expiresAt) - store.now) / 1000));
+    // Zero is a real moment here: the old code has lapsed and the daemon is asking for
+    // another. Saying so beats a dead 0:00 that looks like the app gave up.
+    if (seconds === 0) return null;
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 });
 
@@ -30,7 +33,7 @@ async function copyCode() {
 <template>
     <div class="min-h-full flex items-center justify-center p-6">
         <div class="card p-6 w-full max-w-[420px] text-center">
-            <h1 class="text-[16px] font-semibold">Twitch Drops Bot</h1>
+            <h1 class="text-[16px] font-semibold">Sluice</h1>
             <p class="text-[12px] mt-1 mb-5" :style="{ color: 'var(--text-2)' }">
                 Authorize this bot with your Twitch account
             </p>
@@ -59,7 +62,8 @@ async function copyCode() {
                 </a>
 
                 <p v-if="expiresIn" class="text-[11px] mt-4 tabular" :style="{ color: 'var(--muted)' }">
-                    Code expires in {{ expiresIn }}
+                    <template v-if="expiresIn">Code expires in {{ expiresIn }}</template>
+                    <template v-else>That code expired &mdash; fetching a new one&hellip;</template>
                 </p>
                 <p class="text-[12px] mt-2 pulse" :style="{ color: 'var(--text-2)' }">
                     Waiting for authorization&hellip;

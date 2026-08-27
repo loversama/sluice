@@ -262,7 +262,23 @@ export class AuthState {
      * Run the device code flow, calling `onCode` once the user needs to enter the code.
      * Resolves when the user has approved, or throws if they never do.
      */
-    async authorize(onCode: (verificationUri: string, userCode: string) => void): Promise<void> {
+    async authorize(
+        onCode: (verificationUri: string, userCode: string, expiresInSeconds: number) => void,
+    ): Promise<void> {
+        // Twitch codes lapse after a few minutes. Someone who walks away mid-sign-in comes
+        // back to a dead code and a countdown reading zero, so a fresh one is fetched and
+        // offered rather than leaving them staring at it.
+        for (;;) {
+            const authorised = await this.authorizeOnce(onCode);
+            if (authorised) return;
+            logger.info("Device code expired; requesting another.");
+        }
+    }
+
+    /** One code's worth of the flow. Resolves false if the code lapsed unused. */
+    private async authorizeOnce(
+        onCode: (verificationUri: string, userCode: string, expiresInSeconds: number) => void,
+    ): Promise<boolean> {
         const headers = {
             Accept: "application/json",
             "Accept-Language": "en-US",
@@ -286,7 +302,7 @@ export class AuthState {
         }
         const device = (await deviceResponse.body.json()) as DeviceCodeResponse;
 
-        onCode(device.verification_uri, device.user_code);
+        onCode(device.verification_uri, device.user_code, device.expires_in);
 
         const deadline = Date.now() + device.expires_in * 1000;
         const pollBody = new URLSearchParams({
@@ -316,9 +332,9 @@ export class AuthState {
                 throw new AuthError("Received a token but Twitch rejected it during validation.");
             }
             logger.info(`Logged in as ${this.login}`);
-            return;
+            return true;
         }
 
-        throw new AuthError("Device code expired before it was entered.");
+        return false;
     }
 }

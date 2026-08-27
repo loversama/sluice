@@ -281,12 +281,13 @@ export function createApp(options: AppOptions): AppHandle {
             if (restored) {
                 logger.warn("Stored credentials are no longer valid; logging in again.");
             }
-            await auth.authorize((verificationUri, userCode) => {
+            await auth.authorize((verificationUri, userCode, expiresIn) => {
                 deviceCode = {
                     code: userCode,
                     url: verificationUri,
-                    // Twitch device codes are valid for 30 minutes.
-                    expiresAt: Date.now() + 30 * 60_000,
+                    // Twitch's own lifetime rather than a guess: the countdown on screen has
+                    // to match the code it is counting down, or it lies at one end or both.
+                    expiresAt: Date.now() + expiresIn * 1000,
                 };
                 bus.emit("auth", { status: "pending", device: deviceCode });
                 options.onDeviceCode?.(deviceCode);
