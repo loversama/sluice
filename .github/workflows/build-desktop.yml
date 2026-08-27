@@ -98,8 +98,11 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          SHA=$(gh api /repos/loversama/sluice-releases/git/refs/heads/main --jq .object.sha)
-          gh api -X POST /repos/loversama/sluice-releases/git/refs \
+          # No leading slash: this runs under Git Bash on Windows, which rewrites a
+          # leading-slash argument into a Windows path - /repos/... arrived as
+          # "C:/Program Files/Git/repos/...".
+          SHA=$(gh api repos/loversama/sluice-releases/git/refs/heads/main --jq .object.sha)
+          gh api -X POST repos/loversama/sluice-releases/git/refs \
             -f ref="refs/tags/$TAG" -f sha="$SHA" \
             || echo "Tag $TAG already there; carrying on."
 
