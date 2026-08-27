@@ -677,6 +677,8 @@ export class ApiServer {
             sounds: config.sounds,
             sidebarMode: config.sidebarMode,
             autoUpdate: config.autoUpdate,
+            schedule: config.schedule,
+            outsideSchedule: miner ? !miner.withinSchedule() : false,
             desktopNotifications: config.desktopNotifications,
             desktopNotificationStyle: config.desktopNotificationStyle,
             queue: miner?.getMineableCampaigns().map((campaign) => campaign.id) ?? [],

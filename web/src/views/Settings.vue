@@ -30,6 +30,8 @@ const form = reactive({
     telegramChatId: "",
     discordWebhookUrl: "",
     sidebarMode: "auto",
+    scheduleEnabled: false,
+    scheduleWindows: [],
     autoUpdate: true,
     desktopNotifications: true,
     desktopNotificationStyle: "native",
@@ -48,6 +50,27 @@ const canEmbedAnonymously = supportsAnonymousEmbed();
 const { isCompact } = useViewport();
 
 /** The desktop build injects this bridge; the container build has no such object. */
+const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function addWindow() {
+    form.scheduleWindows.push({ days: [1, 2, 3, 4, 5], from: "18:00", to: "23:00" });
+}
+
+function toggleDay(window, day) {
+    const at = window.days.indexOf(day);
+    if (at === -1) window.days.push(day);
+    else window.days.splice(at, 1);
+    window.days.sort((a, b) => a - b);
+}
+
+/** A window ending before it starts runs overnight, which is worth saying out loud. */
+function windowNote(window) {
+    if (!window.days.length) return "No days selected, so this window never applies.";
+    if (window.from === window.to) return "Start and end are the same, so this window does nothing.";
+    return window.to < window.from ? "Runs overnight, into the following morning." : "";
+}
+
 const update = ref({ status: "idle" });
 const changelogOpen = ref(false);
 const changelog = ref([]);
@@ -302,6 +325,8 @@ watch(
             telegramChatId: config.notifications?.telegram?.chatId ?? "",
             discordWebhookUrl: config.notifications?.discord?.webhookUrl ?? "",
             sidebarMode: config.sidebarMode ?? "auto",
+            scheduleEnabled: config.schedule?.enabled ?? false,
+            scheduleWindows: (config.schedule?.windows ?? []).map((w) => ({ ...w, days: [...w.days] })),
             autoUpdate: config.autoUpdate ?? true,
             desktopNotifications: config.desktopNotifications ?? true,
             desktopNotificationStyle: config.desktopNotificationStyle ?? "native",
@@ -364,6 +389,7 @@ async function save() {
             logLevel: form.logLevel,
             allowStreamEmbed: form.allowStreamEmbed,
             sidebarMode: form.sidebarMode,
+            schedule: { enabled: form.scheduleEnabled, windows: form.scheduleWindows },
             autoUpdate: form.autoUpdate,
             desktopNotifications: form.desktopNotifications,
             desktopNotificationStyle: form.desktopNotificationStyle,
@@ -784,6 +810,94 @@ const inputStyle = {
                 Notifications
             </span>
         </div>
+        <section v-if="visible('mining')" class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                When to mine
+            </h2>
+
+            <label class="flex items-center justify-between gap-4">
+                <span>
+                    <span class="text-[13px]">Only mine at certain times</span>
+                    <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
+                        Twitch only credits one watch session per account, so two copies of
+                        Sluice in two places take turns starving each other. Giving each its
+                        own hours is how they stop competing. Off means mine whenever.
+                    </span>
+                </span>
+                <el-switch v-model="form.scheduleEnabled" />
+            </label>
+
+            <template v-if="form.scheduleEnabled">
+                <p
+                    v-if="!form.scheduleWindows.length"
+                    class="text-[11px]"
+                    :style="{ color: 'var(--warn)' }"
+                >
+                    No hours set yet, so nothing is restricted and it mines as usual. Add a
+                    window below to limit it.
+                </p>
+
+                <div
+                    v-for="(window, index) in form.scheduleWindows"
+                    :key="index"
+                    class="rounded-lg p-3 space-y-2"
+                    :style="{ background: 'var(--surface-2)' }"
+                >
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                        <button
+                            v-for="(label, day) in DAY_LABELS"
+                            :key="day"
+                            class="w-7 h-7 rounded-md text-[11px] font-medium"
+                            :title="DAY_NAMES[day]"
+                            :style="
+                                window.days.includes(day)
+                                    ? { background: 'var(--accent)', color: 'white' }
+                                    : { background: 'var(--surface)', color: 'var(--text-2)' }
+                            "
+                            @click="toggleDay(window, day)"
+                        >
+                            {{ label }}
+                        </button>
+
+                        <button
+                            class="ml-auto px-1.5 text-[13px]"
+                            :style="{ color: 'var(--danger)' }"
+                            title="Remove this window"
+                            @click="form.scheduleWindows.splice(index, 1)"
+                        >&times;</button>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <input
+                            v-model="window.from"
+                            type="time"
+                            class="px-2 py-1.5 rounded-lg text-[12px] outline-none"
+                            :style="inputStyle"
+                        />
+                        <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">until</span>
+                        <input
+                            v-model="window.to"
+                            type="time"
+                            class="px-2 py-1.5 rounded-lg text-[12px] outline-none"
+                            :style="inputStyle"
+                        />
+                    </div>
+
+                    <p v-if="windowNote(window)" class="text-[11px]" :style="{ color: 'var(--muted)' }">
+                        {{ windowNote(window) }}
+                    </p>
+                </div>
+
+                <button
+                    class="px-3 py-1.5 rounded-lg text-[12px]"
+                    :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                    @click="addWindow"
+                >
+                    Add hours
+                </button>
+            </template>
+        </section>
+
         <section v-if="visible('notifications')" class="card p-4 space-y-3 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Telegram</h2>
             <!--

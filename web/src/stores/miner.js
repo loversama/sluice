@@ -29,6 +29,8 @@ export const useMinerStore = defineStore("miner", {
         sounds: { enabled: true, volume: 0.5 },
         /** expanded | collapsed | auto - see config.sidebarMode. */
         sidebarMode: "auto",
+        /** True when the clock, not the campaigns, is why nothing is being mined. */
+        outsideSchedule: false,
         /**
          * What the daemon is doing while there is nothing to show yet. Null once mining
          * has started, or when the dashboard connects to an already-running daemon.
@@ -147,6 +149,7 @@ export const useMinerStore = defineStore("miner", {
             this.allowStreamEmbed = snapshot.allowStreamEmbed ?? false;
             this.sounds = snapshot.sounds ?? this.sounds;
             this.sidebarMode = snapshot.sidebarMode ?? this.sidebarMode;
+            this.outsideSchedule = snapshot.outsideSchedule ?? false;
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
             if (snapshot.mining) this.loading = null;

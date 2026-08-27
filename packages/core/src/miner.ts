@@ -18,6 +18,7 @@ import { loadState, saveState } from "./state.js";
 import { loadClaims, saveClaims, summarise, type ClaimHistory, type ClaimStats } from "./claims.js";
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 import { detectForeignSession, type ProgressSnapshot } from "./foreign-session.js";
+import { isWithinSchedule } from "./schedule.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -209,6 +210,8 @@ export class Miner extends EventEmitter {
     private currentChannel: Channel | null = null;
     private currentDrop: Drop | null = null;
     private foreignSessionAt: number | null = null;
+    /** Whether the schedule allowed mining last time it was looked at, for logging changes. */
+    private scheduleAllowed = true;
     private lastProgressAt = 0;
 
     /** Drop minutes as of the last sweep, for spotting another session earning as us. */
@@ -422,6 +425,22 @@ export class Miner extends EventEmitter {
             notifiedUnlinkedClaims: [...this.notifiedUnlinkedClaims],
             failedClaims: [...this.failedClaimIds],
         });
+    }
+
+    /**
+     * Whether the clock currently allows mining.
+     *
+     * Logged on change rather than every call: this is asked every few seconds, and the
+     * interesting moment is the transition, not the state.
+     */
+    withinSchedule(): boolean {
+        const allowed = isWithinSchedule(this.config.schedule, new Date());
+        if (allowed !== this.scheduleAllowed) {
+            this.scheduleAllowed = allowed;
+            logger.info(allowed ? "Schedule window opened; mining." : "Outside the mining schedule; waiting.");
+            this.pushFeed("info", allowed ? "Schedule window opened" : "Outside the mining schedule");
+        }
+        return allowed;
     }
 
     get isPaused(): boolean {
@@ -764,6 +783,12 @@ export class Miner extends EventEmitter {
         while (!this.stopping) {
             try {
                 if (this.paused) {
+                    await sleep(5_000);
+                    continue;
+                }
+                if (!this.withinSchedule()) {
+                    // Checked here rather than on a timer: the loop already wakes every few
+                    // seconds, and a schedule that takes effect within that is plenty.
                     await sleep(5_000);
                     continue;
                 }
@@ -1251,6 +1276,11 @@ export class Miner extends EventEmitter {
                 const beatStart = Date.now();
                 if (!channel.isOnline) {
                     logger.info(`${channel.displayName} went offline.`);
+                    return;
+                }
+                if (!this.withinSchedule()) {
+                    logger.info("Outside the mining schedule; leaving the channel.");
+                    this.switchRequested = true;
                     return;
                 }
                 if (this.paused) {

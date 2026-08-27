@@ -1,3 +1,4 @@
+import type { Schedule } from "./schedule.js";
 import { readFile, rename } from "node:fs/promises";
 
 import { writeFileAtomic } from "./atomic-write.js";
@@ -177,6 +178,13 @@ export interface Config {
      * notice, and when it does the bot cannot mine until a fix ships. Someone running the
      * installer has no other route to that fix.
      */
+    /**
+     * Hours the miner is allowed to run.
+     *
+     * Twitch credits one watch session per account, so two copies in two places starve each
+     * other. Giving each its own hours is how they stop competing.
+     */
+    schedule: Schedule;
     autoUpdate: boolean;
     desktopNotifications: boolean;
     /**
@@ -222,6 +230,7 @@ export const DEFAULT_CONFIG: Config = {
     holdClaimsWhenUnlinked: false,
     allowStreamEmbed: false,
     sidebarMode: "auto",
+    schedule: { enabled: false, windows: [] },
     autoUpdate: true,
     desktopNotifications: true,
     desktopNotificationStyle: "native",

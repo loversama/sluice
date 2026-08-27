@@ -24,6 +24,12 @@ const active = computed(() => Boolean(store.mining && drop.value));
  * next drop picked - some seconds later. Showing the finished drop as though it were still
  * counting up for all of that is the part that reads as stuck.
  */
+/**
+ * Idle because of the clock rather than because there is nothing to do. Worth separating:
+ * one of them is a setting working, the other is a problem.
+ */
+const outsideSchedule = computed(() => store.outsideSchedule === true);
+
 const claimedAndWaiting = computed(() => Boolean(active.value && drop.value?.isClaimed));
 
 const accent = computed(() => (store.isStalled ? "var(--warn)" : "var(--accent)"));
@@ -333,10 +339,14 @@ const idleReason = computed(() => {
             <div v-else class="flex items-center justify-between gap-3">
                 <div class="min-w-0">
                     <h1 class="text-[20px] font-semibold leading-tight">
-                        {{ paused ? "Paused" : "Nothing to mine right now" }}
+                        {{ paused ? "Paused" : outsideSchedule ? "Outside your hours" : "Nothing to mine right now" }}
                     </h1>
                     <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
-                        {{ paused ? "Nothing is being watched or claimed until you resume." : idleReason }}
+                        <template v-if="paused">Nothing is being watched or claimed until you resume.</template>
+                        <template v-else-if="outsideSchedule">
+                            Mining is set to certain hours, and now is not one of them.
+                        </template>
+                        <template v-else>{{ idleReason }}</template>
                     </p>
                 </div>
                 <RouterLink
