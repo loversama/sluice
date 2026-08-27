@@ -2,7 +2,7 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
-import { pinDraggedGame } from "@/lib/ranking.js";
+import { orderDraggedGame } from "@/lib/ranking.js";
 
 /**
  * Dragging the queue into a different order, from either layout.
@@ -41,13 +41,16 @@ export function useQueueOrder() {
     onUnmounted(() => clearTimeout(settleTimer));
 
     /**
-     * Persist a drag by pinning the game that moved - see pinDraggedGame for the rule.
+     * Persist a drag - see orderDraggedGame for the rule.
      *
-     * Refuses to write if the priority list was never loaded. Treating a failed fetch as an
-     * empty list would make the next drag delete every entry the user had.
+     * Writes queueOrder and nothing else. The priority list is the user's own and is never
+     * touched from here.
+     *
+     * Refuses to write if settings were never loaded, since treating a failed fetch as an
+     * empty list would delete an order the user had built up.
      */
     async function onReorder(event) {
-        const existing = store.config?.priorityGames;
+        const existing = store.config?.queueOrder;
         if (!existing) {
             ElMessage.error("Settings have not loaded yet, so the order was not saved.");
             order.value = [...store.upNext];
@@ -63,10 +66,10 @@ export function useQueueOrder() {
         pending.value = true;
         saving.value = true;
 
-        const next = pinDraggedGame(order.value, existing, movedIndex);
+        const next = orderDraggedGame(order.value, existing, movedIndex);
 
         try {
-            await store.saveConfig({ priorityGames: next });
+            await store.saveConfig({ queueOrder: next });
         } catch (error) {
             ElMessage.error(error.message);
             order.value = [...store.upNext];

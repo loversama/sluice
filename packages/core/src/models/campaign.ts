@@ -387,6 +387,8 @@ export type PriorityMode =
 
 export interface RankingOptions {
     priorityGames: string[];
+    /** Games dragged in the queue, ranked below the priority list and above the mode. */
+    queueOrder?: string[];
     mode?: PriorityMode;
     /**
      * Stable random keys by campaign ID, for "random" mode. Regenerated each refresh so the
@@ -441,6 +443,17 @@ export function compareCampaigns(a: Campaign, b: Campaign, options: RankingOptio
     const rankDelta = priorityRank(a, priorityGames) - priorityRank(b, priorityGames);
     if (rankDelta !== 0) {
         return rankDelta;
+    }
+
+    // Then anything the user has dragged. It sits under the curated list because that list
+    // is a deliberate statement about which games matter, where a drag is only a statement
+    // about what should come next.
+    const dragged = options.queueOrder ?? [];
+    if (dragged.length) {
+        const draggedDelta = priorityRank(a, dragged) - priorityRank(b, dragged);
+        if (draggedDelta !== 0) {
+            return draggedDelta;
+        }
     }
 
     // A campaign whose reward cannot be delivered is worth less than one that can, whatever

@@ -639,6 +639,7 @@ export class Miner extends EventEmitter {
         const mode = this.config.priorityMode;
         return {
             priorityGames: this.config.priorityGames,
+            queueOrder: this.config.queueOrder,
             mode,
             randomKeys: this.randomKeys,
             focusGameId: this.currentCampaign?.gameId ?? null,

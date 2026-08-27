@@ -426,3 +426,37 @@ describe("compareCampaigns with deferrals", () => {
         expect(withMap[0]).toBe("a");
     });
 });
+
+/**
+ * The queue order is stored apart from the priority list, and ranks below it: the list is a
+ * deliberate statement about which games matter, a drag only about what should come next.
+ */
+describe("compareCampaigns with a dragged queue order", () => {
+    const rank = (options: RankingOptions, ...campaigns: Campaign[]) =>
+        [...campaigns].sort((a, b) => compareCampaigns(a, b, options)).map((c) => c.id);
+
+    const make = (id: string, game: string) =>
+        new Campaign(makeCampaign({ id, game: { id: `g-${id}`, name: game, boxArtURL: "" } }));
+
+    const rust = make("rust", "Rust");
+    const apex = make("apex", "Apex Legends");
+    const dota = make("dota", "Dota 2");
+
+    it("orders games the user dragged", () => {
+        expect(rank({ priorityGames: [], queueOrder: ["Dota 2", "Rust"] }, rust, apex, dota))
+            .toEqual(["dota", "rust", "apex"]);
+    });
+
+    it("still puts the curated list first", () => {
+        // Dragging must not be able to outrank a game the user deliberately listed.
+        expect(rank({ priorityGames: ["Apex Legends"], queueOrder: ["Rust"] }, rust, apex))
+            .toEqual(["apex", "rust"]);
+    });
+
+    it("changes nothing when nothing has been dragged", () => {
+        const withEmpty = rank({ priorityGames: ["Rust"], queueOrder: [] }, rust, apex, dota);
+        const without = rank({ priorityGames: ["Rust"] }, rust, apex, dota);
+
+        expect(withEmpty).toEqual(without);
+    });
+});

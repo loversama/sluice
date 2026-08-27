@@ -28,6 +28,16 @@ export interface Config {
      * An empty list means "any game with an active campaign".
      */
     priorityGames: string[];
+    /**
+     * Games moved by dragging the queue, in the order they were put.
+     *
+     * Separate from the priority list on purpose. The priority list is curated by hand and
+     * means "I want these games"; dragging the queue means "not that one first", which is a
+     * smaller statement and should not silently enrol a game into a list the user is
+     * keeping. An earlier version wrote drags into priorityGames and put fifty-odd games
+     * there in one gesture.
+     */
+    queueOrder: string[];
     /** Games to never mine, whatever the priority mode says. */
     excludedGames: string[];
     /**
@@ -219,6 +229,7 @@ export interface Config {
 
 export const DEFAULT_CONFIG: Config = {
     priorityGames: [],
+    queueOrder: [],
     excludedGames: [],
     priorityMode: "ending_soonest",
     libraryPolicy: "ownedOrListed",
