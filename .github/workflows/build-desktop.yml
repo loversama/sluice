@@ -125,7 +125,10 @@ jobs:
         run: |
           REPO=loversama/sluice-releases
           shopt -s globstar nullglob
-          FILES=(packages/desktop/release/**/*.exe packages/desktop/release/**/*.blockmap packages/desktop/release/**/latest.yml)
+          # The installer and its metadata only. A recursive glob also swept up the
+          # unpacked build - a 210MB Sluice.exe and elevate.exe - which are inputs to the
+          # installer, not things anyone should download.
+          FILES=(packages/desktop/release/*.exe packages/desktop/release/*.blockmap packages/desktop/release/latest.yml)
 
           # latest.yml is what the updater reads. Without it a release installs but never
           # offers an update, and nothing about it looks wrong - so its absence fails here
