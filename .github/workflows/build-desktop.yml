@@ -106,57 +106,49 @@ jobs:
             -f ref="refs/tags/$TAG" -f sha="$SHA" \
             || echo "Tag $TAG already there; carrying on."
 
-      - name: Build the installer and publish
+      # Built here, uploaded next. electron-builder's own GitHub publisher was doing both,
+      # and across repositories it uploaded the blockmap, skipped the installer and
+      # latest.yml, and still exited 0 - leaving a release that looked published and could
+      # neither be installed nor updated from. Separating them means the upload either
+      # happens or fails loudly.
+      - name: Build the installer
         working-directory: packages/desktop
         shell: bash
-        env:
-          # Writes to the separate releases repo, so the built-in GITHUB_TOKEN - which only
-          # covers this one - is not enough. Needs contents:write on sluice-releases.
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          # Clear any release for this tag first, then retry - the pattern taken from
-          # mt-database-v2, which has been publishing this way for a while.
-          #
-          # electron-builder creates the release, then uploads the installer, the blockmap
-          # and latest.yml to it. If a release for the tag already exists in any state -
-          # left by a failed run, or created twice by electron-builder itself - the uploads
-          # land inconsistently: a first attempt here produced two releases for one tag,
-          # holding a blockmap and nothing else. A release missing its exe is worse than no
-          # release, and one missing latest.yml is worse still, because updating then fails
-          # silently.
-          for attempt in 1 2 3; do
-            echo "Attempt $attempt: clearing any existing release for $TAG"
-            gh release delete "$TAG" --repo loversama/sluice-releases --yes 2>/dev/null || true
-            sleep 2
-            if npx electron-builder --win --publish ${{ steps.publish.outputs.flag }}; then
-              echo "Published on attempt $attempt."
-              exit 0
-            fi
-            echo "Attempt $attempt failed; trying again."
-            sleep 5
-          done
-          echo "::error::Could not publish $TAG after three attempts."
-          exit 1
+        run: npx electron-builder --win --publish never
 
-      # electron-builder writes no release body, so a published release arrives blank
-      # unless something fills it. The annotated tag's own message is the obvious source:
-      # it is written at the moment of tagging, by whoever decided what the release is.
-      - name: Put the tag's message in the release notes
+      - name: Publish it
         if: steps.publish.outputs.flag == 'always'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG="${{ github.ref_name }}"
+          REPO=loversama/sluice-releases
+          shopt -s globstar nullglob
+          FILES=(packages/desktop/release/**/*.exe packages/desktop/release/**/*.blockmap packages/desktop/release/**/latest.yml)
+
+          # latest.yml is what the updater reads. Without it a release installs but never
+          # offers an update, and nothing about it looks wrong - so its absence fails here
+          # rather than being discovered months later.
+          if [[ ! " ${FILES[*]} " =~ latest.yml ]]; then
+            echo "::error::latest.yml was not produced; refusing to publish a release nothing can update from."
+            exit 1
+          fi
+
           NOTES=$(git tag -l --format='%(contents)' "$TAG")
           if [[ -z "${NOTES// }" ]]; then
-            echo "::warning::$TAG has no message, so the release notes are empty. Tag with -a next time."
-            exit 0
+            echo "::warning::$TAG has no message, so the notes will be empty. Tag with -a next time."
+            NOTES="Sluice $TAG"
           fi
           printf '%s' "$NOTES" > notes.md
-          gh release edit "$TAG" --repo loversama/sluice-releases --notes-file notes.md \
-            || echo "::warning::Could not set the release notes; the release itself is fine."
+
+          # Start from nothing: a half-populated release left by an earlier attempt is the
+          # exact failure this step exists to avoid.
+          gh release delete "$TAG" --repo "$REPO" --yes 2>/dev/null || true
+          gh release create "$TAG" --repo "$REPO" --title "${TAG#v}" --notes-file notes.md
+          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}"
+
+          echo "Published $TAG with ${#FILES[@]} files."
 
       - name: Keep the installer as an artifact either way
         uses: actions/upload-artifact@v4
