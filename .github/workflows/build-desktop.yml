@@ -33,11 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The guard below compares the tag against the default branch, which needs real
-          # history. The default shallow clone has none, so it refused every tag - including
-          # ones squarely on master.
-          fetch-depth: 0
-        with:
           fetch-depth: 0 # the ancestry check below needs history
 
       - name: Refuse tags that are not on the default branch
