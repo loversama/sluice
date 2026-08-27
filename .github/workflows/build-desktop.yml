@@ -86,6 +86,23 @@ jobs:
             echo "flag=never" >> "$GITHUB_OUTPUT"
           fi
 
+      # electron-builder publishes the installer, then makes a second call to attach
+      # latest.yml - the file the updater actually reads. That call creates a *published*
+      # release, and GitHub refuses to publish one whose tag does not exist in the target
+      # repository. The source tag lives in this repo; the release lives in the other. So
+      # the tag has to exist in both, and it is made here rather than by hand.
+      - name: Mirror the tag into the releases repo
+        if: steps.publish.outputs.flag == 'always'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          SHA=$(gh api /repos/loversama/sluice-releases/git/refs/heads/main --jq .object.sha)
+          gh api -X POST /repos/loversama/sluice-releases/git/refs \
+            -f ref="refs/tags/$TAG" -f sha="$SHA" \
+            || echo "Tag $TAG already there; carrying on."
+
       - name: Build the installer and publish
         working-directory: packages/desktop
         shell: bash
@@ -94,6 +111,24 @@ jobs:
           # covers this one - is not enough. Needs contents:write on sluice-releases.
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: npx electron-builder --win --publish ${{ steps.publish.outputs.flag }}
+
+      # electron-builder writes no release body, so a published release arrives blank
+      # unless something fills it. The annotated tag's own message is the obvious source:
+      # it is written at the moment of tagging, by whoever decided what the release is.
+      - name: Put the tag's message in the release notes
+        if: steps.publish.outputs.flag == 'always'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          NOTES=$(git tag -l --format='%(contents)' "$TAG")
+          if [[ -z "${NOTES// }" ]]; then
+            echo "::warning::$TAG has no message, so the release notes are empty. Tag with -a next time."
+            exit 0
+          fi
+          printf '%s' "$NOTES" > notes.md
+          gh release edit "$TAG" --repo loversama/sluice-releases --notes-file notes.md
 
       - name: Keep the installer as an artifact either way
         uses: actions/upload-artifact@v4
