@@ -51,6 +51,7 @@ export function wireMinerToBus(deps: {
         });
     });
     miner.on("drop-claimed", ({ drop, campaign }) => {
+        publishStats();
         bus.emit("drop-claimed", {
             dropId: drop.id,
             campaignId: campaign.id,
@@ -77,10 +78,22 @@ export function wireMinerToBus(deps: {
             url: deliverable ? null : campaign.accountLinkUrl,
         });
     });
+    /**
+     * The totals beside the claim list.
+     *
+     * They are derived from claim history rather than stored, and only ever travelled in a
+     * full snapshot - so a claim appeared in the list while "62 drops" beside it stayed at
+     * 61 until something unrelated caused a refetch.
+     */
+    const publishStats = (): void => {
+        bus.emit("stats", miner?.getClaimStats() ?? null);
+    };
+
     miner.on("loading", (payload) => {
         bus.emit("loading", payload);
     });
     miner.on("campaign-completed", (campaign) => {
+        publishStats();
         bus.emit("campaign-completed", {
             campaignId: campaign.id,
             name: campaign.name,

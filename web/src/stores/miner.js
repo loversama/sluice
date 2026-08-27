@@ -308,6 +308,12 @@ export const useMinerStore = defineStore("miner", {
                 }
             });
 
+            // The totals are recomputed by the daemon on every claim; without this they sat
+            // beside a list that had already moved on.
+            on("stats", (payload) => {
+                this.stats = payload ?? this.stats;
+            });
+
             on("loading", (payload) => {
                 if (payload.background) {
                     this.refreshing = payload.phase !== "ready";
