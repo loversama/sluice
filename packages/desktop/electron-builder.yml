@@ -26,6 +26,17 @@ extraResources:
 asar: true
 compression: maximum
 
+# No spaces in the file name, ever.
+#
+# The default is "Sluice Setup 0.4.2.exe", and electron-builder writes that to disk while
+# recording the URL-safe "Sluice-Setup-0.4.2.exe" in latest.yml. Its own publisher uploads
+# under the sanitised name so the two agree; publishing with `gh` instead uploads the name
+# on disk, and GitHub turns the spaces into dots. The updater then asks for the hyphenated
+# name, gets a 404, and reports that it cannot download the update - which is how 0.4.1 and
+# 0.4.2 both shipped unable to update themselves. Naming it this way leaves nothing for
+# anything to sanitise.
+artifactName: ${productName}-Setup-${version}.${ext}
+
 win:
   icon: resources/icon.ico
   target:

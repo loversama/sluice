@@ -174,7 +174,24 @@ jobs:
             exit 1
           fi
 
-          echo "Published $TAG with ${#FILES[@]} files."
+          # The updater reads latest.yml, then asks for the file it names. If GitHub is
+          # holding that file under any other name the download 404s, the update fails, and
+          # nothing about the release looks wrong from the outside - which is exactly how
+          # 0.4.1 and 0.4.2 both shipped unable to update themselves.
+          WANTED=$(sed -n 's/^path: *//p' "$DIR/latest.yml" | tr -d '\r')
+          if [[ -z "$WANTED" ]]; then
+            echo "::error::latest.yml has no path: entry, so nothing can be verified."
+            gh release delete "$TAG" --repo "$REPO" --yes || true
+            exit 1
+          fi
+          if ! gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -qxF "$WANTED"; then
+            echo "::error::latest.yml points at '$WANTED', which is not among the published assets:"
+            gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
+            gh release delete "$TAG" --repo "$REPO" --yes || true
+            exit 1
+          fi
+
+          echo "Published $TAG with ${#FILES[@]} files; the updater will fetch $WANTED."
 
       # "Either way" needs saying out loud: without this the step is skipped whenever an
       # earlier one fails, which is precisely when a built installer is worth keeping.

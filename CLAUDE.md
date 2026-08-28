@@ -100,6 +100,17 @@ within a couple of hours — or immediately via **Settings → Check now**.
 `latest.yml` is what the updater reads. If it is missing from a release's assets, updating
 silently does nothing, and the release looks fine from the outside.
 
+**The name in `latest.yml` must match the uploaded asset exactly.** electron-builder writes
+the installer to disk with spaces and records the URL-safe hyphenated name in `latest.yml`;
+its own publisher uploads under the sanitised name, so the two agree. This repository
+publishes with `gh` instead, which uploads the name on disk — and GitHub converts spaces to
+dots. The updater then asks for `Sluice-Setup-X.Y.Z.exe`, GitHub has `Sluice.Setup.X.Y.Z.exe`,
+and the download 404s. Both 0.4.1 and 0.4.2 shipped that way and could not update themselves.
+
+Two things prevent it now: `artifactName` in `electron-builder.yml` removes the spaces at
+source, and the publish step checks the `path:` in `latest.yml` against the release's asset
+list, deleting the release if they disagree. Do not "simplify" either one away.
+
 ## Verifying desktop changes
 
 `electron-vite` transpiles the main process without checking types, so `tsc -b` passing at
