@@ -127,17 +127,30 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           REPO=loversama/sluice-releases
-          shopt -s globstar nullglob
-          # The installer and its metadata only. A recursive glob also swept up the
+          shopt -s nullglob
+          # electron-builder writes into a directory named for the version, so everything is
+          # one level below release/. A recursive glob reaches it, but also sweeps up the
           # unpacked build - a 210MB Sluice.exe and elevate.exe - which are inputs to the
-          # installer, not things anyone should download.
-          FILES=(packages/desktop/release/*.exe packages/desktop/release/*.blockmap packages/desktop/release/latest.yml)
+          # installer rather than things anyone should download.
+          DIR="packages/desktop/release/${TAG#v}"
 
           # latest.yml is what the updater reads. Without it a release installs but never
           # offers an update, and nothing about it looks wrong - so its absence fails here
           # rather than being discovered months later.
-          if [[ ! " ${FILES[*]} " =~ latest.yml ]]; then
-            echo "::error::latest.yml was not produced; refusing to publish a release nothing can update from."
+          #
+          # Tested as a file on disk. The previous version looked for the name in the list
+          # of paths, and a path with no wildcard in it is in that list whether the file
+          # exists or not, so the check passed on a directory that held nothing at all.
+          if [[ ! -f "$DIR/latest.yml" ]]; then
+            echo "::error::$DIR/latest.yml was not produced; refusing to publish a release nothing can update from."
+            echo "What the build actually left behind:"
+            ls -R packages/desktop/release || true
+            exit 1
+          fi
+
+          FILES=("$DIR"/*.exe "$DIR"/*.blockmap "$DIR/latest.yml")
+          if [[ ${#FILES[@]} -lt 3 ]]; then
+            echo "::error::expected an installer, its blockmap and latest.yml; found: ${FILES[*]}"
             exit 1
           fi
 
@@ -152,16 +165,28 @@ jobs:
           # exact failure this step exists to avoid.
           gh release delete "$TAG" --repo "$REPO" --yes 2>/dev/null || true
           gh release create "$TAG" --repo "$REPO" --title "${TAG#v}" --notes-file notes.md
-          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}"
+          # A release is created before it can be uploaded to, so a failed upload leaves a
+          # published release with no installer in it. Take it back down rather than leave
+          # that standing.
+          if ! gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}"; then
+            echo "::error::upload failed; removing the empty release it would have left behind."
+            gh release delete "$TAG" --repo "$REPO" --yes || true
+            exit 1
+          fi
 
           echo "Published $TAG with ${#FILES[@]} files."
 
+      # "Either way" needs saying out loud: without this the step is skipped whenever an
+      # earlier one fails, which is precisely when a built installer is worth keeping.
       - name: Keep the installer as an artifact either way
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sluice-windows
+          # One level down, which is the directory named for the version. Two levels down
+          # is win-unpacked, whose 210MB Sluice.exe is an input to the installer.
           path: |
-            packages/desktop/release/**/*.exe
-            packages/desktop/release/**/*.blockmap
-            packages/desktop/release/**/latest.yml
+            packages/desktop/release/*/*.exe
+            packages/desktop/release/*/*.blockmap
+            packages/desktop/release/*/latest.yml
           if-no-files-found: warn
