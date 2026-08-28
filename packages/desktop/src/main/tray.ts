@@ -1,4 +1,5 @@
-import { app, Menu, Tray, nativeImage, type BrowserWindow } from "electron";
+import { app, Menu, Tray, nativeImage, nativeTheme, type BrowserWindow } from "electron";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,11 +13,55 @@ import type { AppHandle } from "@sluice/core";
  */
 let tray: Tray | null = null;
 
-function iconPath(): string {
+function resource(name: string): string {
     const here = dirname(fileURLToPath(import.meta.url));
     return app.isPackaged
-        ? join(process.resourcesPath, "icon.ico")
-        : join(here, "..", "..", "resources", "icon.ico");
+        ? join(process.resourcesPath, name)
+        : join(here, "..", "..", "resources", name);
+}
+
+/**
+ * Whether the taskbar is dark, and so whether the white mark or the purple one will be
+ * visible in it.
+ *
+ * Windows keeps the taskbar's theme separate from the one applications follow, and the two
+ * genuinely differ - a Windows 11 machine set to "Custom" can run light applications on a
+ * dark taskbar. `nativeTheme` only knows the application half, so on Windows the registry
+ * gets asked directly and `nativeTheme` is the fallback everywhere else.
+ */
+function taskbarIsDark(): boolean {
+    if (process.platform === "win32") {
+        try {
+            const out = execFileSync(
+                "reg",
+                [
+                    "query",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                    "/v",
+                    "SystemUsesLightTheme",
+                ],
+                { encoding: "utf8", timeout: 2000, windowsHide: true },
+            );
+            const value = /SystemUsesLightTheme\s+REG_DWORD\s+0x(\d+)/i.exec(out);
+            if (value) {
+                return value[1] === "0";
+            }
+        } catch {
+            // No registry value, or reg is unavailable. Fall through to the application theme,
+            // which is right whenever the two are not set apart deliberately.
+        }
+    }
+    return nativeTheme.shouldUseDarkColors;
+}
+
+/** The tray mark in whichever colour the taskbar will actually show. */
+function trayImage(): Electron.NativeImage {
+    return nativeImage.createFromPath(resource(taskbarIsDark() ? "tray-light.ico" : "tray-dark.ico"));
+}
+
+/** The application's own mark, in its own colour. */
+export function appIconPath(): string {
+    return resource("icon.ico");
 }
 
 export interface TrayDeps {
@@ -30,10 +75,19 @@ export function createTray(deps: TrayDeps): void {
     if (tray) {
         return;
     }
-    const image = nativeImage.createFromPath(iconPath());
+    const image = trayImage();
     tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
     tray.setToolTip("Sluice");
     tray.on("double-click", () => deps.showWindow());
+
+    // Someone switching Windows to light mode should not be left with a white mark on a
+    // white taskbar until the next restart.
+    nativeTheme.on("updated", () => {
+        const refreshed = trayImage();
+        if (!refreshed.isEmpty()) {
+            tray?.setImage(refreshed);
+        }
+    });
 
     const render = (): void => {
         const miner = deps.getHandle()?.context.getMiner() ?? null;

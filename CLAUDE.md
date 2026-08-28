@@ -112,3 +112,17 @@ timeout 40 xvfb-run -a node_modules/.bin/electron packages/desktop \
 ```
 
 A clean start logs `Dashboard listening on …` and nothing else.
+
+## Icons
+
+Every icon is generated from `sluice.jpeg` at the repository root:
+
+```bash
+python3 scripts/make-icons.py
+```
+
+It produces the app icon, both tray marks and the dashboard favicon. Edit the source drawing
+and re-run it rather than editing any of the outputs, which are all overwritten.
+
+The tray ships in two colours because Windows themes the taskbar separately from
+applications: white for a dark taskbar, purple for a light one, chosen at run time.

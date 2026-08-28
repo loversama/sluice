@@ -17,6 +17,11 @@ extraResources:
     to: "web"
   - from: "resources/icon.ico"
     to: "icon.ico"
+  # Both tray marks ship: which one is used depends on the taskbar's theme at run time.
+  - from: "resources/tray-light.ico"
+    to: "tray-light.ico"
+  - from: "resources/tray-dark.ico"
+    to: "tray-dark.ico"
 
 asar: true
 compression: maximum

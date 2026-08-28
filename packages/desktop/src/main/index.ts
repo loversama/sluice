@@ -11,7 +11,7 @@ import { isOwnUrl } from "./navigation.js";
 import { ToastOverlay } from "./toasts.js";
 import { IconCache } from "./icon-cache.js";
 import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
-import { createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
+import { appIconPath, createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { importFromDockerData } from "./import-docker.js";
 import { AutoUpdate } from "./auto-update.js";
 
@@ -109,6 +109,9 @@ let updates: AutoUpdate | null = null;
             show: false,
             backgroundColor: "#0e0e10",
             title: "Sluice",
+            // Packaged builds take this from the executable; a development run would
+            // otherwise show Electron's own default.
+            icon: appIconPath(),
             // The header is the title bar. A native one costs ~32px that the compact
             // layout cannot spare, and leaves the app looking like two designs stacked.
             frame: false,
