@@ -1,4 +1,4 @@
-import { app, screen, BrowserWindow, shell, nativeImage, Tray, Menu, dialog, ipcMain, Notification } from "electron";
+import { app, screen, BrowserWindow, shell, Tray, nativeImage, nativeTheme, Menu, dialog, ipcMain, Notification } from "electron";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@sluice/core";
@@ -7,6 +7,7 @@ import { mkdirSync, statSync, renameSync, appendFileSync, existsSync, readFileSy
 import { inspect } from "node:util";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile, readdir, stat, unlink, cp } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 const MAX_BYTES = 5 * 1024 * 1024;
 const ANSI = /\x1b\[[0-9;]*m/g;
 function render(value) {
@@ -321,18 +322,52 @@ function applyLoginItem(enabled) {
   app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"] });
 }
 let tray = null;
-function iconPath() {
+function resource(name) {
   const here = dirname(fileURLToPath(import.meta.url));
-  return app.isPackaged ? join(process.resourcesPath, "icon.ico") : join(here, "..", "..", "resources", "icon.ico");
+  return app.isPackaged ? join(process.resourcesPath, name) : join(here, "..", "..", "resources", name);
+}
+function taskbarIsDark() {
+  if (process.platform === "win32") {
+    try {
+      const out = execFileSync(
+        "reg",
+        [
+          "query",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+          "/v",
+          "SystemUsesLightTheme"
+        ],
+        { encoding: "utf8", timeout: 2e3, windowsHide: true }
+      );
+      const value = /SystemUsesLightTheme\s+REG_DWORD\s+0x(\d+)/i.exec(out);
+      if (value) {
+        return value[1] === "0";
+      }
+    } catch {
+    }
+  }
+  return nativeTheme.shouldUseDarkColors;
+}
+function trayImage() {
+  return nativeImage.createFromPath(resource(taskbarIsDark() ? "tray-light.ico" : "tray-dark.ico"));
+}
+function appIconPath() {
+  return resource("icon.ico");
 }
 function createTray(deps) {
   if (tray) {
     return;
   }
-  const image = nativeImage.createFromPath(iconPath());
+  const image = trayImage();
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
   tray.setToolTip("Sluice");
   tray.on("double-click", () => deps.showWindow());
+  nativeTheme.on("updated", () => {
+    const refreshed = trayImage();
+    if (!refreshed.isEmpty()) {
+      tray?.setImage(refreshed);
+    }
+  });
   const render2 = () => {
     const miner = deps.getHandle()?.context.getMiner() ?? null;
     const paused = miner?.isPaused ?? false;
@@ -571,6 +606,9 @@ if (!app.requestSingleInstanceLock()) {
       show: false,
       backgroundColor: "#0e0e10",
       title: "Sluice",
+      // Packaged builds take this from the executable; a development run would
+      // otherwise show Electron's own default.
+      icon: appIconPath(),
       // The header is the title bar. A native one costs ~32px that the compact
       // layout cannot spare, and leaves the app looking like two designs stacked.
       frame: false,
@@ -836,14 +874,18 @@ ${toast.game}` : toast.name,
           });
         }
       );
-      handle.bus.on("campaign-completed", (payload) => {
-        void announce({
-          kind: "complete",
-          title: "Campaign complete",
-          name: payload.gameName ?? "Campaign complete",
-          game: payload.name ?? null
-        });
-      });
+      handle.bus.on(
+        "campaign-completed",
+        (payload) => {
+          void announce({
+            kind: "complete",
+            title: "Campaign complete",
+            name: payload.gameName ?? "Campaign complete",
+            game: payload.name ?? null,
+            imageUrl: payload.boxArtUrl ?? null
+          });
+        }
+      );
       handle.bus.on("watching", (payload) => {
         const channel = payload?.channel;
         setTrayStatus(
