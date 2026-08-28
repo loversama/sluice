@@ -30,7 +30,10 @@ jobs:
 
       - name: Build the dashboard
         run: npm run build:web
-      - name: Build the desktop bundles
+      - name: Type check the desktop shell
+        run: npm --prefix packages/desktop run typecheck
+
+      - name: Build the desktop shell
         run: npm --prefix packages/desktop run build
 
   docker:

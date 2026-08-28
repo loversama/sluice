@@ -102,16 +102,24 @@ silently does nothing, and the release looks fine from the outside.
 
 ## Verifying desktop changes
 
-The Electron main process is **not type-checked**: it is not in the root `tsconfig`
-references, and `electron-vite` transpiles without checking. `tsc -b` passing says nothing
-about it. Until that is closed, main-process changes want running rather than reading:
+`electron-vite` transpiles the main process without checking types, so `tsc -b` passing at
+the root still says nothing about it. The package now has its own check, which CI runs:
+
+```bash
+npm --prefix packages/desktop run typecheck
+```
+
+That catches the class of bug that shipped twice — the updater crash on launch and the null
+window listener were both plain type errors. It does not catch everything, so main-process
+changes still want running:
 
 ```bash
 timeout 40 xvfb-run -a node_modules/.bin/electron packages/desktop \
   --user-data-dir=/tmp/sluice-check
 ```
 
-A clean start logs `Dashboard listening on …` and nothing else.
+A clean start logs `Dashboard listening on …` and nothing else. Redirect to a file rather
+than piping to `tail`: the run ends on SIGTERM, and a pipe loses the buffered output.
 
 ## Icons
 
