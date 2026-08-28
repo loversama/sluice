@@ -7,6 +7,7 @@ import { useViewport } from "@/lib/viewport.js";
 import { playSound } from "@/lib/sounds.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import { formatDateTime, formatRelative } from "@/lib/format.js";
+import { renderMarkdown, stripTitle } from "@/lib/markdown.js";
 
 const store = useMinerStore();
 
@@ -74,9 +75,9 @@ function windowNote(window) {
 }
 
 const update = ref({ status: "idle" });
-const changelogOpen = ref(false);
 const changelog = ref([]);
 const changelogError = ref("");
+const changelogLoading = ref(false);
 
 const updateLabel = computed(() => {
     const state = update.value;
@@ -93,14 +94,29 @@ async function checkUpdates() {
     await window.desktopBridge?.checkForUpdates?.();
 }
 
-async function toggleChangelog() {
-    changelogOpen.value = !changelogOpen.value;
-    if (!changelogOpen.value || changelog.value.length) return;
+/** Fetched once, the first time the notes are actually on screen. */
+async function loadChangelog() {
+    if (changelogLoading.value || changelog.value.length) return;
 
+    changelogLoading.value = true;
     changelogError.value = "";
-    const result = await window.desktopBridge?.changelog?.();
-    if (result?.ok) changelog.value = result.releases ?? [];
-    else changelogError.value = result?.error ?? "Could not load the release notes.";
+    try {
+        const result = await window.desktopBridge?.changelog?.();
+        if (result?.ok) changelog.value = result.releases ?? [];
+        else changelogError.value = result?.error ?? "Could not load the release notes.";
+    } finally {
+        changelogLoading.value = false;
+    }
+}
+
+/**
+ * One release's notes as HTML.
+ *
+ * The notes are Markdown written for GitHub, so they arrive full of headings, bullets and
+ * bold. Rendered as plain text they read as the punctuation instead of through it.
+ */
+function releaseHtml(release) {
+    return renderMarkdown(stripTitle(release.notes, release.version));
 }
 
 const isDesktop = typeof window !== "undefined" && Boolean(window.desktopBridge);
@@ -111,20 +127,33 @@ const isDesktop = typeof window !== "undefined" && Boolean(window.desktopBridge)
  * tab strip, and a second level of navigation inside a 350px column is worse than scrolling
  * - and the same categories become headings instead.
  */
-const TABS = [
+const TABS = computed(() => [
     { id: "mining", label: "Mining" },
     { id: "notifications", label: "Notifications" },
     { id: "accounts", label: "Accounts" },
+    // Updating is the desktop app's business; the container is updated by pulling an image.
+    ...(isDesktop ? [{ id: "updates", label: "Updates" }] : []),
     { id: "advanced", label: "Advanced" },
-];
+]);
 
-const activeTab = ref(localStorage.getItem("sluice.settingsTab") ?? "mining");
+const stored = localStorage.getItem("sluice.settingsTab");
+// A tab remembered from the desktop app does not exist in a browser, and leaving it
+// selected would show an empty page with no tab highlighted.
+const activeTab = ref(TABS.value.some((tab) => tab.id === stored) ? stored : "mining");
 watch(activeTab, (tab) => localStorage.setItem("sluice.settingsTab", tab));
 
 /** Narrow shows every section; wide shows the open tab's. */
 function visible(tab) {
     return isCompact.value || activeTab.value === tab;
 }
+
+watch(
+    () => isDesktop && visible("updates"),
+    (showing) => {
+        if (showing) void loadChangelog();
+    },
+    { immediate: true },
+);
 
 const testingService = ref("");
 
@@ -1446,17 +1475,17 @@ const inputStyle = {
              are tabs on a wide screen become the same full-bleed bands the compact
              dashboard uses. -->
         <div
-            v-if="isCompact"
+            v-if="isCompact && desktop"
             class="-mx-4 px-4 py-1.5 mb-3"
             :style="{ background: 'var(--surface-2)' }"
         >
             <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
-                Advanced
+                Updates
             </span>
         </div>
-        <section v-if="desktop && visible('advanced')" class="card p-4 space-y-4 break-inside-avoid mb-4">
+        <section v-if="desktop && visible('updates')" class="card p-4 space-y-4 break-inside-avoid mb-4">
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
-                Desktop app
+                Automatic updates
             </h2>
 
             <label class="flex items-center justify-between gap-4">
@@ -1497,35 +1526,60 @@ const inputStyle = {
                 </div>
             </div>
 
-            <div>
-                <button
-                    class="text-[11px] hover:underline"
-                    :style="{ color: 'var(--accent)' }"
-                    @click="toggleChangelog"
-                >
-                    {{ changelogOpen ? "Hide" : "What's new" }}
-                </button>
 
-                <div v-if="changelogOpen" class="mt-2 space-y-3 max-h-[320px] overflow-y-auto scroll-thin pr-1">
-                    <p v-if="changelogError" class="text-[11px]" :style="{ color: 'var(--warn)' }">
-                        {{ changelogError }}
-                    </p>
-                    <p v-else-if="!changelog.length" class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Loading&hellip;
-                    </p>
-                    <div v-for="release in changelog" :key="release.version">
+        </section>
+        <section v-if="desktop && visible('updates')" class="card p-4 space-y-3 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                What&rsquo;s new
+            </h2>
+
+            <div>
+                <p v-if="changelogError" class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                    {{ changelogError }}
+                </p>
+                <p v-else-if="!changelog.length" class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                    {{ changelogLoading ? "Loading…" : "No releases have been published yet." }}
+                </p>
+
+                <div v-else class="space-y-4 max-h-[440px] overflow-y-auto scroll-thin pr-1">
+                    <article v-for="release in changelog" :key="release.version">
                         <div class="flex items-baseline gap-2">
                             <span class="text-[12px] font-semibold">{{ release.version }}</span>
                             <span v-if="release.at" class="text-[10px]" :style="{ color: 'var(--muted)' }">
                                 {{ formatDateTime(release.at) }}
                             </span>
                         </div>
-                        <p class="text-[11px] whitespace-pre-line mt-0.5" :style="{ color: 'var(--text-2)' }">
-                            {{ release.notes || "No notes for this release." }}
+                        <!-- The renderer escapes its input and only ever emits a fixed set of
+                             tags, so notes fetched from GitHub cannot bring markup with them. -->
+                        <div
+                            v-if="release.notes"
+                            class="changelog-body text-[11px] mt-1"
+                            :style="{ color: 'var(--text-2)' }"
+                            v-html="releaseHtml(release)"
+                        ></div>
+                        <p v-else class="text-[11px] mt-1" :style="{ color: 'var(--muted)' }">
+                            No notes for this release.
                         </p>
-                    </div>
+                    </article>
                 </div>
             </div>
+        </section>
+        <!-- In the narrow window everything is on one page, so the categories that
+             are tabs on a wide screen become the same full-bleed bands the compact
+             dashboard uses. -->
+        <div
+            v-if="isCompact"
+            class="-mx-4 px-4 py-1.5 mb-3"
+            :style="{ background: 'var(--surface-2)' }"
+        >
+            <span class="text-[10px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Advanced
+            </span>
+        </div>
+        <section v-if="desktop && visible('advanced')" class="card p-4 space-y-4 break-inside-avoid mb-4">
+            <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">
+                Desktop app
+            </h2>
 
             <label class="flex items-center justify-between gap-4">
                 <span>
@@ -1711,5 +1765,72 @@ const inputStyle = {
     border-radius: 999px;
     font-size: 10px;
     font-weight: 600;
+}
+
+/*
+ * Rendered release notes. Scoped styles do not reach v-html output, so these are written
+ * through :deep() - without it the notes render as unstyled browser defaults, with headings
+ * far larger than anything else on the page.
+ */
+.changelog-body :deep(h3),
+.changelog-body :deep(h4),
+.changelog-body :deep(h5),
+.changelog-body :deep(h6) {
+    margin: 10px 0 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text);
+}
+
+.changelog-body :deep(h3:first-child),
+.changelog-body :deep(h4:first-child),
+.changelog-body :deep(h5:first-child),
+.changelog-body :deep(h6:first-child) {
+    margin-top: 0;
+}
+
+.changelog-body :deep(p) {
+    margin: 0 0 6px;
+    line-height: 1.5;
+}
+
+.changelog-body :deep(ul) {
+    margin: 0 0 6px;
+    padding-left: 14px;
+    list-style: disc;
+}
+
+.changelog-body :deep(li) {
+    margin-bottom: 4px;
+    line-height: 1.5;
+}
+
+.changelog-body :deep(strong) {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.changelog-body :deep(code) {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+}
+
+.changelog-body :deep(a) {
+    color: var(--accent);
+}
+
+.changelog-body :deep(hr) {
+    margin: 8px 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+}
+
+.changelog-body :deep(*:last-child) {
+    margin-bottom: 0;
 }
 </style>
