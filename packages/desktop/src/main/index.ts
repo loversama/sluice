@@ -360,14 +360,18 @@ let updates: AutoUpdate | null = null;
                 },
             );
 
-            handle.bus.on("campaign-completed", (payload: { name?: string; gameName?: string }) => {
-                void announce({
-                    kind: "complete",
-                    title: "Campaign complete",
-                    name: payload.gameName ?? "Campaign complete",
-                    game: payload.name ?? null,
-                });
-            });
+            handle.bus.on(
+                "campaign-completed",
+                (payload: { name?: string; gameName?: string; boxArtUrl?: string | null }) => {
+                    void announce({
+                        kind: "complete",
+                        title: "Campaign complete",
+                        name: payload.gameName ?? "Campaign complete",
+                        game: payload.name ?? null,
+                        imageUrl: payload.boxArtUrl ?? null,
+                    });
+                },
+            );
 
             handle.bus.on("watching", (payload: { channel?: { displayName?: string; game?: string } }) => {
                 const channel = payload?.channel;

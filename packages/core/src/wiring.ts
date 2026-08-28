@@ -98,6 +98,10 @@ export function wireMinerToBus(deps: {
             campaignId: campaign.id,
             name: campaign.name,
             gameName: campaign.gameName,
+            // The game's box art, so a completion is as recognisable as a claim. The
+            // in-app notifier below has always had it; only the bus payload went without,
+            // which left the desktop notification as the one announcement with no picture.
+            boxArtUrl: campaign.boxArtUrl(),
         });
         void notifier.send({
             kind: "complete",
