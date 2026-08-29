@@ -1,4 +1,4 @@
-import { app, screen, BrowserWindow, shell, nativeImage, Tray, nativeTheme, Menu, dialog, ipcMain, Notification } from "electron";
+import { app, screen, BrowserWindow, shell, Tray, nativeImage, nativeTheme, Menu, dialog, ipcMain, Notification } from "electron";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@sluice/core";
@@ -402,8 +402,7 @@ function setTrayStatus(text) {
 }
 function showBalloon(title, content) {
   try {
-    const icon = nativeImage.createFromPath(appIconPath());
-    tray?.displayBalloon({ title, content, ...icon.isEmpty() ? {} : { icon } });
+    tray?.displayBalloon({ title, content, iconType: "none" });
   } catch {
   }
 }
