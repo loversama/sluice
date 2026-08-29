@@ -24,6 +24,9 @@ param(
 # Keep a copy of everything printed here. A failed build scrolls past, or the window closes,
 # and the app's own log is no help because the failure happened before it ever started.
 $transcript = Join-Path $env:TEMP "sluice-run-desktop.log"
+# A second file, because the transcript holds its own open and Tee-Object cannot write to
+# the same path - and even after Stop-Transcript the append silently goes nowhere.
+$appLog = Join-Path $env:TEMP "sluice-app.log"
 try { Start-Transcript -Path $transcript -Force | Out-Null } catch { }
 
 $ErrorActionPreference = "Stop"
@@ -104,18 +107,19 @@ Write-Host @"
     Data lives in:  $env:APPDATA\Sluice
     App log:        $env:APPDATA\@sluice\desktop\logs\desktop.log
     This script:    $transcript
+    Its output:     $appLog
 
     Ctrl+C here closes the app.
 
 "@ -ForegroundColor DarkGray
 
-# Piped through Tee-Object because Start-Transcript does not capture the output of native
-# commands on Windows PowerShell 5.1 - so npm's own errors, which are the ones worth having,
+# Teed to a file of its own, because Start-Transcript does not capture the output of native
+# commands on Windows PowerShell 5.1 - so npm's errors, which are the ones worth having,
 # went to the console and nowhere else.
-npm --prefix packages/desktop run dev 2>&1 | Tee-Object -FilePath $transcript -Append
+npm --prefix packages/desktop run dev 2>&1 | Tee-Object -FilePath $appLog
 
 # Nothing checked this, and nothing followed it, so a crash left the script exiting 0. The
 # wrapper only pauses on a failure, which meant the window closed on the error unread.
 if ($LASTEXITCODE -ne 0) {
-    Die "Sluice exited with code $LASTEXITCODE. The output above is also in $transcript"
+    Die "Sluice exited with code $LASTEXITCODE. The output above is also in $appLog"
 }
