@@ -109,4 +109,13 @@ Write-Host @"
 
 "@ -ForegroundColor DarkGray
 
-npm --prefix packages/desktop run dev
+# Piped through Tee-Object because Start-Transcript does not capture the output of native
+# commands on Windows PowerShell 5.1 - so npm's own errors, which are the ones worth having,
+# went to the console and nowhere else.
+npm --prefix packages/desktop run dev 2>&1 | Tee-Object -FilePath $transcript -Append
+
+# Nothing checked this, and nothing followed it, so a crash left the script exiting 0. The
+# wrapper only pauses on a failure, which meant the window closed on the error unread.
+if ($LASTEXITCODE -ne 0) {
+    Die "Sluice exited with code $LASTEXITCODE. The output above is also in $transcript"
+}
