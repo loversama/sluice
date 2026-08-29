@@ -644,6 +644,11 @@ export class Miner extends EventEmitter {
             randomKeys: this.randomKeys,
             focusGameId: this.currentCampaign?.gameId ?? null,
             deferred: this.deferredCampaigns,
+            // Matches exactly what the dashboard dims, so the order it shows and the
+            // reason it gives for a row being greyed out never disagree.
+            skipped: (campaign) =>
+                !this.isInLibraryScope(campaign) ||
+                this.config.excludedGames.some((game) => this.matchesGame(game, campaign)),
             steamScore:
                 steam && (mode === "steam_playtime" || mode === "steam_recent")
                     ? (campaign) =>

@@ -460,3 +460,82 @@ describe("compareCampaigns with a dragged queue order", () => {
         expect(withEmpty).toEqual(without);
     });
 });
+
+/**
+ * The queue shown on the dashboard is not the list the miner works from: it keeps the
+ * campaigns the policy will pass over, dimmed, so it is clear they exist. They were left
+ * wherever the ranking happened to put them, which put rows that will never be mined above
+ * rows that are genuinely next.
+ */
+describe("campaigns the policy will not mine", () => {
+    const owned = new Campaign(makeCampaign({ id: "owned", game: { id: "1", displayName: "Owned" } }));
+    const unowned = new Campaign(makeCampaign({ id: "unowned", game: { id: "2", displayName: "Unowned" } }));
+    const skipped = (campaign: Campaign) => campaign.id === "unowned";
+
+    it("sorts below one that will be", () => {
+        expect(compareCampaigns(unowned, owned, rank({ skipped }))).toBeGreaterThan(0);
+        expect(compareCampaigns(owned, unowned, rank({ skipped }))).toBeLessThan(0);
+    });
+
+    it("stays below even when it is top of the priority list", () => {
+        // The priority list counts as owned, so this cannot arise from the library policy
+        // alone - but an excluded game can still be named in it, and exclusion wins.
+        const options = rank({ skipped, priorityGames: ["Unowned"] });
+        expect(compareCampaigns(unowned, owned, options)).toBeGreaterThan(0);
+    });
+
+    it("stays below one the user has skipped by hand", () => {
+        // Deferred is "not this one, now"; out of policy is "not at all" - so the deferred
+        // campaign, which will come back around, still ranks first.
+        const options = rank({ skipped, deferred: new Map([["owned", 1]]) });
+        expect(compareCampaigns(unowned, owned, options)).toBeGreaterThan(0);
+    });
+
+    it("orders normally among themselves", () => {
+        const alsoUnowned = new Campaign(
+            makeCampaign({ id: "unowned2", game: { id: "3", displayName: "Other" } }),
+        );
+        const options = rank({
+            skipped: () => true,
+            priorityGames: ["Other"],
+        });
+        expect(compareCampaigns(alsoUnowned, unowned, options)).toBeLessThan(0);
+    });
+
+    it("changes nothing when no predicate is given", () => {
+        expect(compareCampaigns(unowned, owned, rank())).toBe(
+            compareCampaigns(unowned, owned, rank()),
+        );
+        expect(compareCampaigns(owned, unowned, rank({ skipped: () => false }))).toBe(
+            compareCampaigns(owned, unowned, rank()),
+        );
+    });
+});
+
+describe("the queue as the dashboard shows it", () => {
+    it("puts every campaign that will be mined above every one that will not", () => {
+        // The reported symptom: a campaign that would really be mined sitting two rows
+        // below dimmed ones, so the rank numbers beside them meant nothing.
+        const games = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"];
+        const campaigns = games.map(
+            (name, index) =>
+                new Campaign(makeCampaign({ id: name, game: { id: String(index), displayName: name } })),
+        );
+        const unowned = new Set(["Alpha", "Beta", "Delta"]);
+
+        const ordered = [...campaigns].sort((a, b) =>
+            compareCampaigns(a, b, rank({ skipped: (campaign) => unowned.has(campaign.id) })),
+        );
+        const willMine = ordered.map((campaign) => !unowned.has(campaign.id));
+
+        expect(ordered.map((campaign) => campaign.id)).toEqual([
+            "Gamma",
+            "Epsilon",
+            "Alpha",
+            "Beta",
+            "Delta",
+        ]);
+        // No mineable campaign appears after a skipped one.
+        expect(willMine.indexOf(false)).toBeGreaterThan(willMine.lastIndexOf(true));
+    });
+});

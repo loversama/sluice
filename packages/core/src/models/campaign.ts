@@ -411,6 +411,16 @@ export interface RankingOptions {
      * it is top of the priority list would make it look broken.
      */
     deferred?: Map<string, number>;
+    /**
+     * Campaigns the policy will not mine at all, by whatever rule - not owned, or excluded
+     * by hand.
+     *
+     * They sort below everything, because the queue is what will be mined and in what
+     * order, and one that will never be reached does not belong in the middle of it. The
+     * miner filters these out before ranking, so this is inert there; it is the dashboard,
+     * which lists them dimmed for context, that needs them out of the way.
+     */
+    skipped?: (campaign: Campaign) => boolean;
 }
 
 function priorityRank(campaign: Campaign, priorityGames: string[]): number {
@@ -428,9 +438,20 @@ function priorityRank(campaign: Campaign, priorityGames: string[]): number {
 export function compareCampaigns(a: Campaign, b: Campaign, options: RankingOptions): number {
     const { priorityGames, mode = "ending_soonest" } = options;
 
-    // Skipped-by-hand goes last, above every other consideration including the priority
-    // list. Among themselves the earliest skip comes first, so pressing Next repeatedly
-    // walks down the queue instead of shuffling the same few.
+    // Below even a deferred campaign: that one is "not now", this one is "not ever" while
+    // the policy stands. Ranking it any higher puts rows in the queue above campaigns that
+    // really are next, and the numbers beside them stop meaning anything.
+    if (options.skipped) {
+        const skippedA = options.skipped(a);
+        if (skippedA !== options.skipped(b)) {
+            return skippedA ? 1 : -1;
+        }
+    }
+
+    // Skipped-by-hand goes last among the campaigns that will actually be mined, above
+    // every other consideration including the priority list. Among themselves the earliest
+    // skip comes first, so pressing Next repeatedly walks down the queue instead of
+    // shuffling the same few.
     const deferredA = options.deferred?.get(a.id) ?? 0;
     const deferredB = options.deferred?.get(b.id) ?? 0;
     if ((deferredA === 0) !== (deferredB === 0)) {

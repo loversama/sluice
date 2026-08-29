@@ -32,10 +32,10 @@ const queue = computed(() => store.upNext);
 /**
  * Campaigns the ranking puts in the queue but the policy will not let it mine.
  *
- * The queue is ordered by what would be mined first, and the ownership and exclusion
- * filters are applied later - so a library policy of "owned or on my list" left dozens of
- * rows in the list that were never going to be touched. They stay visible, because knowing
- * a campaign exists and is being passed over is useful, but they are dimmed and counted.
+ * They stay visible, because knowing a campaign exists and is being passed over is useful,
+ * but they are dimmed, counted, and ranked below everything that will actually be mined.
+ * They used to be left wherever the ordering happened to put them, which stranded rows that
+ * were genuinely next below rows that were never going to be touched.
  */
 const skipped = computed(
     () => queue.value.filter((campaign) => !campaign.inLibraryScope || campaign.isExcluded).length,
