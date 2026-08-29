@@ -293,7 +293,13 @@ export class AuthState {
         const deviceResponse = await request(OAUTH_DEVICE_URL, {
             method: "POST",
             headers,
-            // An empty scope set is deliberate: drop mining needs no granted scopes.
+            // An empty scope set, which buys less than it appears to.
+    //
+    // This is a first-party client id, and Twitch's private GraphQL authorises those by
+    // client id rather than by scope - which is how the same token goes on to claim channel
+    // points, read the whole inventory and mint playback tokens, none of which a genuinely
+    // scopeless token could do. Treat auth.json as a signed-in mobile session, not as a
+    // narrow API key, and see .gitignore, which has always said so.
             body: new URLSearchParams({ client_id: this.client.clientId, scopes: "" }).toString(),
         });
         if (deviceResponse.statusCode !== 200) {

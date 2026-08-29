@@ -79,6 +79,13 @@ let updates: AutoUpdate | null = null;
     const isOurs = (url: string): boolean => isOwnUrl(url, port);
 
     const openExternally = (url: string): void => {
+        // Checked here as well as at the IPC boundary, because will-navigate reaches this
+        // from anywhere in the window - including the Twitch player frame, which is
+        // somebody else's code running inside ours.
+        if (!/^https?:\/\//i.test(url)) {
+            logger.debug(`Refused to open ${url}`);
+            return;
+        }
         void shell.openExternal(url);
     };
 

@@ -364,5 +364,9 @@ export async function loadConfig(path: string): Promise<Config> {
 
 /** Persist config back to disk after an API edit. */
 export async function saveConfig(path: string, config: Config): Promise<void> {
-    await writeFileAtomic(path, `${JSON.stringify(config, null, 4)}\n`);
+    // Owner-only, as auth.json already was. This file holds the Telegram bot token and the
+    // Discord bot token or webhook - each of which is full control of that bot - and it was
+    // being written at the default mode, readable by any other account on the machine or any
+    // container sharing the data volume.
+    await writeFileAtomic(path, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
 }

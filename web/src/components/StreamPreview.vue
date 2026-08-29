@@ -45,12 +45,17 @@ const showPlayer = computed(() => playing.value && store.allowStreamEmbed && ano
 <template>
     <div class="relative aspect-video overflow-hidden" :style="{ background: 'var(--surface-2)' }">
         <!--
+            No allow-top-navigation in the sandbox: without it an advert in the player can set
+            top.location, which the desktop app reads as a link the user followed and hands to
+            the browser - the popup route, reopened by another door.
+
             credentialless keeps the player signed out. Without it this frame would carry the
             user's twitch.tv cookies and open a second watch session on their account.
         -->
         <iframe
             v-if="showPlayer"
             credentialless
+            sandbox="allow-scripts allow-same-origin allow-popups-to-escape-sandbox"
             :src="embedUrl"
             class="absolute inset-0 w-full h-full"
             allow="autoplay; fullscreen"
