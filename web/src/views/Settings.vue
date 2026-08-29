@@ -615,36 +615,43 @@ const inputStyle = {
 </script>
 
 <template>
-    <div class="space-y-4 max-w-[1100px]">
-        <header class="card p-2 px-3 flex items-baseline justify-between sticky top-0 z-10">
-            <h1 class="text-[13px] font-semibold">Settings</h1>
-            <span class="text-[12px] h-4" :style="{ color: saved ? 'var(--success)' : 'var(--muted)' }">
+    <div class="settings space-y-4">
+        <!-- The tabs sit in the header rather than on a row of their own. They are five
+             short words against the full width of the page, and a strip to themselves cost
+             a whole row of height to say very little. -->
+        <header class="card p-2 px-3 flex items-center gap-3 sticky top-0 z-10">
+            <h1 class="text-[13px] font-semibold shrink-0">Settings</h1>
+
+            <nav v-if="!isCompact" class="flex gap-1 flex-wrap min-w-0">
+                <button
+                    v-for="tab in TABS"
+                    :key="tab.id"
+                    class="px-3 py-1 rounded-lg text-[12px] transition-colors"
+                    :style="
+                        activeTab === tab.id
+                            ? { background: 'var(--accent)', color: 'white' }
+                            : { background: 'var(--surface-2)', color: 'var(--text-2)' }
+                    "
+                    @click="activeTab = tab.id"
+                >
+                    {{ tab.label }}
+                </button>
+            </nav>
+
+            <span
+                class="text-[12px] h-4 shrink-0 ml-auto"
+                :style="{ color: saved ? 'var(--success)' : 'var(--muted)' }"
+            >
                 {{ saved ? "Saved" : "Changes save automatically" }}
             </span>
         </header>
-
-        <nav v-if="!isCompact" class="flex gap-1 flex-wrap">
-            <button
-                v-for="tab in TABS"
-                :key="tab.id"
-                class="px-3 py-1.5 rounded-lg text-[12px] transition-colors"
-                :style="
-                    activeTab === tab.id
-                        ? { background: 'var(--accent)', color: 'white' }
-                        : { background: 'var(--surface)', color: 'var(--text-2)' }
-                "
-                @click="activeTab = tab.id"
-            >
-                {{ tab.label }}
-            </button>
-        </nav>
 
         <!--
             Multi-column rather than a grid: a grid aligns rows to the tallest card, which
             left a short card like Claiming sitting above a large void. Columns let the cards
             pack against each other instead.
         -->
-        <div class="xl:columns-2 xl:gap-4">
+        <div class="settings-columns">
 
         <!-- In the narrow window everything is on one page, so the categories that
              are tabs on a wide screen become the same full-bleed bands the compact
@@ -1832,5 +1839,35 @@ const inputStyle = {
 
 .changelog-body :deep(*:last-child) {
     margin-bottom: 0;
+}
+
+/*
+ * Column count follows the space this page actually has, not the width of the window.
+ *
+ * The two differ by the sidebar, which is 176px expanded and can be collapsed or hidden
+ * entirely - so a viewport breakpoint was measuring the wrong thing and left a 972px column
+ * unsplit at a 1180px window. A container query asks the only question that matters: how
+ * wide is the page.
+ */
+.settings {
+    container-type: inline-size;
+    /* Wide enough for three columns, and a limit past which lines get hard to track. */
+    max-width: 1680px;
+}
+
+.settings-columns {
+    column-gap: 1rem;
+}
+
+@container (min-width: 880px) {
+    .settings-columns {
+        columns: 2;
+    }
+}
+
+@container (min-width: 1420px) {
+    .settings-columns {
+        columns: 3;
+    }
 }
 </style>
