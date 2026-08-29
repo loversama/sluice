@@ -555,7 +555,7 @@ async function test(service) {
     testingService.value = service ?? "";
     try {
         clearTimeout(saveTimer);
-        await persist();
+        await save();
         const body = await store.testNotification(service);
 
         const failed = (body.results ?? []).filter((result) => !result.ok);
