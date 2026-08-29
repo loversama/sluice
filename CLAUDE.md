@@ -25,10 +25,15 @@ Four things have to line up, and the release fails if any of them does not:
 
 So a release is:
 
+**Tag with `--cleanup=verbatim`.** Git's default treats a line beginning with `#` as a
+comment and deletes it, so `### Added` and every other heading is silently stripped out of
+the message — the tag looks fine when written and arrives on the release with its structure
+gone. 0.4.2 and 0.4.3 both shipped that way.
+
 ```bash
 # 1. Bump all three version files to match the tag you are about to make.
 # 2. Commit and push to master.
-git tag -a v0.4.1 -m "Sluice 0.4.1
+git tag -a --cleanup=verbatim v0.4.1 -m "Sluice 0.4.1
 
 Added
 - Game art on the campaign-complete notification.
@@ -62,6 +67,11 @@ One line of context, only if the release needs it.
 ### Fixed
 - **What was broken**, described as the person experiencing it would.
 ```
+
+The workflow reads the message off the annotated tag, strips the subject line and any
+`Claude-Session:` style trailer, and **fails the build** if what is left names the tooling.
+That guard exists because there is no taking it back: by the time anyone reads a release,
+it is already published.
 
 Rules that matter:
 

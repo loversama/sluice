@@ -154,12 +154,38 @@ jobs:
             exit 1
           fi
 
-          NOTES=$(git tag -l --format='%(contents)' "$TAG")
-          if [[ -z "${NOTES// }" ]]; then
-            echo "::warning::$TAG has no message, so the notes will be empty. Tag with -a next time."
-            NOTES="Sluice $TAG"
+          # The notes are the annotated tag's message, and getting hold of it takes care.
+          # actions/checkout leaves behind a lightweight tag pointing at the commit, so
+          # %(contents) quietly returns the commit message instead - which is how a release
+          # came to be published as "Version 0.4.3" followed by a commit trailer. Fetching
+          # the tag object itself is what makes the difference.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if [[ "$(git cat-file -t "$TAG" 2>/dev/null)" != "tag" ]]; then
+            echo "::error::$TAG is not an annotated tag, and its message is the release notes."
+            exit 1
           fi
-          printf '%s' "$NOTES" > notes.md
+
+          # Drop the subject line, which repeats the title GitHub already shows, and any
+          # trailer, which belongs in git history rather than in notes people read.
+          git tag -l --format='%(contents)' "$TAG" \
+            | sed -e '1{/^Sluice /d}' \
+                  -e '/^[A-Za-z][A-Za-z-]*-Session:/d' \
+                  -e '/^Co-authored-by:/d' \
+                  -e '/^Signed-off-by:/d' \
+            | sed -e '/./,$!d' > notes.md
+
+          if [[ ! -s notes.md ]]; then
+            echo "::error::$TAG has an empty message, so the release would have no notes."
+            exit 1
+          fi
+
+          # A release describes the software, never how it was written. Failing here is the
+          # only reliable guard: by the time anyone reads the notes they are already public.
+          if grep -qiE 'claude|anthropic|copilot|\bLLM\b' notes.md; then
+            echo "::error::the notes name the tooling that produced them. See CLAUDE.md."
+            grep -niE 'claude|anthropic|copilot|\bLLM\b' notes.md
+            exit 1
+          fi
 
           # Start from nothing: a half-populated release left by an earlier attempt is the
           # exact failure this step exists to avoid.
