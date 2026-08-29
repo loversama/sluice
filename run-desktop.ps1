@@ -90,6 +90,19 @@ npx tsc -b
 if ($LASTEXITCODE -ne 0) { Die "TypeScript build failed." }
 
 Step "Building the Electron bundles"
+# A development build ships the "dev" token, which the broker has never issued, so linking
+# Steam from source is refused with "update to the latest release" - advice that cannot be
+# taken here. Drop an issued token in .sluice-client-token and it is used instead. The file
+# is git-ignored; an already-set environment variable wins, so a one-off still works.
+$tokenFile = Join-Path $repo ".sluice-client-token"
+if (-not $env:SLUICE_CLIENT_TOKEN -and (Test-Path $tokenFile)) {
+    $token = (Get-Content $tokenFile -Raw).Trim()
+    if ($token) {
+        $env:SLUICE_CLIENT_TOKEN = $token
+        Note "Using the broker token from .sluice-client-token"
+    }
+}
+
 Step "Checking the Electron binary is the Windows one"
 # npm install run from WSL against this same checkout fetches the Linux build of Electron
 # and overwrites the Windows one - node_modules is shared, the download is not. The failure
