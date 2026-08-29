@@ -24,10 +24,14 @@ function resource(name: string): string {
  * Whether the taskbar is dark, and so whether the white mark or the purple one will be
  * visible in it.
  *
- * Windows keeps the taskbar's theme separate from the one applications follow, and the two
- * genuinely differ - a Windows 11 machine set to "Custom" can run light applications on a
- * dark taskbar. `nativeTheme` only knows the application half, so on Windows the registry
- * gets asked directly and `nativeTheme` is the fallback everywhere else.
+ * White is the answer unless Windows says otherwise in as many words. The taskbar is dark
+ * by default and the white mark is what the app has always shown, so it is the behaviour to
+ * preserve; the purple one exists only for a light taskbar, where white would be invisible.
+ *
+ * Windows keeps the taskbar's theme separate from the one applications follow - a machine
+ * set to "Custom" can run light applications against a dark taskbar - so the taskbar's own
+ * registry value is the only thing worth reading. Anything else, including not being able
+ * to read it at all, leaves the mark white.
  */
 function taskbarIsDark(): boolean {
     if (process.platform === "win32") {
@@ -47,11 +51,11 @@ function taskbarIsDark(): boolean {
                 return value[1] === "0";
             }
         } catch {
-            // No registry value, or reg is unavailable. Fall through to the application theme,
-            // which is right whenever the two are not set apart deliberately.
+            // No registry value, or reg is unavailable. Stay white rather than guess from
+            // the application theme, which is a different setting and can disagree.
         }
     }
-    return nativeTheme.shouldUseDarkColors;
+    return true;
 }
 
 /** The tray mark in whichever colour the taskbar will actually show. */

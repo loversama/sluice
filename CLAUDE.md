@@ -143,5 +143,10 @@ python3 scripts/make-icons.py
 It produces the app icon, both tray marks and the dashboard favicon. Edit the source drawing
 and re-run it rather than editing any of the outputs, which are all overwritten.
 
-The tray ships in two colours because Windows themes the taskbar separately from
-applications: white for a dark taskbar, purple for a light one, chosen at run time.
+The tray mark is **white**, and stays white unless Windows positively reports a light
+taskbar — read from the taskbar's own registry value, which is a different setting from the
+one applications follow. A failed read, or any other platform, keeps it white. The purple
+variant exists only so a light taskbar does not show white on white.
+
+It also generates the NSIS wizard artwork. `installerSidebar.bmp` matters: without it the
+uninstaller's welcome page falls back to `nsis3-metro.bmp`, a stock NSIS graphic.

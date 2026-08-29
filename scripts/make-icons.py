@@ -45,6 +45,13 @@ TRAY_MARGIN = 0.02
 
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
+# NSIS wizard art. The sidebar is a fixed size and must be a BMP: without one the installer
+# falls back to nsis3-metro.bmp, a stock NSIS graphic with nothing to do with this app.
+SIDEBAR = (164, 314)
+
+# The background the sidebar mark sits on, matched to the app's own dark surface.
+SIDEBAR_BACKGROUND = (24, 24, 27)
+
 
 def coverage(source: Image.Image) -> Image.Image:
     """The source's alpha channel, recovered from how far each pixel sits from white."""
@@ -84,6 +91,19 @@ def coloured(alpha: Image.Image, colour: tuple[int, int, int], size: int) -> Ima
     return image
 
 
+def write_sidebar(path: Path, alpha: Image.Image) -> None:
+    """The installer's side panel: the mark centred on a flat background, saved as a BMP."""
+    panel = Image.new("RGB", SIDEBAR, SIDEBAR_BACKGROUND)
+    side = round(min(SIDEBAR) * 0.62)
+    mark = coloured(alpha, PURPLE, side)
+    # Composited rather than pasted with a mask alone, so the antialiased edges blend into
+    # the panel instead of against black.
+    panel.paste(mark, ((SIDEBAR[0] - side) // 2, (SIDEBAR[1] - side) // 2), mark)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    panel.save(path, "BMP")
+    print(f"  {path.relative_to(ROOT)}")
+
+
 def write(path: Path, image: Image.Image, sizes: list[int] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if sizes:
@@ -107,6 +127,11 @@ def main() -> None:
     # one is kept for a light taskbar, where white would be invisible.
     write(DESKTOP / "tray-light.ico", coloured(tray, (255, 255, 255), 256), ICO_SIZES)
     write(DESKTOP / "tray-dark.ico", coloured(tray, PURPLE, 256), ICO_SIZES)
+
+    # The installer wizard. The header icon appears beside every page's title; the sidebar
+    # is the tall panel on the welcome and finish pages.
+    write(DESKTOP / "installerHeaderIcon.ico", coloured(alpha, PURPLE, 256), ICO_SIZES)
+    write_sidebar(DESKTOP / "installerSidebar.bmp", alpha)
 
     # The dashboard, which the container serves to a browser as well.
     write(WEB / "favicon.ico", coloured(alpha, PURPLE, 256), [16, 32, 48])

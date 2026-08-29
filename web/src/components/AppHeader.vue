@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, RouterLink } from "vue-router";
 
 import { useMinerStore } from "@/stores/miner.js";
+import BrandMark from "./BrandMark.vue";
 
 const props = defineProps({
     nav: { type: Array, required: true },
@@ -98,11 +99,11 @@ async function toggleMaximize() {
             title="Collapse or expand the sidebar"
             @click="emit('toggle-sidebar')"
         >
-            <span class="text-[16px]" :style="{ color: 'var(--accent)' }">◈</span>
+            <BrandMark :size="16" :style="{ color: 'var(--accent)' }" class="shrink-0" />
             <span class="text-[13px] font-semibold tracking-tight">Sluice</span>
         </button>
         <div v-else class="flex items-center gap-2 shrink-0">
-            <span class="text-[16px]" :style="{ color: 'var(--accent)' }">◈</span>
+            <BrandMark :size="16" :style="{ color: 'var(--accent)' }" class="shrink-0" />
             <span v-if="!compact" class="text-[13px] font-semibold tracking-tight">Sluice</span>
         </div>
 

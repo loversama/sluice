@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { useMinerStore } from "@/stores/miner.js";
+import BrandMark from "./BrandMark.vue";
 
 const store = useMinerStore();
 const copied = ref(false);
@@ -33,6 +34,7 @@ async function copyCode() {
 <template>
     <div class="min-h-full flex items-center justify-center p-6">
         <div class="card p-6 w-full max-w-[420px] text-center">
+            <BrandMark :size="34" class="mx-auto mb-2" :style="{ color: 'var(--accent)' }" />
             <h1 class="text-[16px] font-semibold">Sluice</h1>
             <p class="text-[12px] mt-1 mb-5" :style="{ color: 'var(--text-2)' }">
                 Authorize this bot with your Twitch account

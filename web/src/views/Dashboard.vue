@@ -2,6 +2,7 @@
 import { computed } from "vue";
 
 import { useMinerStore } from "@/stores/miner.js";
+import BrandMark from "@/components/BrandMark.vue";
 import draggable from "vuedraggable";
 import { useQueueOrder } from "@/composables/useQueueOrder.js";
 import { formatDuration, formatRelative, formatUntil, totalRemainingMinutes } from "@/lib/format.js";
@@ -263,7 +264,7 @@ const deliverableShare = computed(() => {
                 </RouterLink>
 
                 <div v-if="!claims.length" class="text-center py-6">
-                    <p class="text-[22px] mb-1" :style="{ color: 'var(--muted)' }">◆</p>
+                    <BrandMark :size="26" class="mx-auto mb-2" :style="{ color: 'var(--muted)' }" />
                     <p class="text-[12px]" :style="{ color: 'var(--muted)' }">
                         Claimed drops will appear here.
                     </p>
