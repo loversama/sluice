@@ -175,7 +175,11 @@ function dismissSteamOnboarding() {
 function openExternalLinks(event) {
     const anchor = event.target?.closest?.("a[target=_blank]");
     if (!anchor) return;
-    const href = anchor.getAttribute("href");
+    // The resolved URL, not the attribute. "Sign in through Steam" points at
+    // /api/steam/login - a relative path - and testing the raw attribute for a scheme
+    // rejected it, so the click fell through to the window.open the main process refuses
+    // and the button did nothing at all.
+    const href = anchor.href;
     if (!href || !/^https?:\/\//i.test(href)) return;
     event.preventDefault();
     window.desktopBridge.openExternal(href);
