@@ -51,6 +51,7 @@ const RELAYED_EVENTS = [
     "campaign-completed",
     "campaigns",
     "beat",
+    "idle",
     "feed",
     "stats",
     "loading",
@@ -681,6 +682,9 @@ export class ApiServer {
             schedule: config.schedule,
             dailyLimit: config.dailyLimit,
             minedTodayMinutes: miner?.minedTodayMinutes ?? 0,
+            // Carried in the snapshot as well as on the wire, so a reload or a dropped
+            // connection does not leave the page unable to say why nothing is happening.
+            idle: miner?.getIdleState() ?? null,
             outsideSchedule: miner ? !miner.withinSchedule() : false,
             atDailyLimit: miner ? !miner.withinDailyLimit() : false,
             desktopNotifications: config.desktopNotifications,

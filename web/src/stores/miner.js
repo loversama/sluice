@@ -46,6 +46,8 @@ export const useMinerStore = defineStore("miner", {
         refreshing: false,
         auth: { status: "pending", user: null, device: null },
         mining: null,
+        /** Why nothing is being mined, or null while something is. */
+        idle: null,
         queue: [],
         nextRefreshAt: null,
         campaigns: [],
@@ -156,7 +158,10 @@ export const useMinerStore = defineStore("miner", {
             this.minedTodayMinutes = snapshot.minedTodayMinutes ?? 0;
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
+            this.idle = snapshot.idle ?? null;
             if (snapshot.mining) this.loading = null;
+            // A snapshot that reports idleness settles it, whatever a stale event said.
+            if (this.idle) this.loading = null;
             this.queue = snapshot.queue ?? [];
             this.nextRefreshAt = snapshot.nextRefreshAt;
             this.campaigns = snapshot.campaigns ?? [];
@@ -261,6 +266,7 @@ export const useMinerStore = defineStore("miner", {
             on("watching", (payload) => {
                 // Whatever the loading phase said, something is being watched now.
                 this.loading = null;
+                this.idle = null;
                 this.mining = {
                     channel: payload.channel,
                     campaignId: payload.campaignId,
@@ -269,6 +275,24 @@ export const useMinerStore = defineStore("miner", {
                     lastBeatAt: null,
                     lastProgressAt: Date.now(),
                 };
+            });
+
+            /**
+             * Nothing is being mined, and the daemon has said why.
+             *
+             * Clearing `mining` here is the fix for the oldest-looking bug on the page: the
+             * daemon stops watching and says nothing, so the browser keeps the last channel
+             * it saw. With the drop already flagged claimed, that renders as "Claimed -
+             * choosing what to mine next" for as long as the app is left open, with the
+             * heartbeat counting up beside it, until a reload happens to clear it.
+             */
+            on("idle", (payload) => {
+                this.idle = payload ?? null;
+                this.mining = null;
+                // The last background refresh left a "choosing" phase behind that nothing
+                // else will ever resolve, because resolving it took a `watching` event.
+                this.loading = null;
+                this.refreshing = false;
             });
 
             on("beat", (payload) => {

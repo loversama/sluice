@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { idleCopy } from "@/lib/idleCopy.js";
 import StartupProgress from "@/components/StartupProgress.vue";
 import { formatClock, formatDuration } from "@/lib/format.js";
 import StatusChip from "./StatusChip.vue";
@@ -103,16 +104,14 @@ const claimedCount = computed(
     () => campaign.value?.drops.filter((entry) => entry.isClaimed).length ?? 0,
 );
 
-/** Why there is nothing to do, stated concretely rather than as a blank card. */
-const idleReason = computed(() => {
-    if (store.upcomingCampaigns.length > 0) {
-        return `No active campaigns match your priorities - ${store.upcomingCampaigns.length} upcoming.`;
-    }
-    if (store.campaigns.length === 0) {
-        return "No campaigns found yet. Waiting for the first refresh.";
-    }
-    return "Nothing available to mine right now.";
-});
+/**
+ * Why there is nothing to do, as the daemon reported it.
+ *
+ * This used to be guessed here from whatever campaign list the page happened to hold, which
+ * could disagree with the decision the miner had actually made. The daemon now says, and
+ * the wording lives in one module the narrow layout and the tray share.
+ */
+const idle = computed(() => idleCopy(store.idle));
 </script>
 
 <template>
@@ -339,7 +338,7 @@ const idleReason = computed(() => {
             <div v-else class="flex items-center justify-between gap-3">
                 <div class="min-w-0">
                     <h1 class="text-[20px] font-semibold leading-tight">
-                        {{ paused ? "Paused" : store.atDailyLimit ? "Daily limit reached" : outsideSchedule ? "Outside your hours" : "Nothing to mine right now" }}
+                        {{ paused ? "Paused" : store.atDailyLimit ? "Daily limit reached" : outsideSchedule ? "Outside your hours" : idle.title || "Nothing to mine right now" }}
                     </h1>
                     <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
                         <template v-if="paused">Nothing is being watched or claimed until you resume.</template>
@@ -349,7 +348,7 @@ const idleReason = computed(() => {
                         <template v-else-if="outsideSchedule">
                             Mining is set to certain hours, and now is not one of them.
                         </template>
-                        <template v-else>{{ idleReason }}</template>
+                        <template v-else>{{ idle.body || "Nothing available to mine right now." }}</template>
                     </p>
                 </div>
                 <RouterLink

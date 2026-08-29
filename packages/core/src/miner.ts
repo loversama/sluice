@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import logger from "./logger.js";
 import type { Config } from "./config.js";
+import { classifyIdle, sameIdle, type IdleState } from "./idle.js";
 import {
     Campaign,
     compareCampaigns,
@@ -85,6 +86,15 @@ function mentionsDrops(channel: Channel): boolean {
  */
 const CAMPAIGN_DETAIL_CONCURRENCY = 4;
 
+/**
+ * How long the idle wait sleeps before re-checking of its own accord.
+ *
+ * Selection runs against campaigns already held in memory, so a pass costs almost nothing;
+ * this is what catches an upcoming campaign's start time arriving with nobody to announce
+ * it.
+ */
+const IDLE_RECHECK_MS = 60_000;
+
 export interface MinerEvents {
     "campaigns-updated": [Campaign[]];
     "watching": [{ channel: Channel; campaign: Campaign; drop: Drop }];
@@ -93,6 +103,14 @@ export interface MinerEvents {
     "campaign-completed": [Campaign];
     /** Emitted after each accepted watch beat; drives the dashboard heartbeat. */
     beat: [{ at: number }];
+    /**
+     * There is nothing to watch, and why.
+     *
+     * Sent when the situation changes rather than on every pass, and cleared by the next
+     * `watching`. Without it the dashboard cannot tell "between channels" from "finished",
+     * and goes on showing the last thing it saw.
+     */
+    idle: [IdleState];
     /** A drop finished on a campaign the account is not linked to. */
     "unlinked-claim": [{ campaign: Campaign; drop: Drop; held: boolean }];
     /** Progress has been earned on an unlinked campaign that is about to expire. */
@@ -238,6 +256,10 @@ export class Miner extends EventEmitter {
     /** Set when a better campaign appears, so the watch loop yields at its next beat. */
     private switchRequested = false;
     private stopping = false;
+    /** Why there is nothing to mine, or null while watching. */
+    private idleState: IdleState | null = null;
+    /** Resolves the interruptible idle wait early. Set only while that wait is in progress. */
+    private wakeIdle: (() => void) | null = null;
     /** When true, the miner reads and reports but never sends watch beats or claims. */
     dryRun = false;
     /** Paused by the user. Campaigns keep refreshing; nothing is watched or claimed. */
@@ -502,6 +524,8 @@ export class Miner extends EventEmitter {
     }
 
     resume(): void {
+        // Resuming should not wait out an idle sleep begun before the pause.
+        this.wake();
         if (!this.paused) {
             return;
         }
@@ -771,6 +795,8 @@ export class Miner extends EventEmitter {
      * priority edits take effect without a restart.
      */
     applyConfig(config: Config): void {
+        // New settings can make something mineable that was not a moment ago.
+        this.wake();
         const previousInterval = this.config.campaignRefreshMinutes;
         this.config = config;
         this.pushFeed("info", "Configuration updated");
@@ -794,6 +820,70 @@ export class Miner extends EventEmitter {
         // old one. Dragging a game to the top and watching the queue ignore you is the
         // clearest possible way to look broken.
         this.publishRanking();
+    }
+
+    /** Why there is nothing to mine, or null while something is being mined. */
+    getIdleState(): IdleState | null {
+        return this.idleState;
+    }
+
+    /**
+     * Work out why nothing is being mined and say so, if it has changed.
+     *
+     * Announced on change rather than every pass: this runs each time the loop comes up
+     * empty, and a dashboard told the same thing every twenty minutes learns nothing while
+     * a feed full of it hides everything else.
+     */
+    private reportIdle(): void {
+        const next = classifyIdle({
+            campaigns: this.getCampaigns(),
+            eligible: this.selectCampaigns(),
+            isExcluded: (campaign) =>
+                this.config.excludedGames.some((game) => this.matchesGame(game, campaign)),
+        });
+        if (sameIdle(this.idleState, next)) {
+            return;
+        }
+        this.idleState = next;
+        this.emit("idle", next);
+    }
+
+    /**
+     * Wait, but no longer than something interesting takes to happen.
+     *
+     * Capped well below the full interval as well, because the decision is made from
+     * campaigns already in memory: re-checking is nearly free, and it covers the cases
+     * nothing thinks to wake us for, such as a campaign whose start time has simply
+     * arrived.
+     */
+    private async waitWhileIdle(totalMs: number): Promise<void> {
+        const deadline = Date.now() + totalMs;
+        while (!this.stopping && Date.now() < deadline) {
+            const slice = Math.min(IDLE_RECHECK_MS, deadline - Date.now());
+            const woken = await new Promise<boolean>((resolve) => {
+                const timer = setTimeout(() => {
+                    this.wakeIdle = null;
+                    resolve(false);
+                }, slice);
+                this.wakeIdle = () => {
+                    clearTimeout(timer);
+                    this.wakeIdle = null;
+                    resolve(true);
+                };
+            });
+            if (woken) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * Cut the idle wait short, because something changed that could make mining possible.
+     *
+     * Safe to call at any time; it does nothing unless a wait is actually in progress.
+     */
+    wake(): void {
+        this.wakeIdle?.();
     }
 
     /** Every campaign currently known, active and upcoming alike. */
@@ -843,8 +933,13 @@ export class Miner extends EventEmitter {
                 }
                 const worked = await this.runOnce();
                 if (!worked) {
+                    this.reportIdle();
                     logger.info("Nothing to mine right now. Waiting for the next refresh.");
-                    await sleep(this.config.campaignRefreshMinutes * 60_000);
+                    // Interruptible: a campaign starting, a tracked channel coming up, or a
+                    // settings change all make this pass worth retrying, and sitting out a
+                    // twenty-minute sleep to notice is the difference between resuming in
+                    // seconds and resuming after the drop everyone wanted has ended.
+                    await this.waitWhileIdle(this.config.campaignRefreshMinutes * 60_000);
                 }
             } catch (error) {
                 if (error instanceof StaleQueryHashError) {
@@ -861,6 +956,9 @@ export class Miner extends EventEmitter {
 
     stop(): void {
         this.stopping = true;
+        // Otherwise a stop issued during an idle wait leaves a timer holding the process
+        // open for the rest of the interval.
+        this.wake();
         if (this.boundaryTimer) {
             clearTimeout(this.boundaryTimer);
             this.boundaryTimer = null;
@@ -1277,6 +1375,9 @@ export class Miner extends EventEmitter {
      * higher-priority campaign appears.
      */
     private async watch(channel: Channel, campaign: Campaign, drop: Drop): Promise<void> {
+        // Watching again, so whatever idleness was reported is over. The `watching`
+        // event that follows is what tells the dashboard; there is no separate "resumed".
+        this.idleState = null;
         this.currentChannel = channel;
         this.currentDrop = drop;
         this.currentCampaign = campaign;
@@ -1903,7 +2004,9 @@ export class Miner extends EventEmitter {
 
         const current = this.currentCampaign;
         if (!current) {
-            // Idle: the main loop will pick this up on its next pass.
+            // Idle. This is exactly the event worth waking for - the channel is up now, and
+            // waiting out the rest of the refresh interval could miss the whole stream.
+            this.wake();
             return;
         }
 
@@ -2109,6 +2212,9 @@ export class Miner extends EventEmitter {
     }
 
     private async refreshCampaigns(): Promise<void> {
+        // Whatever this finds, the idle loop's decision was made against older data.
+        // Waking is cheap and the recheck is against memory.
+        this.wake();
         const startedAt = Date.now();
         // A sweep that runs while a channel is already being watched is background work -
         // a claim triggers one, and the dashboard announcing "starting up" every time a

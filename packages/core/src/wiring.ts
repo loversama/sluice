@@ -89,6 +89,9 @@ export function wireMinerToBus(deps: {
         bus.emit("stats", miner?.getClaimStats() ?? null);
     };
 
+    miner.on("idle", (payload) => {
+        bus.emit("idle", payload);
+    });
     miner.on("loading", (payload) => {
         bus.emit("loading", payload);
     });

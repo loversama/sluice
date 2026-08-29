@@ -411,6 +411,20 @@ function destroyTray() {
   tray?.destroy();
   tray = null;
 }
+function idleTooltip(idle) {
+  switch (idle?.reason) {
+    case "all_claimed":
+      return "All drops claimed - watching for new campaigns";
+    case "nothing_eligible":
+      return "Nothing matches your settings - watching for new campaigns";
+    case "no_campaigns":
+      return "No campaigns running - watching for new ones";
+    case "no_live_channels":
+      return "Waiting for someone to go live";
+    default:
+      return "Sluice";
+  }
+}
 async function importFromDockerData(win) {
   const picked = await dialog.showOpenDialog(win ?? void 0, {
     title: "Choose the bot's data folder",
@@ -887,6 +901,9 @@ ${toast.game}` : toast.name,
           });
         }
       );
+      handle.bus.on("idle", (payload) => {
+        setTrayStatus(idleTooltip(payload));
+      });
       handle.bus.on("watching", (payload) => {
         const channel = payload?.channel;
         setTrayStatus(

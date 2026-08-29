@@ -12,6 +12,7 @@ import { ToastOverlay } from "./toasts.js";
 import { IconCache } from "./icon-cache.js";
 import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./desktop-settings.js";
 import { appIconPath, createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
+import { idleTooltip } from "./idle-tooltip.js";
 import { importFromDockerData } from "./import-docker.js";
 import { AutoUpdate } from "./auto-update.js";
 
@@ -381,6 +382,12 @@ let updates: AutoUpdate | null = null;
                     });
                 },
             );
+
+            // The tray said "Mining ..." for as long as the app was open, whatever had
+            // happened since - including all night after the last drop was claimed.
+            handle.bus.on("idle", (payload: { reason?: string }) => {
+                setTrayStatus(idleTooltip(payload));
+            });
 
             handle.bus.on("watching", (payload: { channel?: { displayName?: string; game?: string } }) => {
                 const channel = payload?.channel;
