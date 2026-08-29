@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { GameArtCache, exactMatch } from "./game-art.js";
 
 import { loadConfig, saveConfig, DEFAULT_CONFIG, type Config } from "./config.js";
 import logger from "./logger.js";
@@ -93,6 +94,11 @@ export function createApp(options: AppOptions): AppHandle {
     // device ID and user agent, which Twitch reads as a different device on every sign-in.
     const auth = new AuthState();
     const gqlForSearch = new TwitchGql(auth);
+    // Box art for games that have no campaign running. Kept at the data root rather than
+    // per user: which poster Twitch uses for a game is not anybody's private business.
+    const gameArt = new GameArtCache(join(dataDir, "game-art.json"), async (name) =>
+        exactMatch(name, await gqlForSearch.searchGames(name)),
+    );
     const steamLibrary = new SteamLibrary();
 
     let paths: UserPaths | null = null;
@@ -178,6 +184,9 @@ export function createApp(options: AppOptions): AppHandle {
             }
             notifier = new NotifierGroup(next);
             miner?.applyConfig(next);
+            // A game just added to the list has no campaign to learn its art from, so go
+            // and find it. Nothing waits on this.
+            void gameArt.ensure(next.priorityGames);
             if (miner) {
                 bus.emit("campaigns", {
                     campaigns: miner.getCampaigns().map((c) => serializeCampaign(c, next, miner?.ownsPredicate ?? null)),
@@ -188,6 +197,7 @@ export function createApp(options: AppOptions): AppHandle {
         getNotifier: () => notifier,
         getSteamLibrary: () => (steamLibrary.isLoaded ? steamLibrary : null),
         searchGames: (term: string) => gqlForSearch.searchGames(term),
+        getGameArt: () => gameArt.toRecord(),
         connectSteam: async (input) => {
             if (input.provider === "sinfulshadows") {
                 const apiKey = input.sinfulshadowsApiKey ?? config.steam.sinfulshadows.apiKey;
@@ -314,6 +324,9 @@ export function createApp(options: AppOptions): AppHandle {
         };
         notifier = new NotifierGroup(config);
         await steamLibrary.load(paths.steam);
+        await gameArt.load();
+        // Not awaited: a poster is never worth delaying the start of mining for.
+        void gameArt.ensure(config.priorityGames);
         logger.info(`Data for ${auth.login}: ${paths.dir}`);
 
         // Two copies mining one account contradict each other's watch sessions and write

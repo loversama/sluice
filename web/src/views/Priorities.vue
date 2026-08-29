@@ -173,12 +173,23 @@ function campaignCount(game) {
     return "no campaigns right now";
 }
 
-/** Art for a game named in the list, matched against whatever campaigns we know of. */
+/**
+ * Art for a game named in the list.
+ *
+ * Campaigns first, because that art comes with the data already on the page. Failing that,
+ * the daemon's cache: a game can sit on this list for weeks with no campaign running, and
+ * before the cache existed those rows simply had no poster - the art was never missing,
+ * Twitch has it, we had just never asked for the game's id.
+ */
 function artFor(game) {
     const known = knownGames.value.find(
         (entry) => entry.name.toLowerCase() === game.toLowerCase(),
     );
-    return known?.boxArtURL ?? boxArt(known?.id);
+    if (known) {
+        return known.boxArtURL ?? boxArt(known.id);
+    }
+    const cached = store.gameArt?.[game.trim().toLowerCase()];
+    return cached ? (cached.boxArtURL ?? boxArt(cached.id)) : null;
 }
 
 /** Debounced so a fumbled drag does not fire three writes. */

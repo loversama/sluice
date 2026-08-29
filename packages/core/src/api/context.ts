@@ -30,6 +30,8 @@ export interface ServerContext {
     getNotifier(): NotifierGroup;
     getSteamLibrary(): SteamLibrary | null;
     searchGames(term: string): Promise<{ id: string; name: string; boxArtURL: string | null }[]>;
+    /** Box art for games with no campaign running, keyed by lowercased name. */
+    getGameArt(): Record<string, { id: string; name: string; boxArtURL: string | null }>;
     /** Store credentials and pull the library. Returns the number of games found. */
     connectSteam(input: {
         provider?: "direct" | "sinfulshadows";

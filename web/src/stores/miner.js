@@ -48,6 +48,8 @@ export const useMinerStore = defineStore("miner", {
         mining: null,
         /** Why nothing is being mined, or null while something is. */
         idle: null,
+        /** Box art for games with no campaign, keyed by lowercased name. */
+        gameArt: {},
         queue: [],
         nextRefreshAt: null,
         campaigns: [],
@@ -159,6 +161,7 @@ export const useMinerStore = defineStore("miner", {
             this.auth = snapshot.auth;
             this.mining = snapshot.mining;
             this.idle = snapshot.idle ?? null;
+            this.gameArt = snapshot.gameArt ?? this.gameArt;
             if (snapshot.mining) this.loading = null;
             // A snapshot that reports idleness settles it, whatever a stale event said.
             if (this.idle) this.loading = null;

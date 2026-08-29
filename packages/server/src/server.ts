@@ -685,6 +685,8 @@ export class ApiServer {
             // Carried in the snapshot as well as on the wire, so a reload or a dropped
             // connection does not leave the page unable to say why nothing is happening.
             idle: miner?.getIdleState() ?? null,
+            // So a priority game with no campaign still shows its poster.
+            gameArt: this.context.getGameArt(),
             outsideSchedule: miner ? !miner.withinSchedule() : false,
             atDailyLimit: miner ? !miner.withinDailyLimit() : false,
             desktopNotifications: config.desktopNotifications,
