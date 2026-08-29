@@ -705,8 +705,11 @@ const inputStyle = {
                         Your
                         <RouterLink to="/priorities" class="underline" :style="{ color: 'var(--accent)' }">priority list</RouterLink>
                         always counts as owned &mdash; that is how you include anything Steam
-                        cannot see, like an Epic or console title, or a category such as
-                        &ldquo;Special Events&rdquo;.
+                        cannot see, like an Epic or console title. Twitch&rsquo;s own
+                        categories, such as &ldquo;Special Events&rdquo;, are always mined:
+                        they are not games, so there is nothing to own, and their rewards are
+                        badges and emotes Twitch grants directly. Exclude them by name if you
+                        would rather not.
                     </span>
                 </span>
                 <select v-model="form.libraryPolicy" class="px-2 py-1.5 rounded-lg text-[12px] outline-none shrink-0 max-w-[210px]" :style="inputStyle">

@@ -539,3 +539,40 @@ describe("the queue as the dashboard shows it", () => {
         expect(willMine.indexOf(false)).toBeGreaterThan(willMine.lastIndexOf(true));
     });
 });
+
+/**
+ * "Special Events" is a Twitch category, not a game. Nobody can own it on Steam, so a
+ * library policy of "only games I own" answered the ownership question the only way it
+ * could and hid every campaign in it - a Worlds badge, an esports event - from anyone with
+ * a library connected, with nothing on screen to explain the absence.
+ */
+describe("special categories under a library policy", () => {
+    const special = (id: string, name = "Special Events") =>
+        new Campaign(makeCampaign({ id: "c1", game: { id, displayName: name } }));
+
+    // The real category ids, from twitch/constants.ts.
+    const SPECIAL = "509663";
+    const ALSO_SPECIAL = "509672";
+
+    const ownsNothing = { policy: "ownedOrListed" as const, priorityGames: [], owns: () => false };
+
+    it("mines a special category even though it can never be owned", () => {
+        expect(isInLibraryScope(special(SPECIAL), ownsNothing)).toBe(true);
+        expect(isInLibraryScope(special(ALSO_SPECIAL), ownsNothing)).toBe(true);
+    });
+
+    it("does not need the priority list as a workaround any more", () => {
+        // This is the behaviour being replaced: it used to be the only way in.
+        expect(isInLibraryScope(special(SPECIAL), { ...ownsNothing, priorityGames: [] })).toBe(true);
+    });
+
+    it("goes by the category id, not by what the category is called", () => {
+        // A game that merely calls itself Special Events gets no exemption; the id is what
+        // Twitch actually keys the category on.
+        expect(isInLibraryScope(special("not-special", "Special Events"), ownsNothing)).toBe(false);
+    });
+
+    it("still leaves ordinary games subject to the policy", () => {
+        expect(isInLibraryScope(special("g1", "Rust"), ownsNothing)).toBe(false);
+    });
+});

@@ -362,6 +362,17 @@ export function isInLibraryScope(campaign: Campaign, options: LibraryScopeOption
     if (options.policy !== "ownedOrListed" || !options.owns) {
         return true;
     }
+    // A special category is not a game, so asking whether it is owned is a category error
+    // with only one possible answer. "Special Events" cannot appear in any Steam library,
+    // so restricting mining to owned games hid every campaign in it - a Worlds badge, an
+    // esports event - from anyone with a library connected, with nothing on screen to say
+    // why. Their rewards are badges and emotes, which Twitch grants directly and which no
+    // game licence has any bearing on.
+    //
+    // The excluded list still applies, so anyone who does not want them can say so.
+    if (campaign.isSpecialCategory) {
+        return true;
+    }
     const listed = options.priorityGames.some(
         (game) =>
             game === campaign.gameId || game.toLowerCase() === campaign.gameName.toLowerCase(),
