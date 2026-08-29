@@ -2,7 +2,7 @@ import { request } from "undici";
 
 import logger from "../logger.js";
 import { SteamError, type OwnedGame } from "./client.js";
-import { CLIENT_TOKEN, VERSION } from "../version.js";
+import { clientToken as defaultClientToken, VERSION } from "../version.js";
 
 /**
  * Why a library fetch failed, when the reason changes what the user should do about it.
@@ -128,7 +128,7 @@ export class BrokerProvider implements LibraryProvider {
     constructor(
         private readonly steamId: string,
         private readonly baseUrl: string = DEFAULT_BROKER_BASE_URL,
-        private readonly clientToken: string = CLIENT_TOKEN,
+        private readonly clientToken: string = defaultClientToken(),
     ) {}
 
     private url(path: string): string {

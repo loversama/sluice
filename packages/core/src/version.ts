@@ -21,3 +21,20 @@ export const VERSION = "0.4.3";
  * assignment - that substitution is a one-line replace and should stay one.
  */
 export const CLIENT_TOKEN = "dev";
+
+/**
+ * The token to send, letting a run from source borrow a real one.
+ *
+ * A development build ships "dev", which the broker has never issued, so linking Steam from
+ * source ends in a 426 and the app advising the user to update - advice a developer cannot
+ * take, because no release exists that would help. Setting SLUICE_CLIENT_TOKEN lets a source
+ * run present an issued token without one being committed.
+ *
+ * Safe to pass around: it is not a credential, and an identical value ships inside every
+ * installer. Read here rather than in version.ts's literal above, which the release workflow
+ * rewrites by exact text and must stay a plain one-line assignment.
+ */
+export function clientToken(): string {
+    const supplied = process.env.SLUICE_CLIENT_TOKEN?.trim();
+    return supplied ? supplied : CLIENT_TOKEN;
+}
