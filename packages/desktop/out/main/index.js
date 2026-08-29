@@ -645,7 +645,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     win.webContents.setWindowOpenHandler(({ url }) => {
-      openExternally(url);
+      logger.debug(`Refused a window.open for ${url}`);
       return { action: "deny" };
     });
     win.webContents.on("will-navigate", (event, url) => {
@@ -689,6 +689,13 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("desktop:version", () => VERSION);
     ipcMain.handle("desktop:get-settings", () => readDesktopSettings());
     ipcMain.handle("desktop:set-settings", (_event, next) => writeDesktopSettings(next));
+    ipcMain.handle("desktop:open-external", (_event, url) => {
+      if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+        logger.debug(`Refused to open ${String(url)}`);
+        return;
+      }
+      openExternally(url);
+    });
     ipcMain.handle("desktop:open-logs", async () => {
       await shell.openPath(logDirectory(app.getPath("userData")));
     });

@@ -5,6 +5,8 @@ const bridge = {
   getSettings: () => electron.ipcRenderer.invoke("desktop:get-settings"),
   setSettings: (next) => electron.ipcRenderer.invoke("desktop:set-settings", next),
   openLogsFolder: () => electron.ipcRenderer.invoke("desktop:open-logs"),
+  /** Open a link in the real browser. The window itself refuses every window.open. */
+  openExternal: (url) => electron.ipcRenderer.invoke("desktop:open-external", url),
   importFromDocker: () => electron.ipcRenderer.invoke("desktop:import-docker"),
   updateStatus: () => electron.ipcRenderer.invoke("desktop:update-status"),
   checkForUpdates: () => electron.ipcRenderer.invoke("desktop:check-updates"),

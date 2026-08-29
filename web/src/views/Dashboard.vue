@@ -42,6 +42,16 @@ const skipped = computed(
     () => queue.value.filter((campaign) => !campaign.inLibraryScope || campaign.isExcluded).length,
 );
 
+/**
+ * How many of the queue will actually be mined.
+ *
+ * The count used to be the whole list, dimmed rows included, so a queue of a hundred and
+ * seven campaigns none of which the policy allowed still read as "107 queued" - a number
+ * that looked like plenty of work and meant none. Shown as a fraction only when some are
+ * being passed over, since "107/107" is just noise.
+ */
+const mineable = computed(() => queue.value.length - skipped.value);
+
 const limitedToOwned = computed(() => store.config?.libraryPolicy === "ownedOrListed");
 
 const claims = computed(() => store.claims);
@@ -87,7 +97,9 @@ const deliverableShare = computed(() => {
                         Up next
                     </h2>
                     <RouterLink to="/campaigns" class="text-[11px] hover:underline" :style="{ color: 'var(--text-2)' }">
-                        {{ queue.length }} queued &rarr;
+                        <template v-if="skipped">{{ mineable }}/{{ queue.length }}</template>
+                        <template v-else>{{ queue.length }}</template>
+                        queued &rarr;
                     </RouterLink>
                 </header>
                 <p v-if="queue.length" class="text-[10px] -mt-2 mb-2" :style="{ color: 'var(--muted)' }">

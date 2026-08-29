@@ -163,11 +163,35 @@ function dismissSteamOnboarding() {
     dismissedOnboarding.value = true;
 }
 
+/**
+ * Send our own external links out through the bridge.
+ *
+ * The desktop window refuses every window.open, because it cannot tell a link in this
+ * interface from an advert inside the embedded Twitch player - and the ads were opening
+ * browser tabs. So links that mean to leave are handed over deliberately here instead.
+ *
+ * Only in the desktop app. A browser opens its own tabs perfectly well.
+ */
+function openExternalLinks(event) {
+    const anchor = event.target?.closest?.("a[target=_blank]");
+    if (!anchor) return;
+    const href = anchor.getAttribute("href");
+    if (!href || !/^https?:\/\//i.test(href)) return;
+    event.preventDefault();
+    window.desktopBridge.openExternal(href);
+}
+
 onMounted(async () => {
+    if (window.desktopBridge?.openExternal) {
+        document.addEventListener("click", openExternalLinks);
+    }
     await store.hydrate();
     store.connect();
 });
-onUnmounted(() => store.disconnect());
+onUnmounted(() => {
+    document.removeEventListener("click", openExternalLinks);
+    store.disconnect();
+});
 </script>
 
 <template>
