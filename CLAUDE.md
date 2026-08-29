@@ -132,6 +132,19 @@ timeout 40 xvfb-run -a node_modules/.bin/electron packages/desktop \
 A clean start logs `Dashboard listening on …` and nothing else. Redirect to a file rather
 than piping to `tail`: the run ends on SIGTERM, and a pipe loses the buffered output.
 
+Kill the leftovers afterwards. Under WSL the `timeout` ends the launcher but not the
+`electron.exe` children it started on the Windows side, and those keep a handle on
+`node_modules/electron` — which makes the *next* `npm install` fail with `EACCES` on a
+rename, an error that says nothing about why:
+
+```bash
+powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='electron.exe'\" | Where-Object { \$_.CommandLine -like '*twitch-drops-bot*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }"
+```
+
+Filter on the path. An installed Sluice runs as `Sluice.exe`, not `electron.exe`, so this
+cannot reach a running copy of the app — but a bare `taskkill /im electron.exe` would take
+out every other Electron application on the machine.
+
 ## Icons
 
 Every icon is generated from `sluice.jpeg` at the repository root:
