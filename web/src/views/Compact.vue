@@ -25,6 +25,8 @@ const store = useMinerStore();
 
 const channel = computed(() => store.mining?.channel ?? null);
 const drop = computed(() => store.currentDrop);
+/** The item being earned. It is what people are actually here for, so it gets a picture. */
+const reward = computed(() => drop.value?.rewards?.[0] ?? null);
 const campaign = computed(() => store.currentCampaign);
 
 const progress = computed(() => {
@@ -209,6 +211,18 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                 </div>
 
                 <template v-if="channel">
+                    <!-- The reward's art, as the wide layout shows it. At this width the
+                         panel was all words, and the one thing being worked towards was the
+                         only part of it with a picture available. -->
+                    <div class="flex items-start gap-2.5">
+                        <img
+                            v-if="reward?.imageURL"
+                            :src="reward.imageURL"
+                            :alt="reward.name"
+                            class="w-11 h-11 rounded-lg object-cover shrink-0"
+                            :style="{ background: 'var(--surface-2)' }"
+                        />
+                        <div class="min-w-0 flex-1">
                     <p class="text-[15px] font-semibold leading-tight truncate">{{ channel.game }}</p>
                     <p class="text-[11px] truncate" :style="{ color: 'var(--text-2)' }">
                         {{ channel.displayName }}<template v-if="drop"> &middot; {{ drop.name }}</template>
@@ -244,6 +258,8 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         class="mt-1.5"
                         :href="campaign.accountLinkUrl"
                     />
+                        </div>
+                    </div>
                 </template>
 
                 <template v-else-if="loading || store.loading">

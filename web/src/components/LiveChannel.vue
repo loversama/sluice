@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
 import StreamPreview from "@/components/StreamPreview.vue";
@@ -17,6 +18,28 @@ const collapsed = ref(false);
 const playing = ref(true);
 
 const channel = computed(() => store.mining?.channel ?? null);
+
+/** Whether the live player is chosen, which is a saved setting rather than a view state. */
+const live = computed(() => store.allowStreamEmbed);
+
+/**
+ * The same control the narrow layout has.
+ *
+ * The wide panel only ever offered a Preview/Player button, and only once the live player
+ * was already switched on - so from here there was no way to switch it on at all, and the
+ * setting it depends on lives two pages away. Turning the stream on is the one thing
+ * someone looking at this panel is most likely to want.
+ */
+async function setLive(value) {
+    if (value === store.allowStreamEmbed || (value && !anonymous)) return;
+    try {
+        await store.saveConfig({ allowStreamEmbed: value });
+        store.allowStreamEmbed = value;
+        playing.value = true;
+    } catch (error) {
+        ElMessage.error(error.message);
+    }
+}
 
 /**
  * Time on this streamer without a break, which survives claims and campaign switches - the
@@ -39,21 +62,37 @@ const watchingFor = computed(() => {
             <span class="text-[11px] flex-1 truncate" :style="{ color: 'var(--muted)' }">
                 &mdash; the stream currently being mined
             </span>
-            <button
-                v-if="channel && store.allowStreamEmbed && anonymous"
-                class="text-[11px] hover:underline shrink-0"
-                :style="{ color: 'var(--text-2)' }"
-                @click="playing = !playing"
-            >
-                {{ playing ? "Preview" : "Player" }}
-            </button>
-            <button
-                class="text-[11px] hover:underline"
-                :style="{ color: 'var(--text-2)' }"
-                @click="collapsed = !collapsed"
-            >
-                {{ collapsed ? "Show" : "Hide" }}
-            </button>
+            <div class="flex items-center gap-1 shrink-0">
+                <button
+                    v-for="option in [{ value: false, label: 'Image' }, { value: true, label: 'Live' }]"
+                    :key="option.label"
+                    class="text-[11px] px-1.5 py-0.5 rounded"
+                    :style="
+                        live === option.value
+                            ? { background: 'var(--surface-2)', color: 'var(--text)' }
+                            : { color: 'var(--muted)', opacity: option.value && !anonymous ? 0.4 : 1 }
+                    "
+                    :disabled="option.value && !anonymous"
+                    :title="
+                        option.value
+                            ? anonymous
+                                ? 'Play the stream here, muted, signed out. Does not touch your Twitch session.'
+                                : 'This browser cannot embed the player signed out, so it is not offered.'
+                            : 'Thumbnail from Twitch, refreshed every 30s. No watch session.'
+                    "
+                    @click="setLive(option.value)"
+                >
+                    {{ option.label }}
+                </button>
+                <button
+                    class="text-[11px] pl-1.5 hover:underline"
+                    :style="{ color: 'var(--text-2)' }"
+                    :title="collapsed ? 'Show the stream' : 'Hide the stream to give the lists more room'"
+                    @click="collapsed = !collapsed"
+                >
+                    {{ collapsed ? "Show" : "Hide" }}
+                </button>
+            </div>
         </header>
 
         <template v-if="!collapsed">
@@ -83,7 +122,7 @@ const watchingFor = computed(() => {
                         :style="{ background: 'color-mix(in srgb, var(--danger) 18%, transparent)', color: 'var(--danger)' }"
                     >LIVE</span>
                     <span class="text-[11px] tabular ml-auto shrink-0" :style="{ color: 'var(--text-2)' }">
-                        {{ channel.viewers.toLocaleString() }} viewers
+                        {{ (channel.viewers ?? 0).toLocaleString() }} viewers
                     </span>
                 </div>
                 <p class="text-[11px] line-clamp-2" :style="{ color: 'var(--text-2)' }">
