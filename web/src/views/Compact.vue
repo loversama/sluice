@@ -25,6 +25,14 @@ const store = useMinerStore();
 
 const channel = computed(() => store.mining?.channel ?? null);
 const drop = computed(() => store.currentDrop);
+/**
+ * Rows the policy will pass over, so the count can say how many will actually be mined.
+ * A hundred queued campaigns none of which are eligible read as plenty of work and meant
+ * none of it.
+ */
+const queueSkipped = computed(
+    () => order.value.filter((item) => !item.inLibraryScope || item.isExcluded).length,
+);
 /** The item being earned. It is what people are actually here for, so it gets a picture. */
 const reward = computed(() => drop.value?.rewards?.[0] ?? null);
 const campaign = computed(() => store.currentCampaign);
@@ -390,7 +398,7 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                 Up next
             </span>
             <span v-if="order.length" class="text-[10px] tabular" :style="{ color: 'var(--muted)' }">
-                {{ order.length }}
+                <template v-if="queueSkipped">{{ order.length - queueSkipped }}/</template>{{ order.length }}
             </span>
             <span
                 v-if="order.length"

@@ -21,6 +21,14 @@ param(
     [switch]$KeepDocker
 )
 
+# Keep a copy of everything printed here. A failed build scrolls past, or the window closes,
+# and the app's own log is no help because the failure happened before it ever started.
+$transcript = Join-Path $env:TEMP "sluice-run-desktop.log"
+# A second file, because the transcript holds its own open and Tee-Object cannot write to
+# the same path - and even after Stop-Transcript the append silently goes nowhere.
+$appLog = Join-Path $env:TEMP "sluice-app.log"
+try { Start-Transcript -Path $transcript -Force | Out-Null } catch { }
+
 $ErrorActionPreference = "Stop"
 $repo = $PSScriptRoot
 Set-Location $repo
@@ -82,6 +90,37 @@ npx tsc -b
 if ($LASTEXITCODE -ne 0) { Die "TypeScript build failed." }
 
 Step "Building the Electron bundles"
+# A development build ships the "dev" token, which the broker has never issued, so linking
+# Steam from source is refused with "update to the latest release" - advice that cannot be
+# taken here. Drop an issued token in .sluice-client-token and it is used instead. The file
+# is git-ignored; an already-set environment variable wins, so a one-off still works.
+$tokenFile = Join-Path $repo ".sluice-client-token"
+if (-not $env:SLUICE_CLIENT_TOKEN -and (Test-Path $tokenFile)) {
+    $token = (Get-Content $tokenFile -Raw).Trim()
+    if ($token) {
+        $env:SLUICE_CLIENT_TOKEN = $token
+        Note "Using the broker token from .sluice-client-token"
+    }
+}
+
+Step "Checking the Electron binary is the Windows one"
+# npm install run from WSL against this same checkout fetches the Linux build of Electron
+# and overwrites the Windows one - node_modules is shared, the download is not. The failure
+# that follows is "spawn ...\electron ENOENT", which says nothing about the cause.
+$electronPath = Join-Path $repo "node_modules\electron\path.txt"
+if (Test-Path $electronPath) {
+    $binary = (Get-Content $electronPath -Raw).Trim()
+    if ($binary -ne "electron.exe") {
+        if ([string]::IsNullOrWhiteSpace($binary)) { $binary = "no" }
+        Warn "node_modules holds the $binary build, not electron.exe."
+        Warn "Something ran npm install from WSL or Linux against this folder."
+        Die  "Repair it from Windows: node node_modules\electron\install.js"
+    }
+    Note "electron.exe present."
+} else {
+    Warn "Could not find node_modules\electron\path.txt - skipping the check."
+}
+
 npm --prefix packages/desktop run build
 if ($LASTEXITCODE -ne 0) { Die "The Electron build failed." }
 
@@ -97,10 +136,26 @@ Write-Host @"
       * Starting a second copy focuses the first window.
 
     Data lives in:  $env:APPDATA\Sluice
-    Logs:           $env:APPDATA\Sluice\logs\desktop.log
+    App log:        $env:APPDATA\@sluice\desktop\logs\desktop.log
+    This script:    $transcript
+    Its output:     $appLog
 
     Ctrl+C here closes the app.
 
 "@ -ForegroundColor DarkGray
 
-npm --prefix packages/desktop run dev
+# Run through cmd, with stderr folded into stdout *inside* cmd rather than by PowerShell.
+#
+# This looks roundabout and is not. $ErrorActionPreference is "Stop", and PowerShell turns
+# anything a native command writes to stderr into a terminating error the moment the stream
+# is redirected - so `npm ... 2>&1 |` killed the script on electron-vite's entirely harmless
+# "renderer config is missing" notice. Folding the streams before PowerShell sees them means
+# there is no stderr to object to, while the output still reaches the log and $LASTEXITCODE
+# still reports a genuine failure.
+cmd.exe /c "npm --prefix packages/desktop run dev 2>&1" | Tee-Object -FilePath $appLog
+
+# Nothing checked this, and nothing followed it, so a crash left the script exiting 0. The
+# wrapper only pauses on a failure, which meant the window closed on the error unread.
+if ($LASTEXITCODE -ne 0) {
+    Die "Sluice exited with code $LASTEXITCODE. The output above is also in $appLog"
+}

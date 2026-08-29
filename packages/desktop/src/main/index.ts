@@ -132,8 +132,18 @@ let updates: AutoUpdate | null = null;
         // can see the address bar and their password manager works. An OAuth page inside a
         // chromeless window that looks like this app is exactly what people are told to be
         // suspicious of.
+        // Denied, without exception.
+        //
+        // This used to open whatever was asked for, which meant anything embedded in the
+        // window could open a browser tab - and the stream preview is an iframe of Twitch,
+        // whose ads did exactly that: a click on nothing at all put an amazon-adsystem
+        // tracking URL in the user's browser. There is no way here to tell an ad in a
+        // subframe from a link in our own interface, so nothing is trusted.
+        //
+        // Our own links go through desktop:open-external instead, which is only reachable
+        // from the preload and so only from our own pages.
         win.webContents.setWindowOpenHandler(({ url }) => {
-            openExternally(url);
+            logger.debug(`Refused a window.open for ${url}`);
             return { action: "deny" };
         });
         win.webContents.on("will-navigate", (event, url) => {
@@ -142,10 +152,12 @@ let updates: AutoUpdate | null = null;
                 openExternally(url);
             }
         });
-        // The Steam link is a same-tab navigation to our own /api/steam/login, which then
-        // 302s out to steamcommunity.com - so the redirect leg needs catching too. Steam's
-        // return_to points back at our loopback port, which the external browser can reach,
-        // so the round trip finishes there and the dashboard picks it up over SSE.
+        // The Steam link opens a new window, so the handler above sends the whole round
+        // trip out to the real browser. This catches the same journey started any other
+        // way: a same-tab navigation to our own /api/steam/login is ours, but the 302 it
+        // answers with is not. Steam's return_to points back at our loopback port, which
+        // the external browser can reach, so the trip finishes on the confirmation page
+        // there and the window learns about it over SSE.
         win.webContents.on("will-redirect", (event, url) => {
             if (!isOurs(url)) {
                 event.preventDefault();
@@ -425,6 +437,15 @@ let updates: AutoUpdate | null = null;
         ipcMain.handle("desktop:version", () => VERSION);
         ipcMain.handle("desktop:get-settings", () => readDesktopSettings());
         ipcMain.handle("desktop:set-settings", (_event, next) => writeDesktopSettings(next));
+        // Only our own pages can reach this, and only http(s) leaves by it - a file:// or
+        // javascript: URL handed to the shell is a different kind of problem entirely.
+        ipcMain.handle("desktop:open-external", (_event, url: unknown) => {
+            if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+                logger.debug(`Refused to open ${String(url)}`);
+                return;
+            }
+            openExternally(url);
+        });
         ipcMain.handle("desktop:open-logs", async () => {
             await shell.openPath(logDirectory(app.getPath("userData")));
         });

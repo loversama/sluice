@@ -135,12 +135,12 @@ export function setTrayStatus(text: string): void {
 export function showBalloon(title: string, content: string): void {
     // Windows only; a no-op elsewhere rather than a crash.
     try {
-        // Named explicitly, because a balloon otherwise borrows the tray's icon - and that
-        // one is white, drawn to sit on a dark taskbar. In a notification it lands on the
-        // notification's own background and all but disappears. This is the app's mark in
-        // its own colour, which is what belongs beside the app's name.
-        const icon = nativeImage.createFromPath(appIconPath());
-        tray?.displayBalloon({ title, content, ...(icon.isEmpty() ? {} : { icon }) });
+        // No picture. Left to itself a balloon borrows the tray's icon, which is white and
+        // drawn for a dark taskbar, so it all but vanished against the notification. Giving
+        // it the app's mark instead only moved the problem: Windows already shows the app's
+        // icon beside the name, so the mark appeared twice for a message that is one line of
+        // text about where the window went.
+        tray?.displayBalloon({ title, content, iconType: "none" });
     } catch {
         // Some platforms have no balloons. Nothing here is important enough to report.
     }

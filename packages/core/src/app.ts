@@ -15,18 +15,18 @@ import {
 } from "./instance-guard.js";
 import { serializeCampaign } from "./api/serialize.js";
 import { SteamLibrary } from "./steam/library.js";
-import { SteamClient, resolveSteamId } from "./steam/client.js";
-import {
-    DirectSteamProvider,
-    SinfulShadowsProvider,
-    LibraryError,
-    type LibraryProvider,
-} from "./steam/provider.js";
+import { resolveSteamId } from "./steam/client.js";
+import { BrokerProvider, LibraryError } from "./steam/provider.js";
 import { AuthState } from "./twitch/auth.js";
 import { TwitchGql, StaleQueryHashError } from "./twitch/gql.js";
 import { VERSION } from "./version.js";
 import { wireMinerToBus } from "./wiring.js";
-import type { DeviceCodeInfo, ServerContext } from "./api/context.js";
+import type {
+    DeviceCodeInfo,
+    ServerContext,
+    SteamConnectResult,
+    SteamState,
+} from "./api/context.js";
 
 export interface AppOptions {
     /** Root of all persisted state: auth.json and users/<id>/ live beneath it. */
@@ -108,7 +108,9 @@ export function createApp(options: AppOptions): AppHandle {
     let unwire: (() => void) | null = null;
     let authStatus: "pending" | "ok" = "pending";
     let deviceCode: DeviceCodeInfo | null = null;
-    let warnedKeyRejected = false;
+    let steamLastError: { code: string; message: string } | null = null;
+    let warnedClientOutdated = false;
+    let steamRetryTimer: NodeJS.Timeout | null = null;
 
     let stopped = false;
     let logoutRequested: (() => void) | null = null;
@@ -119,22 +121,65 @@ export function createApp(options: AppOptions): AppHandle {
         options.onProblem?.({ level, code, message });
     };
 
-    const buildSteamProvider = (): LibraryProvider => {
-        if (config.steam.provider === "sinfulshadows") {
-            const { apiKey, baseUrl } = config.steam.sinfulshadows;
-            if (!apiKey) {
-                throw new Error("No SinfulShadows API key configured.");
-            }
-            return new SinfulShadowsProvider(apiKey, baseUrl);
-        }
-        const { apiKey, steamId } = config.steam;
-        if (!apiKey) {
-            throw new Error("No Steam API key configured.");
-        }
+    /**
+     * The soonest to try again when a library has never loaded at all.
+     *
+     * Once there is a cached library, a failed refresh costs nothing: mining carries on
+     * ranking against yesterday's copy and the next scheduled refresh picks it up. With no
+     * library at all the whole library policy is inert - every game counts as unowned - so
+     * the gap between a broker hiccup and the next daily refresh is a day of mining the
+     * wrong things. One retry closes that without turning into a poll.
+     *
+     * A floor, not a schedule. The broker's per-minute burst allowance counts every call,
+     * cached ones included, so retrying hard would earn a 429 on top of whatever went
+     * wrong; and when it names a wait of its own, that wins.
+     */
+    const FIRST_LIBRARY_RETRY_MS = 15 * 60_000;
+
+    const buildSteamProvider = (): BrokerProvider => {
+        const { steamId, brokerBaseUrl } = config.steam;
         if (!steamId) {
             throw new Error("No Steam account connected.");
         }
-        return new DirectSteamProvider(new SteamClient(apiKey), steamId);
+        return new BrokerProvider(steamId, brokerBaseUrl);
+    };
+
+    const steamState = (): SteamState => ({
+        linked: config.steam.linked,
+        steamId: config.steam.steamId ?? null,
+        personaName: steamLibrary.personaName || null,
+        gameCount: steamLibrary.size,
+        recencySignal: steamLibrary.isLoaded ? steamLibrary.recencySignal : null,
+        stale: steamLibrary.stale,
+        fetchedAt: steamLibrary.fetchedAt ? new Date(steamLibrary.fetchedAt).toISOString() : null,
+        lastError: steamLastError,
+    });
+
+    /**
+     * Tell the dashboard Steam changed.
+     *
+     * Without this a sign-in that finishes in the external browser leaves the window
+     * showing the old state until something reloads it - and on the desktop build the
+     * browser is where the round trip always ends.
+     */
+    const emitSteam = (): void => {
+        bus.emit("steam", steamState());
+    };
+
+    /** Try again later, once, because there is no library to fall back on. */
+    const scheduleFirstLibraryRetry = (retryAfterSeconds?: number): void => {
+        if (steamRetryTimer || steamLibrary.isLoaded || !config.steam.steamId) {
+            return;
+        }
+        const delay = Math.max(FIRST_LIBRARY_RETRY_MS, (retryAfterSeconds ?? 0) * 1000);
+        steamRetryTimer = setTimeout(() => {
+            steamRetryTimer = null;
+            void refreshSteam()
+                .then(() => miner?.setSteamLibrary(steamLibrary))
+                .catch((error) => {
+                    logger.debug(`Steam library retry failed: ${(error as Error).message}`);
+                });
+        }, delay).unref();
     };
 
     const refreshSteam = async (): Promise<number> => {
@@ -145,22 +190,43 @@ export function createApp(options: AppOptions): AppHandle {
         try {
             const count = await steamLibrary.refresh(provider);
             await steamLibrary.save(paths.steam);
-            warnedKeyRejected = false;
+            steamLastError = null;
+            warnedClientOutdated = false;
+            emitSteam();
             return count;
         } catch (error) {
-            if (error instanceof LibraryError && error.code === "key_invalid" && !warnedKeyRejected) {
-                warnedKeyRejected = true;
+            const failure =
+                error instanceof LibraryError
+                    ? { code: error.code, message: error.message }
+                    : { code: "unavailable", message: (error as Error).message };
+            steamLastError = failure;
+            emitSteam();
+
+            // The one failure the user cannot wait out: this build has been cut off and
+            // will keep failing until it is updated. Said once, not every refresh.
+            if (failure.code === "client_outdated" && !warnedClientOutdated) {
+                warnedClientOutdated = true;
                 await notifier
                     .send({
-                        title: "SinfulShadows key rejected",
+                        title: "Sluice needs updating to read Steam",
                         lines: [
-                            error.message,
-                            `Mining continues on the cached library (${steamLibrary.size} games).`,
+                            failure.message,
+                            steamLibrary.isLoaded
+                                ? `Mining continues on the cached library (${steamLibrary.size} games).`
+                                : "Campaign ranking is running without a Steam library until then.",
                         ],
-                        url: error.actionUrl ?? null,
+                        url: null,
                         kind: "warning",
                     })
                     .catch(() => {});
+            }
+            // Nothing to wait for when the account itself is gone: retrying a 404 on a
+            // timer would spend calls forever on an answer that cannot change until the
+            // user links a different account.
+            if (failure.code !== "profile_not_found") {
+                scheduleFirstLibraryRetry(
+                    error instanceof LibraryError ? error.retryAfterSeconds : undefined,
+                );
             }
             throw error;
         }
@@ -196,52 +262,56 @@ export function createApp(options: AppOptions): AppHandle {
         },
         getNotifier: () => notifier,
         getSteamLibrary: () => (steamLibrary.isLoaded ? steamLibrary : null),
+        getSteamState: steamState,
         searchGames: (term: string) => gqlForSearch.searchGames(term),
         getGameArt: () => gameArt.toRecord(),
-        connectSteam: async (input) => {
-            if (input.provider === "sinfulshadows") {
-                const apiKey = input.sinfulshadowsApiKey ?? config.steam.sinfulshadows.apiKey;
-                if (!apiKey) {
-                    throw new Error("No SinfulShadows API key given.");
-                }
-                const baseUrl = config.steam.sinfulshadows.baseUrl;
-                const identity = await new SinfulShadowsProvider(apiKey, baseUrl).verify();
-                await context.setConfig({
-                    ...config,
-                    steam: {
-                        ...config.steam,
-                        provider: "sinfulshadows",
-                        sinfulshadows: { ...config.steam.sinfulshadows, apiKey },
-                    },
-                });
-                if (!identity.steamLinked) {
-                    throw new Error(
-                        "Key accepted, but no Steam account is linked to it. Link Steam at " +
-                            `${baseUrl}/settings/connections, then refresh.`,
-                    );
-                }
-                warnedKeyRejected = false;
-                return refreshSteam();
-            }
+        connectSteam: async (input): Promise<SteamConnectResult> => {
+            // Throws if the input names nothing Steam recognises, which is the only part of
+            // this the user got wrong rather than something being unavailable.
+            const steamId = await resolveSteamId(input.steamId);
 
-            const apiKey = input.apiKey ?? config.steam.apiKey;
-            const steamId = input.steamId
-                ? await resolveSteamId(input.steamId, apiKey ? new SteamClient(apiKey) : undefined)
-                : config.steam.steamId;
-            if (!steamId) {
-                throw new Error("No Steam account given.");
+            // Whose account it is, before the library, so a link that sticks can still say
+            // who it linked when the library turns out to be private. Two calls rather than
+            // one - the summary is cached and charged separately - which is why this is
+            // done here and nowhere else.
+            const summary = await new BrokerProvider(steamId, config.steam.brokerBaseUrl)
+                .fetchSummary()
+                .catch(() => null);
+
+            // A different account means the games we hold belong to somebody else.
+            if (config.steam.steamId && config.steam.steamId !== steamId) {
+                steamLibrary.clear();
+                miner?.setSteamLibrary(null);
+            }
+            if (summary?.personaName) {
+                steamLibrary.personaName = summary.personaName;
             }
             await context.setConfig({
                 ...config,
-                steam: { ...config.steam, provider: "direct", apiKey, steamId },
+                steam: { ...config.steam, linked: input.via, steamId },
             });
-            if (!apiKey) {
-                throw new Error(
-                    "Account saved. Add a Web API key to read your library - the key is what " +
-                        "grants access to it.",
-                );
+
+            try {
+                const gameCount = await refreshSteam();
+                miner?.setSteamLibrary(steamLibrary);
+                return { personaName: steamLibrary.personaName, gameCount, error: null };
+            } catch (error) {
+                // The link is made and stays made. Reading a library and identifying an
+                // account are separate things, and a private profile fails only the first.
+                const failure =
+                    error instanceof LibraryError
+                        ? { code: error.code, message: error.message }
+                        : { code: "unavailable", message: (error as Error).message };
+                return {
+                    personaName: summary?.personaName ?? steamLibrary.personaName,
+                    gameCount: steamLibrary.size,
+                    error: failure,
+                };
             }
-            return refreshSteam();
+        },
+        skipSteam: async () => {
+            await context.setConfig({ ...config, steam: { ...config.steam, linked: "skipped" } });
+            emitSteam();
         },
         logout: async () => {
             logger.info("Signing out by request.");
@@ -263,16 +333,22 @@ export function createApp(options: AppOptions): AppHandle {
         },
         refreshSteam,
         disconnectSteam: async () => {
+            // The games go with the account. Leaving them behind would keep ownership
+            // gating and playtime ranking running off a library nothing is linked to, and
+            // the dashboard would report a persona for an account it no longer holds.
+            steamLibrary.clear();
+            miner?.setSteamLibrary(null);
+            if (paths) {
+                await rm(paths.steam, { force: true }).catch(() => {});
+            }
+            steamLastError = null;
             await context.setConfig({
                 ...config,
-                steam: {
-                    ...config.steam,
-                    provider: "direct",
-                    apiKey: undefined,
-                    steamId: undefined,
-                    sinfulshadows: { ...config.steam.sinfulshadows, apiKey: undefined },
-                },
+                // Back to null rather than "skipped": disconnecting is not the same as
+                // declining, and the offer to link should come back.
+                steam: { ...config.steam, linked: null, steamId: undefined },
             });
+            emitSteam();
         },
     };
 
@@ -324,6 +400,21 @@ export function createApp(options: AppOptions): AppHandle {
         };
         notifier = new NotifierGroup(config);
         await steamLibrary.load(paths.steam);
+        // Someone who read their library through a SinfulShadows key never had a Steam ID
+        // in their config - the site derived it from the linked account, and the only copy
+        // that reached this machine is the one in steam.json. Adopt it, so the change to a
+        // keyless broker costs them nothing and asks them nothing.
+        if (!config.steam.steamId && !config.steam.linked && steamLibrary.steamId) {
+            config = {
+                ...config,
+                steam: { ...config.steam, linked: "profile", steamId: steamLibrary.steamId },
+            };
+            await saveConfig(paths.config, config);
+            logger.info(
+                `Kept your linked Steam account (${steamLibrary.personaName || steamLibrary.steamId}); ` +
+                    "no key is needed for it any more.",
+            );
+        }
         await gameArt.load();
         // Not awaited: a poster is never worth delaying the start of mining for.
         void gameArt.ensure(config.priorityGames);
@@ -365,18 +456,15 @@ export function createApp(options: AppOptions): AppHandle {
         await miner.loadClaimHistory(paths.claims);
         miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
 
-        const steamConfigured =
-            config.steam.provider === "sinfulshadows"
-                ? Boolean(config.steam.sinfulshadows.apiKey)
-                : Boolean(config.steam.apiKey && config.steam.steamId);
-        if (steamConfigured) {
+        if (config.steam.steamId) {
             const ageHours = (Date.now() - steamLibrary.fetchedAt) / 3_600_000;
             if (!steamLibrary.isLoaded || ageHours >= config.steam.refreshHours) {
                 try {
                     await refreshSteam();
                     miner.setSteamLibrary(steamLibrary);
                 } catch (error) {
-                    // A stale library still ranks better than none, so keep going.
+                    // A stale library still ranks better than none, so keep going. When
+                    // there is no library at all, refreshSteam has already booked a retry.
                     logger.warn(`Could not refresh the Steam library: ${(error as Error).message}`);
                 }
             }
@@ -477,6 +565,10 @@ export function createApp(options: AppOptions): AppHandle {
         },
         async stop(): Promise<void> {
             stopped = true;
+            if (steamRetryTimer) {
+                clearTimeout(steamRetryTimer);
+                steamRetryTimer = null;
+            }
             miner?.stop();
             unwire?.();
             await lock.release();

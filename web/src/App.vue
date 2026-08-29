@@ -8,6 +8,7 @@ import { useViewport } from "@/lib/viewport.js";
 import AuthGate from "@/components/AuthGate.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
+import SteamOnboarding from "@/components/SteamOnboarding.vue";
 import Compact from "@/views/Compact.vue";
 
 const store = useMinerStore();
@@ -135,11 +136,62 @@ watch(
     },
 );
 
+/**
+ * Asked once, as soon as there is an account to ask about.
+ *
+ * The Steam library is what makes ranking and the links page worth anything, and someone
+ * who has just finished signing in to Twitch is exactly who is willing to spend thirty
+ * seconds on it. `linked === null` is the daemon saying the question has never been
+ * answered - not that the answer was no, which is "skipped" and stops this for good.
+ */
+const dismissedOnboarding = ref(false);
+
+const showSteamOnboarding = computed(
+    () =>
+        store.loaded &&
+        store.auth.status === "ok" &&
+        store.steam.linked === null &&
+        !dismissedOnboarding.value,
+);
+
+/**
+ * Dismissing with the X is a "not now" and lasts as long as the page does. Nothing is
+ * persisted for it: the only answer worth remembering is the one given with the Skip
+ * button, and the daemon remembers that.
+ */
+function dismissSteamOnboarding() {
+    dismissedOnboarding.value = true;
+}
+
+/**
+ * Send our own external links out through the bridge.
+ *
+ * The desktop window refuses every window.open, because it cannot tell a link in this
+ * interface from an advert inside the embedded Twitch player - and the ads were opening
+ * browser tabs. So links that mean to leave are handed over deliberately here instead.
+ *
+ * Only in the desktop app. A browser opens its own tabs perfectly well.
+ */
+function openExternalLinks(event) {
+    const anchor = event.target?.closest?.("a[target=_blank]");
+    if (!anchor) return;
+    const href = anchor.getAttribute("href");
+    if (!href || !/^https?:\/\//i.test(href)) return;
+    event.preventDefault();
+    window.desktopBridge.openExternal(href);
+}
+
 onMounted(async () => {
+    if (window.desktopBridge?.openExternal) {
+        document.addEventListener("click", openExternalLinks);
+    }
     await store.hydrate();
     store.connect();
 });
-onUnmounted(() => store.disconnect());
+onUnmounted(() => {
+    document.removeEventListener("click", openExternalLinks);
+    store.disconnect();
+});
 </script>
 
 <template>
@@ -240,5 +292,9 @@ onUnmounted(() => store.disconnect());
             </main>
         </div>
         </div>
+
+        <!-- Last in the tree and fixed-position, so it sits over whichever layout is
+             showing without breaking the v-if/v-else pair above. -->
+        <SteamOnboarding v-if="showSteamOnboarding" @close="dismissSteamOnboarding" />
     </div>
 </template>

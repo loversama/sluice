@@ -1,4 +1,4 @@
-import { app, screen, BrowserWindow, shell, nativeImage, Tray, nativeTheme, Menu, dialog, ipcMain, Notification } from "electron";
+import { app, screen, BrowserWindow, shell, Tray, nativeImage, nativeTheme, Menu, dialog, ipcMain, Notification } from "electron";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { consoleSink, logger, setLogSink, createApp, setLogLevel, VERSION } from "@sluice/core";
@@ -402,8 +402,7 @@ function setTrayStatus(text) {
 }
 function showBalloon(title, content) {
   try {
-    const icon = nativeImage.createFromPath(appIconPath());
-    tray?.displayBalloon({ title, content, ...icon.isEmpty() ? {} : { icon } });
+    tray?.displayBalloon({ title, content, iconType: "none" });
   } catch {
   }
 }
@@ -645,7 +644,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     win.webContents.setWindowOpenHandler(({ url }) => {
-      openExternally(url);
+      logger.debug(`Refused a window.open for ${url}`);
       return { action: "deny" };
     });
     win.webContents.on("will-navigate", (event, url) => {
@@ -689,6 +688,13 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("desktop:version", () => VERSION);
     ipcMain.handle("desktop:get-settings", () => readDesktopSettings());
     ipcMain.handle("desktop:set-settings", (_event, next) => writeDesktopSettings(next));
+    ipcMain.handle("desktop:open-external", (_event, url) => {
+      if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+        logger.debug(`Refused to open ${String(url)}`);
+        return;
+      }
+      openExternally(url);
+    });
     ipcMain.handle("desktop:open-logs", async () => {
       await shell.openPath(logDirectory(app.getPath("userData")));
     });

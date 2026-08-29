@@ -45,6 +45,24 @@ export const useMinerStore = defineStore("miner", {
          */
         refreshing: false,
         auth: { status: "pending", user: null, device: null },
+        /**
+         * Everything known about the Steam link, kept here rather than fetched per page.
+         *
+         * `linked: null` means the question has never been put, which is what raises the
+         * onboarding sheet. It arrives in the snapshot and is replaced wholesale by the
+         * `steam` event - which is the only way the window learns about a sign-in that
+         * finished in an external browser.
+         */
+        steam: {
+            linked: null,
+            steamId: null,
+            personaName: null,
+            gameCount: 0,
+            recencySignal: null,
+            stale: false,
+            fetchedAt: null,
+            lastError: null,
+        },
         mining: null,
         /** Why nothing is being mined, or null while something is. */
         idle: null,
@@ -125,6 +143,12 @@ export const useMinerStore = defineStore("miner", {
             return this.beatAge !== null && this.beatAge < BEAT_TIMEOUT_MS;
         },
 
+        /**
+         * Whether Steam ranking has anything to work with. Not the same as being linked:
+         * a link whose library has never come back ranks exactly like no link at all.
+         */
+        hasSteamLibrary: (state) => state.steam.gameCount > 0,
+
         secondsToRefresh: (state) =>
             state.nextRefreshAt
                 ? Math.max(0, Math.round((new Date(state.nextRefreshAt) - state.now) / 1000))
@@ -159,6 +183,7 @@ export const useMinerStore = defineStore("miner", {
             this.atDailyLimit = snapshot.atDailyLimit ?? false;
             this.minedTodayMinutes = snapshot.minedTodayMinutes ?? 0;
             this.auth = snapshot.auth;
+            this.steam = snapshot.steam ?? this.steam;
             this.mining = snapshot.mining;
             this.idle = snapshot.idle ?? null;
             this.gameArt = snapshot.gameArt ?? this.gameArt;
@@ -264,6 +289,12 @@ export const useMinerStore = defineStore("miner", {
                 if (payload.status === "ok") {
                     this.hydrate();
                 }
+            });
+
+            // Sent whenever the link, the library or the last error changes - including a
+            // sign-in the user completed in a different browser entirely.
+            on("steam", (payload) => {
+                this.steam = payload ?? this.steam;
             });
 
             on("watching", (payload) => {

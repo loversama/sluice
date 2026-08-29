@@ -79,30 +79,42 @@ describe("isCrossOrigin", () => {
     });
 });
 
-describe("listen", () => {
-    /** The bare minimum an ApiServer needs to answer at all. */
-    function context() {
-        const { EventEmitter } = require("node:events") as typeof import("node:events");
-        return {
-            auth: {} as never,
-            version: "test",
-            startedAt: Date.now(),
-            bus: new EventEmitter(),
-            getAuthStatus: () => "pending" as const,
-            getDeviceCode: () => null,
-            getMiner: () => null,
-            getConfig: () => DEFAULT_CONFIG,
-            setConfig: async () => {},
-            getNotifier: () => ({ send: async () => {} }) as never,
-            getSteamLibrary: () => null,
-            searchGames: async () => [],
-            connectSteam: async () => 0,
-            logout: async () => ({ revoked: true }),
-            refreshSteam: async () => 0,
-            disconnectSteam: async () => {},
-        };
-    }
+/** The bare minimum an ApiServer needs to answer at all. */
+function context(overrides: Record<string, unknown> = {}) {
+    const { EventEmitter } = require("node:events") as typeof import("node:events");
+    return {
+        auth: {} as never,
+        version: "test",
+        startedAt: Date.now(),
+        bus: new EventEmitter(),
+        getAuthStatus: () => "pending" as const,
+        getDeviceCode: () => null,
+        getMiner: () => null,
+        getConfig: () => DEFAULT_CONFIG,
+        setConfig: async () => {},
+        getNotifier: () => ({ send: async () => {} }) as never,
+        getSteamLibrary: () => null,
+        getSteamState: () => ({
+            linked: null,
+            steamId: null,
+            personaName: null,
+            gameCount: 0,
+            recencySignal: null,
+            stale: false,
+            fetchedAt: null,
+            lastError: null,
+        }),
+        searchGames: async () => [],
+        connectSteam: async () => ({ personaName: "", gameCount: 0, error: null }),
+        skipSteam: async () => {},
+        logout: async () => ({ revoked: true }),
+        refreshSteam: async () => 0,
+        disconnectSteam: async () => {},
+        ...overrides,
+    };
+}
 
+describe("listen", () => {
     it("reports the port it was actually given", async () => {
         // The desktop build asks for 0 so the OS picks a free one - which is what keeps it
         // from colliding with a running container - and then has to know where to point a
@@ -127,6 +139,122 @@ describe("listen", () => {
         } finally {
             a.close();
             b.close();
+        }
+    });
+});
+
+/**
+ * Steam is keyless now: the user supplies an account, never a credential. These pin the
+ * shape the dashboard reads and the one thing about the sign-in round trip that is not
+ * obvious - that it must not end in a redirect.
+ */
+describe("the Steam routes", () => {
+    /** Stand the server up on a free port and hand back a fetch bound to it. */
+    async function serving(overrides: Record<string, unknown> = {}) {
+        const server = new ApiServer(context(overrides) as never, "/nonexistent");
+        const port = await server.listen("127.0.0.1", 0);
+        return {
+            server,
+            get: (path: string) => fetch(`http://127.0.0.1:${port}${path}`),
+            post: (path: string, body?: unknown) =>
+                fetch(`http://127.0.0.1:${port}${path}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body ?? {}),
+                }),
+        };
+    }
+
+    it("reports link state rather than whether a key is stored", async () => {
+        const { server, get } = await serving({
+            getSteamState: () => ({
+                linked: "openid",
+                steamId: "76561197971203314",
+                personaName: "Nathan",
+                gameCount: 412,
+                recencySignal: "playtimeRecent",
+                stale: false,
+                fetchedAt: "2026-08-29T00:00:00.000Z",
+                lastError: null,
+            }),
+        });
+        try {
+            const body = await (await get("/api/steam")).json();
+            expect(body).toEqual({
+                linked: "openid",
+                steamId: "76561197971203314",
+                personaName: "Nathan",
+                gameCount: 412,
+                recencySignal: "playtimeRecent",
+                stale: false,
+                fetchedAt: "2026-08-29T00:00:00.000Z",
+                lastError: null,
+            });
+            // The old shape leaked whether a key was held; there is no key any more.
+            expect(body).not.toHaveProperty("hasApiKey");
+            expect(body).not.toHaveProperty("provider");
+        } finally {
+            server.close();
+        }
+    });
+
+    it("records a skip, so the daemon remembers it rather than the browser", async () => {
+        let skipped = false;
+        const { server, post } = await serving({
+            skipSteam: async () => {
+                skipped = true;
+            },
+        });
+        try {
+            expect((await post("/api/steam/skip")).status).toBe(200);
+            expect(skipped).toBe(true);
+        } finally {
+            server.close();
+        }
+    });
+
+    it("takes a Steam ID and nothing else on connect", async () => {
+        let seen: unknown = null;
+        const { server, post } = await serving({
+            connectSteam: async (input: unknown) => {
+                seen = input;
+                return { personaName: "Nathan", gameCount: 3, error: null };
+            },
+        });
+        try {
+            const body = await (await post("/api/steam/connect", {
+                steamId: "https://steamcommunity.com/id/nathan",
+                apiKey: "STEAMKEY",
+            })).json();
+
+            expect(seen).toEqual({ steamId: "https://steamcommunity.com/id/nathan", via: "profile" });
+            expect(body).toMatchObject({ ok: true, personaName: "Nathan", gameCount: 3 });
+        } finally {
+            server.close();
+        }
+    });
+
+    it("refuses a connect with no account named", async () => {
+        const { server, post } = await serving();
+        try {
+            expect((await post("/api/steam/connect", { steamId: "  " })).status).toBe(400);
+        } finally {
+            server.close();
+        }
+    });
+
+    it("answers the sign-in callback with a page, not a redirect", async () => {
+        // This leg finishes in the user's own browser on the desktop build. Redirecting to
+        // /#/settings opened a second dashboard there, connected to the same daemon.
+        const { server, get } = await serving();
+        try {
+            const response = await get("/api/steam/callback");
+            expect(response.status).toBe(400);
+            expect(response.headers.get("location")).toBeNull();
+            expect(response.headers.get("content-type")).toContain("text/html");
+            expect(await response.text()).toContain("Close this tab");
+        } finally {
+            server.close();
         }
     });
 });

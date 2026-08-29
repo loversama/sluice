@@ -1,15 +1,57 @@
 import type { EventEmitter } from "node:events";
 
-import type { Config } from "../config.js";
+import type { Config, SteamLinkState } from "../config.js";
 import type { Miner } from "../miner.js";
 import type { AuthState } from "../twitch/auth.js";
 import type { NotifierGroup } from "../notifiers/index.js";
-import type { SteamLibrary } from "../steam/library.js";
+import type { RecencyBasis, SteamLibrary } from "../steam/library.js";
 
 export interface DeviceCodeInfo {
     code: string;
     url: string;
     expiresAt: number;
+}
+
+/**
+ * Everything the dashboard knows about Steam, in one shape.
+ *
+ * Served by `GET /api/steam`, carried in the state snapshot, and emitted as the `steam`
+ * event whenever any of it changes - the same object all three times, so a page cannot end
+ * up believing two different things depending on how it heard.
+ */
+export interface SteamState {
+    /** Null means the user has not been asked yet, which is what shows onboarding. */
+    linked: SteamLinkState | null;
+    steamId: string | null;
+    personaName: string | null;
+    gameCount: number;
+    /**
+     * Which signal the "recently played" ranking is actually using. Two-week playtime for
+     * anything read through the broker: Steam reveals last-played times only to a key that
+     * owns the account.
+     */
+    recencySignal: RecencyBasis | null;
+    /**
+     * The library came from the broker's cache rather than live from Steam - because Steam
+     * was unreachable, or because it declined to spend the last of a shared daily
+     * allowance. Real data, just old, and not worth surfacing as a fault.
+     */
+    stale: boolean;
+    /** ISO time the data left Steam, not when it was served. */
+    fetchedAt: string | null;
+    /** Why the last read failed, or null if it did not. */
+    lastError: { code: string; message: string } | null;
+}
+
+/** The outcome of linking an account: the link and the library are separate things. */
+export interface SteamConnectResult {
+    personaName: string;
+    gameCount: number;
+    /**
+     * Set when the account linked but its library could not be read - a private profile,
+     * most often. The link still stands, so this is reported rather than thrown.
+     */
+    error: { code: string; message: string } | null;
 }
 
 /**
@@ -29,16 +71,25 @@ export interface ServerContext {
     setConfig(config: Config): Promise<void>;
     getNotifier(): NotifierGroup;
     getSteamLibrary(): SteamLibrary | null;
+    /** Link state, persona, library size and the last failure, for the API and the bus. */
+    getSteamState(): SteamState;
     searchGames(term: string): Promise<{ id: string; name: string; boxArtURL: string | null }[]>;
     /** Box art for games with no campaign running, keyed by lowercased name. */
     getGameArt(): Record<string, { id: string; name: string; boxArtURL: string | null }>;
-    /** Store credentials and pull the library. Returns the number of games found. */
+    /**
+     * Remember which Steam account is the user's, and read its library.
+     *
+     * Throws only when the account cannot be identified at all. A library that will not
+     * come back comes back in the result: the link is established either way, and telling
+     * someone their sign-in failed because their profile is private would be a lie.
+     */
     connectSteam(input: {
-        provider?: "direct" | "sinfulshadows";
-        apiKey?: string;
-        steamId?: string;
-        sinfulshadowsApiKey?: string;
-    }): Promise<number>;
+        steamId: string;
+        /** How it was identified, which the dashboard shows and onboarding depends on. */
+        via: Exclude<SteamLinkState, "skipped">;
+    }): Promise<SteamConnectResult>;
+    /** Record that the user declined to link Steam, so they are not asked again. */
+    skipSteam(): Promise<void>;
     /** Revoke the Twitch token, drop the credentials, and restart into the login screen. */
     logout(): Promise<{ revoked: boolean }>;
     refreshSteam(): Promise<number>;

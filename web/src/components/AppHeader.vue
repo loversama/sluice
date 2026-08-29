@@ -112,10 +112,13 @@ async function toggleMaximize() {
              behind a menu that costs an extra click. -->
         <!-- Only when the sidebar is not on screen. Two rows of the same five links is
              clutter, and leaves you wondering whether they do different things. -->
+        <!-- Grouped and left-aligned beside the mark. justify-around pushed the icons into
+             the far corners of whatever width was going, which read as five unrelated
+             buttons rather than one navigation bar. -->
         <nav
             v-if="!hasSidebar"
             class="app-no-drag flex items-center gap-0.5 min-w-0"
-            :class="compact ? 'flex-1 justify-around' : 'ml-3'"
+            :class="compact ? 'flex-1 justify-start gap-1' : 'ml-3'"
         >
             <RouterLink
                 v-for="item in nav"

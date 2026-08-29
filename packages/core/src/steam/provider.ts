@@ -1,8 +1,8 @@
 import { request } from "undici";
 
 import logger from "../logger.js";
-import { SteamClient, SteamError, type OwnedGame } from "./client.js";
-import { VERSION } from "../version.js";
+import { SteamError, type OwnedGame } from "./client.js";
+import { clientToken as defaultClientToken, VERSION } from "../version.js";
 
 /**
  * Why a library fetch failed, when the reason changes what the user should do about it.
@@ -11,20 +11,26 @@ import { VERSION } from "../version.js";
  * library still in use.
  */
 export type LibraryErrorCode =
-    | "key_invalid"
-    | "steam_not_linked"
     | "library_private"
+    | "profile_not_found"
+    | "client_outdated"
     | "rate_limited"
     | "unavailable";
 
 export class LibraryError extends SteamError {
+    /** Where the user should go to fix it, when there is such a place. */
+    readonly actionUrl?: string;
+    /** Seconds the broker asked us to wait, when it said. */
+    readonly retryAfterSeconds?: number;
+
     constructor(
         message: string,
         readonly code: LibraryErrorCode,
-        /** Where the user should go to fix it, when there is such a place. */
-        readonly actionUrl?: string,
+        options: { actionUrl?: string; retryAfterSeconds?: number } = {},
     ) {
         super(message);
+        this.actionUrl = options.actionUrl;
+        this.retryAfterSeconds = options.retryAfterSeconds;
     }
 }
 
@@ -34,8 +40,25 @@ export interface LibrarySnapshot {
     games: OwnedGame[];
     /** Unix ms of the fetch that produced this data, which may predate the request. */
     fetchedAt: number;
-    /** True when the provider served cached data because Steam was unreachable. */
+    /**
+     * The broker served a cached copy rather than reading Steam.
+     *
+     * Real data that is merely old - Steam was unreachable, or the broker chose not to
+     * spend the last of a shared daily allowance. Not a failure and not worth a banner;
+     * it means only that this is worth trying again sooner than a full refresh interval.
+     */
     stale?: boolean;
+}
+
+/** Who an account is, without touching the library. Enough to confirm a link. */
+export interface SteamSummary {
+    steamId: string;
+    personaName: string;
+    avatarUrl: string | null;
+    /** False when the profile itself is private, so nothing else will be readable either. */
+    visible: boolean;
+    fetchedAt: number;
+    stale: boolean;
 }
 
 export interface LibraryProvider {
@@ -46,36 +69,20 @@ export interface LibraryProvider {
 
 /** Steam is unreachable often enough that "no games" needs saying properly. */
 const PRIVATE_LIBRARY_MESSAGE =
-    "Steam returned no games. Set 'Game details' to Public in your Steam privacy settings, " +
-    "and check the API key belongs to this account.";
+    "Steam returned no games. Set 'Game details' to Public in your Steam privacy settings.";
 
-/** The user's own Steam Web API key, talking to Steam directly. */
-export class DirectSteamProvider implements LibraryProvider {
-    readonly label = "Steam (your API key)";
+/** Where "Game details" lives, for every error that comes down to that setting. */
+const STEAM_PRIVACY_URL = "https://steamcommunity.com/my/edit/settings";
 
-    constructor(
-        private readonly client: SteamClient,
-        private readonly steamId: string,
-    ) {}
+export const DEFAULT_BROKER_BASE_URL = "https://sinfulshadows.com";
 
-    async fetchLibrary(): Promise<LibrarySnapshot> {
-        const games = await this.client.getOwnedGames(this.steamId);
-        if (games.length === 0) {
-            // An empty list is what Steam returns for a private profile, which is not
-            // distinguishable from owning nothing - so say what to check instead.
-            throw new LibraryError(PRIVATE_LIBRARY_MESSAGE, "library_private");
-        }
-        const profile = await this.client.getProfile(this.steamId).catch(() => null);
-        return {
-            steamId: this.steamId,
-            personaName: profile?.personaName ?? "",
-            games,
-            fetchedAt: Date.now(),
-        };
-    }
+/** Every non-200 the broker returns shares this shape. */
+interface BrokerError {
+    error?: string;
+    message?: string;
 }
 
-interface ProxyResponse {
+interface LibraryResponse {
     steamId: string;
     personaName: string;
     fetchedAt: number;
@@ -89,34 +96,63 @@ interface ProxyResponse {
     }[];
 }
 
-export const DEFAULT_SINFULSHADOWS_BASE_URL = "https://sinfulshadows.com";
+interface SummaryResponse {
+    steamId: string;
+    personaName: string;
+    avatarUrl: string | null;
+    visible: boolean;
+    fetchedAt: number;
+    stale: boolean;
+}
+
+/** `Retry-After` in seconds, or undefined if the broker did not send a usable one. */
+function retryAfterOf(headers: Record<string, string | string[] | undefined>): number | undefined {
+    const raw = headers["retry-after"];
+    const value = Number(Array.isArray(raw) ? raw[0] : raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
 
 /**
- * Read the library through SinfulShadows, which holds the Steam key.
+ * Read Steam through the broker on sinfulshadows.com.
  *
- * There is no Steam ID to supply: the endpoint serves only the Steam account the key's owner
- * has linked on the site, so identity comes from the key. That is also what keeps the site
- * from becoming an open proxy for reading strangers' libraries.
+ * The user supplies no key of any kind - only which account is theirs. The broker holds one
+ * Steam key, caches what it reads and rate-limits per IP, which is what makes serving every
+ * copy of Sluice from a single key tenable.
+ *
+ * A Steam ID identifies a public profile and nothing more, so there is no secret here to
+ * get wrong: the broker will only ever return what the account has already made public.
  */
-export class SinfulShadowsProvider implements LibraryProvider {
-    readonly label = "SinfulShadows";
+export class BrokerProvider implements LibraryProvider {
+    readonly label = "Steam";
 
     constructor(
-        private readonly apiKey: string,
-        private readonly baseUrl: string = DEFAULT_SINFULSHADOWS_BASE_URL,
+        private readonly steamId: string,
+        private readonly baseUrl: string = DEFAULT_BROKER_BASE_URL,
+        private readonly clientToken: string = defaultClientToken(),
     ) {}
 
     private url(path: string): string {
-        return `${this.baseUrl.replace(/\/+$/, "")}${path}`;
+        const query = new URLSearchParams({ steamId: this.steamId });
+        return `${this.baseUrl.replace(/\/+$/, "")}/api/v1/sluice/steam/${path}?${query}`;
     }
 
+    /**
+     * One call to the broker.
+     *
+     * Every call counts against a small per-minute burst allowance, cache hits included -
+     * that limit protects the broker's own server rather than Steam's. So nothing here may
+     * retry in a loop: the callers space their attempts out in minutes, and a `Retry-After`
+     * is passed back on the error for them to honour.
+     */
     private async get(path: string): Promise<unknown> {
         let response;
         try {
             response = await request(this.url(path), {
                 method: "GET",
                 headers: {
-                    authorization: `Bearer ${this.apiKey}`,
+                    // Says which build is calling; see CLIENT_TOKEN. Not a credential, and
+                    // never logged.
+                    "X-Sluice-Client": this.clientToken,
                     "user-agent": `sluice/${VERSION}`,
                     accept: "application/json",
                 },
@@ -125,62 +161,107 @@ export class SinfulShadowsProvider implements LibraryProvider {
             });
         } catch (error) {
             throw new LibraryError(
-                `Could not reach SinfulShadows: ${(error as Error).message}`,
+                `Could not reach the Steam service: ${(error as Error).message}`,
                 "unavailable",
             );
         }
 
         const status = response.statusCode;
-        let body: any = null;
+        let body: BrokerError | null = null;
         try {
-            body = await response.body.json();
+            body = (await response.body.json()) as BrokerError;
         } catch {
             await response.body.dump().catch(() => {});
         }
 
         if (status === 200) {
+            // Read before the charge for this request, so it is the headroom that was there
+            // a moment ago rather than what is left now. Only ever worth a debug line.
+            const remaining = response.headers["x-ratelimit-remaining"];
+            if (remaining !== undefined) {
+                logger.debug(`Steam service quota remaining: ${String(remaining)}`);
+            }
             return body;
         }
 
-        const message: string = body?.message ?? `SinfulShadows returned ${status}.`;
+        // The header is authoritative: the body's retryAfter is a convenience copy, and a
+        // proxy in between can change one without the other.
+        const retryAfterSeconds = retryAfterOf(response.headers);
+        const message = body?.message ?? `The Steam service returned ${status}.`;
 
-        if (status === 401 || status === 403) {
+        // 401 means the broker does not know this token; 426 means it knows it and has
+        // stopped answering to it. Either way this build is the thing that is out of date,
+        // and updating is the only fix the user has.
+        if (status === 401 || status === 426) {
             throw new LibraryError(
-                body?.error === "insufficient_scope"
-                    ? "This SinfulShadows key lacks the steam:library scope. Create a new one."
-                    : "SinfulShadows rejected the API key - it may have been revoked. Create a new one.",
-                "key_invalid",
-                `${this.baseUrl}/settings/api`,
+                "This version of Sluice can no longer read Steam. Update to the latest release.",
+                "client_outdated",
             );
+        }
+        // Permanent, unlike everything else here: Steam has no such account. A deleted or
+        // renamed profile would otherwise sit behind "Steam is unavailable" forever, with
+        // the library quietly never updating again and nothing ever suggesting the one
+        // thing that would fix it.
+        if (status === 404) {
+            throw new LibraryError(
+                "Steam has no account with this ID any more. Link your Steam account again.",
+                "profile_not_found",
+            );
+        }
+        if (status === 409) {
+            // The broker names the exact Steam setting in its message, so pass it through
+            // rather than paraphrasing it here.
+            throw new LibraryError(message, "library_private", { actionUrl: STEAM_PRIVACY_URL });
         }
         if (status === 429) {
-            throw new LibraryError(message, "rate_limited");
+            throw new LibraryError(message, "rate_limited", { retryAfterSeconds });
         }
-        if (body?.error === "steam_not_linked") {
+        // The broker sheds Sluice traffic when the Steam allowance it shares with the rest
+        // of sinfulshadows.com runs low, so the site's own features get the last calls of
+        // the day. It only reaches us when nothing was cached - with a cached copy this
+        // arrives as a perfectly ordinary 200 marked stale - and a shed request is not
+        // charged against the caller's quota either.
+        //
+        // Degraded exactly like anything else being unavailable, but with our own wording:
+        // nothing is wrong with the user's account, profile or link, and the broker's
+        // message is written for whoever is reading its logs, not for them.
+        if (body?.error === "steam_budget_low") {
             throw new LibraryError(
-                "No Steam account is linked to your SinfulShadows account. Link it, then retry.",
-                "steam_not_linked",
-                `${this.baseUrl}/settings/connections`,
+                "Steam is busy at the moment. Your library will refresh on its own shortly.",
+                "unavailable",
+                { retryAfterSeconds },
             );
         }
-        if (body?.error === "library_private") {
-            throw new LibraryError(message, "library_private");
-        }
-        throw new LibraryError(message, "unavailable");
+        // Everything left is retryable in the sense that matters here: the cached library
+        // stays in use and the next cycle tries again. That includes a 400 for a malformed
+        // Steam ID, which is deliberate - IDs are validated before they are stored, so one
+        // arriving here is our bug rather than something the user can act on, and the
+        // broker's own message is enough to debug it by.
+        throw new LibraryError(message, "unavailable", { retryAfterSeconds });
     }
 
-    /** Confirm the key works and report whose library it will return. */
-    async verify(): Promise<{ userId: number; steamLinked: boolean; personaName: string }> {
-        const body = (await this.get("/api/v1/me")) as any;
+    /**
+     * Who this Steam ID belongs to. Unaffected by the library being private.
+     *
+     * Cached and charged separately from the library, so asking for both costs two of the
+     * day's calls rather than one. Worth it at link time, where naming the account is the
+     * point; not worth it on a refresh, where the library response carries the persona
+     * anyway.
+     */
+    async fetchSummary(): Promise<SteamSummary> {
+        const body = (await this.get("summary")) as SummaryResponse;
         return {
-            userId: body?.userId ?? 0,
-            steamLinked: Boolean(body?.steam?.linked),
-            personaName: body?.steam?.personaName ?? "",
+            steamId: body.steamId ?? this.steamId,
+            personaName: body.personaName ?? "",
+            avatarUrl: body.avatarUrl ?? null,
+            visible: body.visible ?? false,
+            fetchedAt: body.fetchedAt ?? Date.now(),
+            stale: body.stale ?? false,
         };
     }
 
     async fetchLibrary(): Promise<LibrarySnapshot> {
-        const body = (await this.get("/api/v1/steam/library")) as ProxyResponse;
+        const body = (await this.get("library")) as LibraryResponse;
         const games: OwnedGame[] = (body.games ?? []).map((game) => ({
             appid: game.appid,
             name: game.name,
@@ -190,17 +271,26 @@ export class SinfulShadowsProvider implements LibraryProvider {
         }));
 
         if (games.length === 0) {
-            throw new LibraryError(PRIVATE_LIBRARY_MESSAGE, "library_private");
+            // Steam answers a private profile with an empty list rather than an error, and
+            // the broker forwards what it got. Owning nothing looks identical, so say what
+            // to check instead of reporting a library of zero games.
+            throw new LibraryError(PRIVATE_LIBRARY_MESSAGE, "library_private", {
+                actionUrl: STEAM_PRIVACY_URL,
+            });
         }
         if (body.stale) {
-            logger.warn("SinfulShadows served a cached Steam library - Steam was unreachable.");
+            // Real data, just old. Either Steam was unreachable or the broker declined to
+            // spend the last of a shared daily allowance on us - the two are not worth
+            // telling apart, and neither is worth telling the user about. The timestamp
+            // below is what shortens the wait before the next attempt.
+            logger.debug("The Steam service served a cached library.");
         }
 
         return {
-            steamId: body.steamId,
+            steamId: body.steamId ?? this.steamId,
             personaName: body.personaName ?? "",
             games,
-            // Keep the provider's own timestamp: treating cached data as a fresh sync would
+            // Keep the broker's own timestamp: treating cached data as a fresh sync would
             // delay the retry by a full refresh interval.
             fetchedAt: body.fetchedAt ?? Date.now(),
             stale: body.stale,

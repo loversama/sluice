@@ -20,10 +20,15 @@ export interface StoredLibrary {
 /**
  * Which field the "recently played" ranking can actually use.
  *
- * Steam only fills in a last-played timestamp when the querying API key belongs to the
- * account being queried, so a library read through a shared key has none. Two-week playtime
- * is returned either way, and total playtime always exists - so the mode degrades rather
- * than collapsing into "owned or not".
+ * Steam fills in a last-played timestamp only for a key that owns the account being read,
+ * and the broker's key never does - so in practice a freshly read library ranks on
+ * two-week playtime, and on total playtime for an account that has played nothing in a
+ * fortnight. Approximate rather than absent, which is the point of degrading at all: the
+ * alternative is the mode collapsing into "owned or not".
+ *
+ * "lastPlayed" is kept because it is still reachable. A library cached before the broker
+ * existed was read with the user's own key and carries real timestamps, and it goes on
+ * ranking on them until the next refresh replaces it.
  */
 export type RecencyBasis = "lastPlayed" | "playtimeRecent" | "playtimeForever";
 
@@ -55,6 +60,11 @@ export class SteamLibrary {
      * Mixing them would be worse than picking one: a unix timestamp and a minute count are
      * not comparable, so a library where only some games carry a timestamp must still rank
      * on a single field.
+     *
+     * Do not "simplify" the first branch away as dead. It is dead for a library read
+     * through the broker, which is every fresh read - but not for one cached from the days
+     * of the user's own key, and the answer has to be whatever the data on hand supports
+     * rather than whatever the current provider tends to return.
      */
     private chooseRecencyBasis(): void {
         if (this.games.some((game) => game.lastPlayed > 0)) {

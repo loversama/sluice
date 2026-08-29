@@ -22,6 +22,8 @@ const bridge = {
     setSettings: (next: Partial<DesktopSettings>): Promise<DesktopSettings> =>
         ipcRenderer.invoke("desktop:set-settings", next),
     openLogsFolder: (): Promise<void> => ipcRenderer.invoke("desktop:open-logs"),
+    /** Open a link in the real browser. The window itself refuses every window.open. */
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke("desktop:open-external", url),
     importFromDocker: (): Promise<{ imported: boolean; message: string }> =>
         ipcRenderer.invoke("desktop:import-docker"),
     updateStatus: (): Promise<{ status: string; version?: string; percent?: number }> =>

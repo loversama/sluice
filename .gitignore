@@ -20,3 +20,8 @@ state.json
 claims.json
 cache/
 data/
+
+# The broker token a run from source presents. Not a credential - an identical one ships in
+# every installer - but it belongs to whoever issued it, and keeping it out of the tree means
+# rotating it is not a commit.
+.sluice-client-token

@@ -28,16 +28,21 @@ const PRIORITY_MODES = [
         steam: true,
     },
     {
+        // "Recently played" is approximate and the label should not pretend otherwise:
+        // Steam gives an exact last-played date only to a key that owns the account, so
+        // the ranking runs on its two-week playtime figure instead. A game played hard
+        // last Tuesday outranks one touched briefly yesterday.
         value: "steam_recent",
         label: "My Steam games, recently played",
-        hint: "Games you own on Steam first, most recently played first. Needs Steam connected.",
+        hint:
+            "Games you own on Steam first, ranked by Steam's two-week playtime rather than " +
+            "an exact last-played date. Needs Steam connected.",
         steam: true,
     },
     { value: "random", label: "Random order", hint: "Reshuffled on every refresh." },
     { value: "priority_only", label: "Nothing else", hint: "Mine only the games listed above." },
 ];
 const newPriority = ref("");
-const steamStatus = ref(null);
 const searchResults = ref([]);
 const searching = ref(false);
 const excludeResults = ref([]);
@@ -119,7 +124,7 @@ function addGame(name) {
 const needsSteam = computed(
     () =>
         PRIORITY_MODES.find((mode) => mode.value === priorityMode.value)?.steam &&
-        !steamStatus.value?.connected,
+        !store.hasSteamLibrary,
 );
 const newExcluded = ref("");
 const saving = ref(false);
@@ -130,9 +135,6 @@ onMounted(async () => {
     if (!store.config) {
         await store.loadConfig();
     }
-    steamStatus.value = await fetch("/api/steam")
-        .then((response) => response.json())
-        .catch(() => null);
 });
 
 watch(
