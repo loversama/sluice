@@ -346,7 +346,7 @@ function taskbarIsDark() {
     } catch {
     }
   }
-  return nativeTheme.shouldUseDarkColors;
+  return true;
 }
 function trayImage() {
   return nativeImage.createFromPath(resource(taskbarIsDark() ? "tray-light.ico" : "tray-dark.ico"));
@@ -767,7 +767,7 @@ if (!app.requestSingleInstanceLock()) {
     const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
     win.webContents.setZoomFactor(factor);
   };
-  app.setAppUserModelId("com.sluice.desktop");
+  app.setAppUserModelId("dev.loversama.sluice");
   app.whenReady().then(
     async () => {
       const dataDir = app.getPath("userData");
