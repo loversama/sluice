@@ -113,10 +113,15 @@ Write-Host @"
 
 "@ -ForegroundColor DarkGray
 
-# Teed to a file of its own, because Start-Transcript does not capture the output of native
-# commands on Windows PowerShell 5.1 - so npm's errors, which are the ones worth having,
-# went to the console and nowhere else.
-npm --prefix packages/desktop run dev 2>&1 | Tee-Object -FilePath $appLog
+# Run through cmd, with stderr folded into stdout *inside* cmd rather than by PowerShell.
+#
+# This looks roundabout and is not. $ErrorActionPreference is "Stop", and PowerShell turns
+# anything a native command writes to stderr into a terminating error the moment the stream
+# is redirected - so `npm ... 2>&1 |` killed the script on electron-vite's entirely harmless
+# "renderer config is missing" notice. Folding the streams before PowerShell sees them means
+# there is no stderr to object to, while the output still reaches the log and $LASTEXITCODE
+# still reports a genuine failure.
+cmd.exe /c "npm --prefix packages/desktop run dev 2>&1" | Tee-Object -FilePath $appLog
 
 # Nothing checked this, and nothing followed it, so a crash left the script exiting 0. The
 # wrapper only pauses on a failure, which meant the window closed on the error unread.
