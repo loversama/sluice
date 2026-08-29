@@ -219,3 +219,56 @@ describe("a missing updater", () => {
         expect(updates.status).toEqual({ status: "idle" });
     });
 });
+
+import { isTransientUpdateError } from "../packages/desktop/src/main/auto-update.js";
+
+/**
+ * The real message that put a stack trace over the whole window: GitHub returned a 504 for
+ * the release feed, which says nothing about this installation and is fixed by looking
+ * again in a few minutes.
+ */
+const GITHUB_504 =
+    "Cannot parse releases feed: Error: Unable to find latest version on GitHub " +
+    "(https://github.com/loversama/sluice-releases/releases/latest), please ensure a " +
+    "production release exists: HttpError: 504";
+
+describe("deciding whether an update failure is worth reporting", () => {
+    it("keeps quiet about a gateway timeout", () => {
+        expect(isTransientUpdateError(GITHUB_504)).toBe(true);
+    });
+
+    it("keeps quiet about the rest of a bad minute at GitHub", () => {
+        for (const message of [
+            "HttpError: 500 Internal Server Error",
+            "HttpError: 502 Bad Gateway",
+            "HttpError: 503 Service Unavailable",
+            "connect ETIMEDOUT 140.82.121.4:443",
+            "getaddrinfo EAI_AGAIN github.com",
+            "socket hang up",
+            "net::ERR_INTERNET_DISCONNECTED",
+            "read ECONNRESET",
+        ]) {
+            expect(isTransientUpdateError(message), message).toBe(true);
+        }
+    });
+
+    it("keeps quiet while a release is still uploading its metadata", () => {
+        expect(isTransientUpdateError("Cannot find latest.yml in the latest release")).toBe(true);
+        expect(isTransientUpdateError("HttpError: 404 Not Found")).toBe(true);
+    });
+
+    it("still reports a failure that will not fix itself", () => {
+        for (const message of [
+            "ENOSPC: no space left on device",
+            "Cannot resolve update signature",
+            "New version is not signed by the application owner",
+        ]) {
+            expect(isTransientUpdateError(message), message).toBe(false);
+        }
+    });
+
+    it("does not mistake a version number for a status code", () => {
+        // A bare "5xx" match would swallow real failures mentioning a version.
+        expect(isTransientUpdateError("Update 1.502.0 could not be verified")).toBe(false);
+    });
+});

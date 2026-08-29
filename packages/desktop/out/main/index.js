@@ -542,7 +542,7 @@ class AutoUpdate {
     });
     updater.on("error", (error) => {
       const message = error instanceof Error ? error.message : String(error);
-      const transient = message.includes("latest.yml") || message.includes("404") || message.includes("ENOTFOUND") || message.includes("ECONNRESET") || message.includes("net::ERR");
+      const transient = isTransientUpdateError(message);
       if (transient) {
         logger.debug(`Update check deferred: ${message}`);
         this.publish({ status: "idle" });
@@ -579,11 +579,10 @@ class AutoUpdate {
       logger.debug("Automatic update check skipped: switched off.");
       return;
     }
-    try {
-      void this.updater?.checkForUpdates();
-    } catch (error) {
-      logger.debug("Update check threw:", error);
-    }
+    Promise.resolve(this.updater?.checkForUpdates()).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.debug(`Update check rejected: ${message}`);
+    });
   }
   /** Restart into the new version now, rather than waiting for the next quit. */
   installNow() {
@@ -605,6 +604,13 @@ class AutoUpdate {
       this.retryTimer = null;
     }
   }
+}
+function isTransientUpdateError(message) {
+  return message.includes("latest.yml") || message.includes("404") || message.includes("ENOTFOUND") || message.includes("ECONNRESET") || message.includes("net::ERR") || // GitHub having a bad minute: a gateway timeout, or any other 5xx. Matched as an
+  // HTTP status rather than as a bare number - "1.502.0" is a version, and treating
+  // it as a status would quietly bury a failure that does need reporting.
+  /(?:HttpError|status(?:\s*code)?)\s*[:=]?\s*5\d\d\b/i.test(message) || /\b(?:Gateway Timeout|Service Unavailable|Bad Gateway|Internal Server Error)\b/i.test(message) || message.includes("ETIMEDOUT") || message.includes("EAI_AGAIN") || message.includes("socket hang up") || // What electron-updater says when the feed itself would not load.
+  message.includes("Unable to find latest version");
 }
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -950,10 +956,7 @@ ${toast.game}` : toast.name,
   });
   process.on("unhandledRejection", (reason) => {
     const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
-    try {
-      dialog.showErrorBox("Sluice hit an error", message);
-    } catch {
-    }
+    logger.error(`Unhandled rejection: ${message}`);
   });
   process.on("uncaughtException", (error) => {
     try {

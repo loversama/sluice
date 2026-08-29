@@ -546,15 +546,21 @@ let updates: AutoUpdate | null = null;
             });
     });
 
-    // Without a console there is nothing to print to, so an unhandled rejection would take
-    // the app down leaving no trace at all.
+    /**
+     * A rejected promise is written down, not put on the screen.
+     *
+     * It used to open a modal with the stack in it. That is the wrong trade for something
+     * that is usually a network call having a bad minute: an update check hitting a GitHub
+     * 504 covered the whole window with a stack trace, over a failure that fixes itself on
+     * the next look and that the app had already recovered from.
+     *
+     * The log keeps it, Settings shows the last update failure, and Open Logs is there for
+     * the rest. An uncaught exception is different - the process is going down either way,
+     * so that one still says so.
+     */
     process.on("unhandledRejection", (reason) => {
         const message = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
-        try {
-            dialog.showErrorBox("Sluice hit an error", message);
-        } catch {
-            // Too early for a dialog; the file sink still has it.
-        }
+        logger.error(`Unhandled rejection: ${message}`);
     });
     process.on("uncaughtException", (error) => {
         try {

@@ -105,12 +105,7 @@ export class AutoUpdate {
             const message = error instanceof Error ? error.message : String(error);
             // A tag exists but its metadata has not finished uploading, or the machine is
             // briefly offline. Neither is worth showing anyone - the next look will find it.
-            const transient =
-                message.includes("latest.yml") ||
-                message.includes("404") ||
-                message.includes("ENOTFOUND") ||
-                message.includes("ECONNRESET") ||
-                message.includes("net::ERR");
+            const transient = isTransientUpdateError(message);
             if (transient) {
                 logger.debug(`Update check deferred: ${message}`);
                 this.publish({ status: "idle" });
@@ -152,11 +147,19 @@ export class AutoUpdate {
             logger.debug("Automatic update check skipped: switched off.");
             return;
         }
-        try {
-            void this.updater?.checkForUpdates();
-        } catch (error) {
-            logger.debug("Update check threw:", error);
-        }
+        // Caught on the promise, not around it. `void` discards the promise, and a
+        // try/catch only ever sees a synchronous throw - so a rejected check escaped as an
+        // unhandled rejection and took over the screen with a stack trace, because GitHub
+        // returned a 504 for a moment.
+        // Wrapped rather than chained: the updater is typed loosely on purpose, because
+        // what the CommonJS module actually hands back has caught us out before. This
+        // handles a promise and a plain value alike.
+        Promise.resolve(this.updater?.checkForUpdates()).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            // The `error` event fires for the same failure and decides what to show; this
+            // is only here so the rejection is handled at all.
+            logger.debug(`Update check rejected: ${message}`);
+        });
     }
 
     /** Restart into the new version now, rather than waiting for the next quit. */
@@ -191,4 +194,32 @@ export interface UpdaterLike {
     on(event: string, listener: (payload: any) => void): unknown;
     checkForUpdates(): Promise<unknown> | unknown;
     quitAndInstall(): void;
+}
+
+/**
+ * Whether an update failure is worth telling anyone about.
+ *
+ * Almost none of them are. A release whose metadata is still uploading, a machine briefly
+ * offline, GitHub returning a 504 for a minute - all of these fix themselves by the next
+ * look, and none of them says anything about this installation. Reporting them trains
+ * people to ignore the one message that matters, which is that an update is waiting.
+ */
+export function isTransientUpdateError(message: string): boolean {
+    return (
+        message.includes("latest.yml") ||
+        message.includes("404") ||
+        message.includes("ENOTFOUND") ||
+        message.includes("ECONNRESET") ||
+        message.includes("net::ERR") ||
+        // GitHub having a bad minute: a gateway timeout, or any other 5xx. Matched as an
+        // HTTP status rather than as a bare number - "1.502.0" is a version, and treating
+        // it as a status would quietly bury a failure that does need reporting.
+        /(?:HttpError|status(?:\s*code)?)\s*[:=]?\s*5\d\d\b/i.test(message) ||
+        /\b(?:Gateway Timeout|Service Unavailable|Bad Gateway|Internal Server Error)\b/i.test(message) ||
+        message.includes("ETIMEDOUT") ||
+        message.includes("EAI_AGAIN") ||
+        message.includes("socket hang up") ||
+        // What electron-updater says when the feed itself would not load.
+        message.includes("Unable to find latest version")
+    );
 }
