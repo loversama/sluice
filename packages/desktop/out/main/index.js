@@ -793,6 +793,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   const isOurs = (url) => isOwnUrl(url, port);
   const openExternally = (url) => {
+    if (!/^https?:\/\//i.test(url)) {
+      logger.debug(`Refused to open ${url}`);
+      return;
+    }
     void shell.openExternal(url);
   };
   const applyThinZoom = () => {
