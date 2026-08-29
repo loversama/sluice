@@ -61,13 +61,21 @@ jobs:
       # on CLIENT_TOKEN in packages/core/src/version.ts - but a build that ships the "dev"
       # placeholder is a build the broker will not answer, which is what the check further
       # down refuses to publish.
+      # No `if:` on the secret. GitHub does not allow the secrets context in a step
+      # condition and refuses to load the whole workflow if you try - it fails in zero
+      # seconds with the file name where the workflow name should be, and says only that
+      # there is "a workflow file issue". The skip is decided inside the script instead.
       - name: Stamp the Steam client token
-        if: ${{ secrets.SLUICE_CLIENT_TOKEN != '' }}
         shell: bash
         env:
           CLIENT_TOKEN: ${{ secrets.SLUICE_CLIENT_TOKEN }}
         run: |
           FILE=packages/core/src/version.ts
+          if [[ -z "$CLIENT_TOKEN" ]]; then
+            echo "::warning::SLUICE_CLIENT_TOKEN is not set; leaving the placeholder in place."
+            echo "The version check below will refuse to publish this build."
+            exit 0
+          fi
           node -e '
             const fs = require("node:fs");
             const file = "packages/core/src/version.ts";
