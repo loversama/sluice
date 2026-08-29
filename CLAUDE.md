@@ -121,6 +121,24 @@ Two things prevent it now: `artifactName` in `electron-builder.yml` removes the 
 source, and the publish step checks the `path:` in `latest.yml` against the release's asset
 list, deleting the release if they disagree. Do not "simplify" either one away.
 
+## Never run npm install from WSL
+
+`node_modules` is shared with Windows, and Electron's postinstall downloads a binary for
+whichever platform it is run on. Installing from WSL replaces `electron.exe` with the Linux
+build, and the next `run-desktop.ps1` fails with `spawn ...\electron ENOENT`, which points
+at nothing useful. It has happened once already, on the upgrade to Electron 43.
+
+Run installs from Windows. To repair it from there:
+
+```powershell
+Remove-Item -Recurse -Force node_modules\electron
+npm install
+```
+
+Building, testing and type checking from WSL are all fine - it is only the install that
+fetches a platform binary. `run-desktop.ps1` now checks `node_modules/electron/path.txt`
+before launching and says this rather than letting the spawn fail.
+
 ## Verifying desktop changes
 
 `electron-vite` transpiles the main process without checking types, so `tsc -b` passing at

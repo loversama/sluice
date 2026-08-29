@@ -90,6 +90,23 @@ npx tsc -b
 if ($LASTEXITCODE -ne 0) { Die "TypeScript build failed." }
 
 Step "Building the Electron bundles"
+Step "Checking the Electron binary is the Windows one"
+# npm install run from WSL against this same checkout fetches the Linux build of Electron
+# and overwrites the Windows one - node_modules is shared, the download is not. The failure
+# that follows is "spawn ...\electron ENOENT", which says nothing about the cause.
+$electronPath = Join-Path $repo "node_modules\electron\path.txt"
+if (Test-Path $electronPath) {
+    $binary = (Get-Content $electronPath -Raw).Trim()
+    if ($binary -ne "electron.exe") {
+        Warn "node_modules holds the $binary build, not electron.exe."
+        Warn "Something ran npm install from WSL or Linux against this folder."
+        Die  "Fix it from Windows: Remove-Item -Recurse -Force node_modules\electron ; npm install"
+    }
+    Note "electron.exe present."
+} else {
+    Warn "Could not find node_modules\electron\path.txt - skipping the check."
+}
+
 npm --prefix packages/desktop run build
 if ($LASTEXITCODE -ne 0) { Die "The Electron build failed." }
 
