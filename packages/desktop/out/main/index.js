@@ -774,6 +774,7 @@ if (!app.requestSingleInstanceLock()) {
   let quitting = false;
   let reallyQuitting = false;
   let warnedAboutTray = false;
+  const APP_USER_MODEL_ID = "dev.loversama.sluice";
   const THIN_WIDTH = 420;
   const MAX_THIN_ZOOM = 1.75;
   let thin = false;
@@ -804,7 +805,7 @@ if (!app.requestSingleInstanceLock()) {
     const factor = Math.min(MAX_THIN_ZOOM, Math.max(1, width / THIN_WIDTH));
     win.webContents.setZoomFactor(factor);
   };
-  app.setAppUserModelId("dev.loversama.sluice");
+  app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : `${APP_USER_MODEL_ID}.dev`);
   app.whenReady().then(
     async () => {
       const dataDir = app.getPath("userData");

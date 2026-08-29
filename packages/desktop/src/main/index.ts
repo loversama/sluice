@@ -43,7 +43,10 @@ if (!app.requestSingleInstanceLock()) {
      * two sizes of one. It scales instead, so the panel can fill a vertical monitor and
      * still be a side panel.
      */
-    const THIN_WIDTH = 420;
+    /** Must be the appId from electron-builder.yml, exactly. A test asserts it. */
+const APP_USER_MODEL_ID = "dev.loversama.sluice";
+
+const THIN_WIDTH = 420;
     /**
      * How much of the extra width becomes zoom rather than extra room.
      *
@@ -214,7 +217,14 @@ let updates: AutoUpdate | null = null;
     // looks like it belongs to nothing.
     //
     // A test asserts these two stay equal, because nothing at build time would notice.
-    app.setAppUserModelId("dev.loversama.sluice");
+    //
+    // A run from source gets its own id. Electron creates a Start Menu shortcut for
+    // whatever id it is given, so that toasts work in development - and if that id is the
+    // installed app's, the development shortcut takes the name over. The result was every
+    // notification from the installed Sluice arriving titled "Electron", with Electron's
+    // icon, because Windows resolved the shared id to a shortcut pointing at
+    // node_modules/electron/dist/electron.exe.
+    app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : `${APP_USER_MODEL_ID}.dev`);
 
     app.whenReady().then(
         async () => {
