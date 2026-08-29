@@ -58,14 +58,17 @@ watch(
 const overlayClass = computed(() => {
     if (props.embedded) return "";
     return isCompact.value
-        ? "fixed inset-0 z-50 flex items-stretch"
+        // Centred rather than stretched. Stretching filled the screen with one card whose
+        // content sat in the top third, which reads as a layout that has gone wrong rather
+        // than a deliberate sheet.
+        ? "fixed inset-0 z-50 flex items-center"
         : "fixed inset-0 z-50 flex items-center justify-center p-6";
 });
 
 const panelClass = computed(() => {
     if (props.embedded) return "";
     return isCompact.value
-        ? "card w-full rounded-none overflow-y-auto"
+        ? "card w-full rounded-none max-h-full overflow-y-auto"
         : "card w-full max-w-[440px]";
 });
 
