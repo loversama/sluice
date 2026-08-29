@@ -1,0 +1,32 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+/**
+ * Windows decides a notification's title and icon by finding a Start Menu shortcut whose
+ * AppUserModelID matches the one the application announces. The installer stamps that
+ * shortcut with electron-builder's appId, so the two have to agree.
+ *
+ * They did not, and the failure is entirely silent: no error, no warning, just toasts
+ * titled "com.sluice.desktop" with no icon, which reads as Windows being awkward rather
+ * than as a line of configuration being wrong. Nothing at build time compares them, so
+ * this does.
+ */
+describe("the Windows application id", () => {
+    const main = readFileSync("packages/desktop/src/main/index.ts", "utf8");
+    const builder = readFileSync("packages/desktop/electron-builder.yml", "utf8");
+
+    const announced = /app\.setAppUserModelId\("([^"]+)"\)/.exec(main)?.[1];
+    const appId = /^appId:\s*(\S+)/m.exec(builder)?.[1];
+
+    it("is announced by the application", () => {
+        expect(announced).toBeDefined();
+    });
+
+    it("is set by the installer", () => {
+        expect(appId).toBeDefined();
+    });
+
+    it("is the same on both sides", () => {
+        expect(announced).toBe(appId);
+    });
+});

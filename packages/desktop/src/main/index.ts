@@ -192,7 +192,16 @@ let updates: AutoUpdate | null = null;
 
     // Windows identifies an app by this for notifications and taskbar grouping; without
     // it both attach to "electron.app.Electron" instead of Sluice.
-    app.setAppUserModelId("com.sluice.desktop");
+    // Must be the appId from electron-builder.yml, exactly.
+    //
+    // Windows works out a toast's title and icon by finding a Start Menu shortcut whose
+    // AppUserModelID matches this. The installer stamps the shortcut with the appId, so
+    // announcing anything else finds no shortcut - and Windows falls back to printing this
+    // string as the title, with no icon beside it. There is no error; the notification just
+    // looks like it belongs to nothing.
+    //
+    // A test asserts these two stay equal, because nothing at build time would notice.
+    app.setAppUserModelId("dev.loversama.sluice");
 
     app.whenReady().then(
         async () => {
