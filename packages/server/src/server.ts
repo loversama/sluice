@@ -57,6 +57,9 @@ const RELAYED_EVENTS = [
     "loading",
     "problem",
     "auth",
+    // Sign-in finishes in an external browser on the desktop build, so without this the
+    // window has no way of learning that Steam was linked short of a reload.
+    "steam",
 ] as const;
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
@@ -66,6 +69,67 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
         "Cache-Control": "no-store",
     });
     response.end(payload);
+}
+
+function sendHtml(response: ServerResponse, status: number, html: string): void {
+    response.writeHead(status, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+    });
+    response.end(html);
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(
+        /[&<>"']/g,
+        (character) =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!,
+    );
+}
+
+/**
+ * The page Steam's round trip lands on.
+ *
+ * Deliberately not the dashboard. On the desktop build this leg finishes in the user's own
+ * browser - that is the whole point of sending sign-in out to somewhere with an address
+ * bar - and redirecting into `/#/settings` there opened a second dashboard, connected to
+ * the same daemon, in a window nobody asked for. A page that says what happened and asks
+ * them to close the tab is the entire job.
+ *
+ * Self-contained: no stylesheet, no script, nothing that has to still be being served when
+ * somebody reopens this from their history.
+ */
+function confirmationPage(content: { heading: string; body: string; ok: boolean }): string {
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sluice</title>
+<style>
+  :root { color-scheme: dark light; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #14131a; color: #ece9f4; padding: 24px;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .card { max-width: 380px; text-align: center; }
+  h1 { font-size: 17px; margin: 0 0 8px; }
+  p { margin: 0; color: #a29db5; }
+  .mark { font-size: 30px; line-height: 1; margin-bottom: 10px; color: ${
+      content.ok ? "#5ac57f" : "#e0645d"
+  }; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark">${content.ok ? "&#10003;" : "&#10007;"}</div>
+    <h1>${escapeHtml(content.heading)}</h1>
+    <p>${escapeHtml(content.body)}</p>
+  </div>
+</body>
+</html>
+`;
 }
 
 /** One call to Discord's REST API as a bot. */
@@ -388,28 +452,7 @@ export class ApiServer {
         }
 
         if (path === "/api/steam" && method === "GET") {
-            const library = this.context.getSteamLibrary();
-            const config = this.context.getConfig();
-            const provider = config.steam.provider;
-            const connected =
-                provider === "sinfulshadows"
-                    ? Boolean(config.steam.sinfulshadows.apiKey)
-                    : Boolean(config.steam.steamId && config.steam.apiKey);
-            return sendJson(response, 200, {
-                provider,
-                connected,
-                hasApiKey: Boolean(config.steam.apiKey),
-                hasSinfulShadowsKey: Boolean(config.steam.sinfulshadows.apiKey),
-                sinfulshadowsBaseUrl: config.steam.sinfulshadows.baseUrl,
-                steamId: config.steam.steamId ?? null,
-                personaName: library?.personaName ?? null,
-                gameCount: library?.size ?? 0,
-                // Which signal the "recently played" ranking can use - a library read through
-                // a shared key carries no last-played timestamps.
-                recencySignal: library?.recencySignal ?? null,
-                stale: library?.stale ?? false,
-                fetchedAt: library?.fetchedAt ? new Date(library.fetchedAt).toISOString() : null,
-            });
+            return sendJson(response, 200, this.context.getSteamState());
         }
 
         if (path === "/api/auth/logout" && method === "POST") {
@@ -418,24 +461,34 @@ export class ApiServer {
         }
 
         if (path === "/api/steam/connect" && method === "POST") {
-            const body = (await readBody(request)) as {
-                provider?: "direct" | "sinfulshadows";
-                apiKey?: string;
-                steamId?: string;
-                sinfulshadowsApiKey?: string;
-            };
-            // A masked key means "keep the stored one".
-            const apiKey = isMasked(body.apiKey) ? undefined : body.apiKey;
-            const sinfulshadowsApiKey = isMasked(body.sinfulshadowsApiKey)
-                ? undefined
-                : body.sinfulshadowsApiKey;
-            const count = await this.context.connectSteam({
-                provider: body.provider,
-                apiKey,
-                steamId: body.steamId,
-                sinfulshadowsApiKey,
-            });
-            return sendJson(response, 200, { ok: true, gameCount: count });
+            const body = (await readBody(request)) as { steamId?: string };
+            if (!body.steamId?.trim()) {
+                return sendJson(response, 400, {
+                    error: "Enter a Steam ID, profile URL, or custom URL name.",
+                });
+            }
+            // Pasting is the only way into this route now; the sign-in flow goes through
+            // the callback below. Either way the account is identified, never authorised.
+            //
+            // The only thing that throws here is input naming no Steam account at all,
+            // which is the user's to fix - a library that will not load comes back inside
+            // the result instead, because the link was still made.
+            try {
+                const result = await this.context.connectSteam({
+                    steamId: body.steamId,
+                    via: "profile",
+                });
+                return sendJson(response, 200, { ok: true, ...result });
+            } catch (error) {
+                return sendJson(response, 400, { error: (error as Error).message });
+            }
+        }
+
+        // Declining is an answer, and it is kept with the account rather than in the
+        // browser so a reinstall does not start asking again.
+        if (path === "/api/steam/skip" && method === "POST") {
+            await this.context.skipSteam();
+            return sendJson(response, 200, { ok: true });
         }
 
         if (path === "/api/steam/refresh" && method === "POST") {
@@ -457,24 +510,60 @@ export class ApiServer {
             return;
         }
 
+        // Where Steam sends the user back, which on the desktop build is a tab in their
+        // real browser rather than the app window. Redirecting into the dashboard from
+        // here would boot a second, unwanted copy of it there - so this leg ends in a page
+        // that says what happened and nothing else. The app itself hears about it over
+        // SSE, from the `steam` event the connect emits.
         if (path === "/api/steam/callback" && method === "GET") {
             const steamId = await verifyCallback(url.searchParams);
             if (!steamId) {
-                response.writeHead(302, { Location: "/#/settings?steam=failed" });
-                response.end();
-                return;
+                return sendHtml(
+                    response,
+                    400,
+                    confirmationPage({
+                        heading: "Steam sign-in could not be verified",
+                        body:
+                            "Steam did not confirm that sign-in, so nothing has been linked. " +
+                            "Close this tab and try again from Sluice.",
+                        ok: false,
+                    }),
+                );
             }
-            try {
-                await this.context.connectSteam({ steamId });
-                response.writeHead(302, { Location: "/#/settings?steam=connected" });
-            } catch (error) {
-                logger.warn(`Steam sign-in succeeded but the library could not be read: ${error}`);
-                // Identity is established even if the library read failed - usually a
-                // missing API key, which the settings page will prompt for.
-                response.writeHead(302, { Location: "/#/settings?steam=needs-key" });
+            const result = await this.context
+                .connectSteam({ steamId, via: "openid" })
+                .catch((error: Error) => {
+                    logger.warn(`Steam sign-in could not be completed: ${error.message}`);
+                    return null;
+                });
+            if (!result) {
+                return sendHtml(
+                    response,
+                    500,
+                    confirmationPage({
+                        heading: "Steam sign-in could not be completed",
+                        body: "Close this tab and try again from Sluice.",
+                        ok: false,
+                    }),
+                );
             }
-            response.end();
-            return;
+
+            const who = result.personaName ? ` — signed in as ${result.personaName}` : "";
+            // The link stands even when the library does not come back: identifying an
+            // account and reading its games are separate things, and saying "failed" here
+            // would send the user off to redo something that already worked.
+            return sendHtml(
+                response,
+                200,
+                confirmationPage({
+                    heading: `Steam linked${who}`,
+                    body: result.error
+                        ? `${result.error.message} Sluice will keep trying - close this tab ` +
+                          "and return to it."
+                        : `${result.gameCount} games found. Close this tab and return to Sluice.`,
+                    ok: !result.error,
+                }),
+            );
         }
 
         if (path === "/api/links" && method === "GET") {
@@ -637,12 +726,6 @@ export class ApiServer {
         if (discord && isMasked(discord.botToken)) {
             discord.botToken = current.notifications.discord?.botToken ?? "";
         }
-        if (merged.steam && isMasked(merged.steam.apiKey)) {
-            merged.steam.apiKey = current.steam.apiKey;
-        }
-        if (merged.steam?.sinfulshadows && isMasked(merged.steam.sinfulshadows.apiKey)) {
-            merged.steam.sinfulshadows.apiKey = current.steam.sinfulshadows?.apiKey;
-        }
         if (merged.campaignRefreshMinutes < 5) {
             merged.campaignRefreshMinutes = 5;
         }
@@ -675,6 +758,9 @@ export class ApiServer {
                     : null,
             },
             mining: miner?.getMiningState() ?? null,
+            // Carried here as well as on the `steam` event, so a page that loads after the
+            // link was made knows about it without asking a second endpoint.
+            steam: this.context.getSteamState(),
             allowStreamEmbed: config.allowStreamEmbed,
             sounds: config.sounds,
             sidebarMode: config.sidebarMode,

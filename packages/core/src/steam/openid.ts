@@ -8,8 +8,9 @@ const CLAIMED_ID_PATTERN = /^https?:\/\/steamcommunity\.com\/openid\/id\/(\d{17}
 /**
  * Steam sign-in, via OpenID 2.0 - the only sign-in Steam offers.
  *
- * This establishes *who* the user is without them copying an ID by hand. It grants no
- * access to anything: reading the library still needs the user's own Web API key.
+ * This establishes *who* the user is without them copying an ID by hand, and that is all
+ * it is for - the library itself is read through the broker, from the Steam ID this hands
+ * back.
  */
 export function buildLoginUrl(returnTo: string, realm: string): string {
     const params = new URLSearchParams({

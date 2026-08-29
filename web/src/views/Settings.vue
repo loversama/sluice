@@ -8,6 +8,7 @@ import { playSound } from "@/lib/sounds.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
 import { formatDateTime, formatRelative } from "@/lib/format.js";
 import { renderMarkdown, stripTitle } from "@/lib/markdown.js";
+import SteamOnboarding from "@/components/SteamOnboarding.vue";
 
 const store = useMinerStore();
 
@@ -301,13 +302,7 @@ const newChannel = ref("");
 const newBlocked = ref("");
 const saved = ref(false);
 const testing = ref(false);
-const steam = ref(null);
-const steamApiKey = ref("");
-const steamAccount = ref("");
 const steamBusy = ref(false);
-/** Which credential path the card is showing; follows the daemon once loaded. */
-const steamProvider = ref("sinfulshadows");
-const ssApiKey = ref("");
 /** Suppresses the autosave watcher while the form is being populated from the daemon. */
 let hydrating = true;
 let saveTimer = null;
@@ -324,11 +319,6 @@ onMounted(async () => {
         desktop.onUpdateStatus?.((next) => (update.value = next));
     }
     if (!store.config) await store.loadConfig();
-    await loadSteam();
-    const outcome = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("steam");
-    if (outcome === "connected") ElMessage.success("Steam account connected.");
-    if (outcome === "failed") ElMessage.error("Steam sign-in could not be verified.");
-    if (outcome === "needs-key") ElMessage.warning("Signed in. Add your Web API key to read your library.");
 });
 
 watch(
@@ -459,46 +449,25 @@ function toggleLanguage(code) {
     else form.broadcasterLanguages.splice(index, 1);
 }
 
-async function loadSteam() {
-    steam.value = await fetch("/api/steam").then((r) => r.json()).catch(() => null);
-    if (steam.value?.hasApiKey) steamApiKey.value = "********";
-    if (steam.value?.hasSinfulShadowsKey) ssApiKey.value = "********";
-    if (steam.value?.provider) steamProvider.value = steam.value.provider;
-}
-async function steamPost(path, body) {
+/** The link state the whole app shares, kept live by the daemon's `steam` event. */
+const steam = computed(() => store.steam);
+const steamLinked = computed(
+    () => steam.value.linked === "openid" || steam.value.linked === "profile",
+);
+
+async function steamPost(path) {
     steamBusy.value = true;
     try {
-        const response = await fetch(path, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body ?? {}),
-        });
+        const response = await fetch(path, { method: "POST" });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`);
-        await loadSteam();
         return data;
     } finally {
         steamBusy.value = false;
+        // The `steam` event will say the same thing, but an action should not leave the
+        // card waiting on the stream to catch up with it.
+        await store.hydrate();
     }
-}
-async function connectSteam() {
-    try {
-        const data = await steamPost("/api/steam/connect", {
-            provider: "direct",
-            apiKey: steamApiKey.value,
-            steamId: steamAccount.value || undefined,
-        });
-        ElMessage.success(`Connected - ${data.gameCount} games found.`);
-    } catch (error) { ElMessage.error(error.message); }
-}
-async function connectSinfulShadows() {
-    try {
-        const data = await steamPost("/api/steam/connect", {
-            provider: "sinfulshadows",
-            sinfulshadowsApiKey: ssApiKey.value,
-        });
-        ElMessage.success(`Connected - ${data.gameCount} games found.`);
-    } catch (error) { ElMessage.error(error.message); }
 }
 async function refreshSteam() {
     try {
@@ -507,11 +476,10 @@ async function refreshSteam() {
     } catch (error) { ElMessage.error(error.message); }
 }
 async function disconnectSteam() {
-    await steamPost("/api/steam/disconnect");
-    steamApiKey.value = "";
-    steamAccount.value = "";
-    ssApiKey.value = "";
-    ElMessage.info("Steam disconnected.");
+    try {
+        await steamPost("/api/steam/disconnect");
+        ElMessage.info("Steam disconnected.");
+    } catch (error) { ElMessage.error(error.message); }
 }
 /**
  * Present only in the desktop build, which injects it from its preload script. The Docker
@@ -718,7 +686,7 @@ const inputStyle = {
                 </select>
             </label>
 
-            <p v-if="form.libraryPolicy === 'ownedOrListed' && !steam?.connected"
+            <p v-if="form.libraryPolicy === 'ownedOrListed' && !store.hasSteamLibrary"
                class="text-[11px]" :style="{ color: 'var(--warn)' }">
                 No Steam library connected, so this is currently inactive &mdash; every game is
                 being mined.
@@ -732,7 +700,7 @@ const inputStyle = {
             </p>
             <p v-else-if="form.libraryPolicy === 'ownedOrListed'"
                class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                Active &mdash; matching against {{ steam?.gameCount || 0 }} owned games.
+                Active &mdash; matching against {{ steam.gameCount }} owned games.
             </p>
         </section>
         <section v-if="visible('mining')" class="card p-4 space-y-4 break-inside-avoid mb-4">
@@ -1368,18 +1336,16 @@ const inputStyle = {
             <h2 class="text-[11px] uppercase tracking-wider" :style="{ color: 'var(--text-2)' }">Steam library</h2>
             <p class="text-[12px]" :style="{ color: 'var(--text-2)' }">
                 Lets the miner rank campaigns by the games you actually own and play, and shows
-                which accounts are worth linking.
+                which accounts are worth linking. No Steam key, and nothing to sign up for.
             </p>
 
-            <div v-if="steam?.connected" class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
+            <div v-if="steamLinked" class="rounded-lg p-3 flex items-center gap-3" :style="{ background: 'var(--surface-2)' }">
                 <div class="flex-1 min-w-0">
                     <p class="text-[13px] font-medium">{{ steam.personaName || steam.steamId }}</p>
                     <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
                         {{ steam.gameCount }} games
-                        &middot; via {{ steam.provider === "sinfulshadows" ? "SinfulShadows" : "your Steam key" }}
+                        &middot; {{ steam.linked === "openid" ? "signed in through Steam" : "linked by profile" }}
                         <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt) }}</template>
-
-                        <template v-if="steam.stale"> &middot; cached</template>
                     </p>
                 </div>
                 <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface)', color: 'var(--text)' }"
@@ -1391,95 +1357,31 @@ const inputStyle = {
                 </button>
             </div>
 
-            <!-- Steam only reports a last-played time to the key that owns the account, so a
-                 borrowed key cannot rank by recency and quietly falls back. Say so. -->
-            <p v-if="steam?.connected && steam?.recencySignal && steam.recencySignal !== 'lastPlayed'"
+            <!-- Named for what it is rather than dressed up as a fault with the library:
+                 the games are real, it is the last read that failed. -->
+            <p v-if="steamLinked && steam.lastError" class="text-[11px]" :style="{ color: 'var(--warn)' }">
+                Last sync failed &mdash; {{ steam.lastError.message }}
+                <template v-if="steam.gameCount">
+                    Ranking is still using the {{ steam.gameCount }} games already cached.
+                </template>
+            </p>
+
+            <!-- Steam only reports a last-played time to a key that owns the account, and
+                 the shared one does not, so recency ranking quietly falls back. Say so. -->
+            <p v-if="steamLinked && steam.recencySignal && steam.recencySignal !== 'lastPlayed'"
                class="text-[11px]" :style="{ color: 'var(--text-2)' }">
                 &ldquo;Recently played&rdquo; ranking is using
                 {{ steam.recencySignal === "playtimeRecent" ? "two-week playtime" : "total playtime" }}
-                &mdash; Steam only reveals last-played times to the key that owns the account.
+                &mdash; Steam only reveals last-played times to the account's own key.
             </p>
 
-            <!-- Two ways in. The SinfulShadows one is first because it asks for less. -->
-            <div class="flex gap-1 p-1 rounded-lg" :style="{ background: 'var(--surface-2)' }">
-                <button
-                    v-for="option in [['sinfulshadows', 'SinfulShadows account'], ['direct', 'Your own Steam key']]"
-                    :key="option[0]"
-                    class="flex-1 px-3 py-1.5 rounded-md text-[12px]"
-                    :style="steamProvider === option[0]
-                        ? { background: 'var(--surface)', color: 'var(--text)' }
-                        : { color: 'var(--text-2)' }"
-                    @click="steamProvider = option[0]"
-                >
-                    {{ option[1] }}
-                </button>
-            </div>
+            <p v-if="steam.linked === 'skipped'" class="text-[11px]" :style="{ color: 'var(--text-2)' }">
+                You chose not to use a Steam library. Link one here whenever you want to.
+            </p>
 
-            <template v-if="steamProvider === 'sinfulshadows'">
-                <label class="block">
-                    <span class="text-[12px]">SinfulShadows API key</span>
-                    <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
-                        No Steam key needed. Create one at
-                        <a href="https://sinfulshadows.com/settings/api" target="_blank" rel="noreferrer" class="underline">sinfulshadows.com &rarr; Settings &rarr; API keys</a>.
-                        Your library comes from the Steam account linked there, so link Steam
-                        on the site first.
-                    </span>
-                    <input v-model="ssApiKey" type="password" placeholder="ss_..."
-                           class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </label>
-                <div class="flex items-center gap-2 flex-wrap">
-                    <button
-                        class="px-3 py-1.5 rounded-lg text-[12px] text-white"
-                        :style="{ background: 'var(--accent)' }"
-                        :disabled="steamBusy"
-                        @click="connectSinfulShadows"
-                    >
-                        {{ steamBusy ? "Connecting..." : steam?.hasSinfulShadowsKey ? "Update key" : "Connect" }}
-                    </button>
-                    <span class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Not autosaved &mdash; press Connect to apply.
-                    </span>
-                </div>
-            </template>
-
-            <template v-else>
-                <template v-if="!steam?.connected || steam?.provider !== 'direct'">
-                    <a href="/api/steam/login" class="inline-block px-3 py-2 rounded-lg text-[13px] font-medium text-white" :style="{ background: '#1b2838' }">
-                        Sign in through Steam
-                    </a>
-                    <input v-model="steamAccount" placeholder="Or paste a profile URL / 17-digit Steam ID"
-                           class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </template>
-
-                <label class="block">
-                    <span class="text-[12px]">Steam Web API key</span>
-                    <span class="block text-[11px] mb-1" :style="{ color: 'var(--text-2)' }">
-                        Required to read your library. Your profile URL alone identifies the
-                        account, but only a key grants access to what is in it. Get one at
-                        <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer" class="underline">steamcommunity.com/dev/apikey</a>.
-                        Your profile's &ldquo;Game details&rdquo; must be public.
-                    </span>
-                    <input v-model="steamApiKey" type="password" class="w-full px-3 py-2 rounded-lg text-[12px] outline-none" :style="inputStyle" />
-                </label>
-                <!-- Connecting makes live API calls, so it is an explicit action rather than
-                     part of the page's autosave. -->
-                <div class="flex items-center gap-2 flex-wrap">
-                    <button
-                        class="px-3 py-1.5 rounded-lg text-[12px] text-white"
-                        :style="{ background: 'var(--accent)' }"
-                        :disabled="steamBusy"
-                        @click="connectSteam"
-                    >
-                        {{ steamBusy ? "Connecting..." : steam?.hasApiKey ? "Update key" : "Connect Steam" }}
-                    </button>
-                    <span v-if="steam?.steamId && !steam?.hasApiKey" class="text-[11px]" :style="{ color: 'var(--warn)' }">
-                        Account identified. A key is still needed to read the library.
-                    </span>
-                    <span v-else class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Not autosaved &mdash; press Connect to apply.
-                    </span>
-                </div>
-            </template>
+            <!-- The same three options the prompt after sign-in offers, from the same
+                 component, so the two cannot come to say different things. -->
+            <SteamOnboarding v-if="!steamLinked" embedded />
         </section>
         <!-- In the narrow window everything is on one page, so the categories that
              are tabs on a wide screen become the same full-bleed bands the compact

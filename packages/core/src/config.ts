@@ -19,8 +19,15 @@ export type { LibraryPolicy };
  */
 export type UnlinkedPolicy = "mine" | "skip" | "ownedOrChosen";
 
-/** Where the Steam library is read from. See `Config.steam.provider`. */
-export type SteamProvider = "direct" | "sinfulshadows";
+/**
+ * How the Steam account was identified, or null while the question has not been put.
+ *
+ * Null is what makes the onboarding prompt appear, and "skipped" is what stops it. That is
+ * why the answer is kept here rather than in the browser: skipping is a decision about the
+ * account, and it should survive a reinstall and follow the user to whatever is showing
+ * the dashboard, not be forgotten by a cleared browser profile.
+ */
+export type SteamLinkState = "openid" | "profile" | "skipped";
 
 export interface Config {
     /**
@@ -144,30 +151,18 @@ export interface Config {
     allowedHosts: string[];
     logLevel: LogLevel;
     steam: {
+        /** Whether Steam has been linked, how, or that the user chose not to. */
+        linked: SteamLinkState | null;
         /**
-         * Where the library is read from.
-         *
-         * "direct" uses the user's own Steam Web API key. "sinfulshadows" borrows the key
-         * held by sinfulshadows.com, which returns the Steam account linked to the
-         * SinfulShadows account the key belongs to - so no Steam key or ID is needed.
-         */
-        provider: SteamProvider;
-        /**
-         * Steam Web API key from https://steamcommunity.com/dev/apikey. Required to read the
-         * library - signing in through Steam establishes identity only. "direct" only.
-         */
-        apiKey?: string;
-        /**
-         * 64-bit Steam ID, filled in by signing in through Steam or entered by hand.
-         * "direct" only; the SinfulShadows provider derives it from the linked account.
+         * 64-bit Steam ID, filled in by signing in through Steam or by pasting a profile
+         * URL. It identifies a public profile and is not a credential.
          */
         steamId?: string;
-        sinfulshadows: {
-            /** Key created at sinfulshadows.com under Settings -> API keys. */
-            apiKey?: string;
-            /** Overridable so the pair can be run against a local backend. */
-            baseUrl: string;
-        };
+        /**
+         * The service that reads Steam on the app's behalf, so no key of any kind is asked
+         * of the user. Overridable so the pair can be run against a local backend.
+         */
+        brokerBaseUrl: string;
         /** Hours between library refreshes. Libraries change rarely. */
         refreshHours: number;
     };
@@ -256,12 +251,67 @@ export const DEFAULT_CONFIG: Config = {
     allowedHosts: [],
     logLevel: "info",
     steam: {
-        provider: "direct",
-        sinfulshadows: { baseUrl: "https://sinfulshadows.com" },
+        linked: null,
+        brokerBaseUrl: "https://sinfulshadows.com",
         refreshHours: 24,
     },
     notifications: {},
 };
+
+/** The Steam block as it was written before the broker, when keys were the user's problem. */
+interface LegacySteam {
+    provider?: "direct" | "sinfulshadows";
+    /** The user's own Steam Web API key. */
+    apiKey?: string;
+    steamId?: string;
+    sinfulshadows?: { apiKey?: string; baseUrl?: string };
+}
+
+/**
+ * Carry a key-era Steam block onto the keyless one.
+ *
+ * Nobody should lose their library or have to do anything, so the rule is to keep whatever
+ * identifies the account and throw away everything that was only ever there to grant
+ * access to it:
+ *
+ * - A direct Steam key with an ID beside it becomes a plain profile link. The ID is all
+ *   that was ever needed to read a public library; the key was the price Steam charged for
+ *   asking, and the broker pays it now.
+ * - A SinfulShadows key had no Steam ID in the config at all - the site derived it from the
+ *   linked account. The ID is in steam.json instead, so `app.ts` adopts it once the cached
+ *   library is loaded and this leaves `linked` null for it to fill in.
+ * - Neither leaves `linked` null, which is what puts the onboarding prompt on screen.
+ *
+ * A base URL somebody pointed at a local backend is worth keeping either way: the broker
+ * lives on the same host as the API it replaces.
+ */
+function migrateSteam(config: Config, legacy: LegacySteam | undefined): void {
+    if (!legacy) {
+        return;
+    }
+    const legacyBaseUrl = legacy.sinfulshadows?.baseUrl;
+    if (legacyBaseUrl && legacyBaseUrl !== DEFAULT_CONFIG.steam.brokerBaseUrl) {
+        config.steam.brokerBaseUrl = legacyBaseUrl;
+    }
+
+    if (!config.steam.linked) {
+        config.steam.linked = legacy.apiKey && config.steam.steamId ? "profile" : null;
+    }
+
+    if (legacy.apiKey || legacy.sinfulshadows?.apiKey) {
+        logger.info(
+            "Steam no longer needs an API key of any kind; the stored one has been removed " +
+                "and your library will keep refreshing without it.",
+        );
+    }
+
+    // Deleted rather than left in place: a key kept in a file nothing reads is a secret
+    // still sitting on disk, and the point of the change is that there is no longer one.
+    const stale = config.steam as LegacySteam;
+    delete stale.provider;
+    delete stale.apiKey;
+    delete stale.sinfulshadows;
+}
 
 /** Load config from disk, writing a default file if none exists. */
 export async function loadConfig(path: string): Promise<Config> {
@@ -293,21 +343,11 @@ export async function loadConfig(path: string): Promise<Config> {
     const config: Config = {
         ...DEFAULT_CONFIG,
         ...parsed,
-        steam: {
-            ...DEFAULT_CONFIG.steam,
-            ...(parsed.steam ?? {}),
-            sinfulshadows: {
-                ...DEFAULT_CONFIG.steam.sinfulshadows,
-                ...(parsed.steam?.sinfulshadows ?? {}),
-            },
-        },
+        steam: { ...DEFAULT_CONFIG.steam, ...(parsed.steam ?? {}) },
         notifications: { ...DEFAULT_CONFIG.notifications, ...(parsed.notifications ?? {}) },
     };
 
-    // Configs written before the SinfulShadows provider existed used a Steam key directly.
-    if (!config.steam.provider) {
-        config.steam.provider = "direct";
-    }
+    migrateSteam(config, parsed.steam as LegacySteam | undefined);
 
     // Older configs expressed this as a boolean; carry the intent across.
     if (parsed.priorityMode === undefined && parsed.mineUnlistedGames === false) {

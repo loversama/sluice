@@ -3,7 +3,6 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadConfig } from "../packages/core/src/config.js";
 import { SteamLibrary } from "../packages/core/src/steam/library.js";
 import type { LibraryProvider, LibrarySnapshot } from "../packages/core/src/steam/provider.js";
 import type { OwnedGame } from "../packages/core/src/steam/client.js";
@@ -12,7 +11,7 @@ const requestMock = vi.hoisted(() => vi.fn());
 vi.mock("undici", () => ({ request: requestMock }));
 
 // Imported after the mock so the provider picks up the stub.
-const { SinfulShadowsProvider, LibraryError } = await import("../packages/core/src/steam/provider.js");
+const { BrokerProvider, LibraryError } = await import("../packages/core/src/steam/provider.js");
 
 function game(partial: Partial<OwnedGame> & { name: string }): OwnedGame {
     return {
@@ -37,9 +36,14 @@ function providerReturning(snapshot: Partial<LibrarySnapshot>): LibraryProvider 
     };
 }
 
-function reply(statusCode: number, body: unknown) {
+function reply(
+    statusCode: number,
+    body: unknown,
+    headers: Record<string, string> = {},
+) {
     return {
         statusCode,
+        headers,
         body: {
             json: async () => body,
             dump: async () => {},
@@ -47,19 +51,7 @@ function reply(statusCode: number, body: unknown) {
     };
 }
 
-describe("config migration", () => {
-    it("defaults an existing config with no provider to the direct Steam key", async () => {
-        const dir = await mkdtemp(join(tmpdir(), "tdb-"));
-        const path = join(dir, "config.json");
-        await writeFile(path, JSON.stringify({ steam: { apiKey: "abc", steamId: "123" } }));
-
-        const config = await loadConfig(path);
-
-        expect(config.steam.provider).toBe("direct");
-        expect(config.steam.apiKey).toBe("abc");
-        expect(config.steam.sinfulshadows.baseUrl).toBe("https://sinfulshadows.com");
-    });
-});
+const STEAM_ID = "76561197971203314";
 
 describe("SteamLibrary recency signal", () => {
     it("ranks on last-played when Steam supplied timestamps", async () => {
@@ -135,13 +127,13 @@ describe("SteamLibrary recency signal", () => {
     });
 });
 
-describe("SinfulShadowsProvider", () => {
+describe("BrokerProvider", () => {
     beforeEach(() => requestMock.mockReset());
 
-    it("maps the proxy response onto owned games", async () => {
+    it("maps the broker's library response onto owned games", async () => {
         requestMock.mockResolvedValue(
             reply(200, {
-                steamId: "76561197971203314",
+                steamId: STEAM_ID,
                 personaName: "Nathan",
                 fetchedAt: 1_700_000_000_000,
                 stale: false,
@@ -157,90 +149,163 @@ describe("SinfulShadowsProvider", () => {
             }),
         );
 
-        const snapshot = await new SinfulShadowsProvider("ss_key").fetchLibrary();
+        const snapshot = await new BrokerProvider(STEAM_ID).fetchLibrary();
 
-        expect(snapshot.steamId).toBe("76561197971203314");
+        expect(snapshot.steamId).toBe(STEAM_ID);
+        expect(snapshot.personaName).toBe("Nathan");
         expect(snapshot.games).toEqual([
             { appid: 252490, name: "Rust", playtimeForever: 1200, playtimeRecent: 60, lastPlayed: 0 },
         ]);
         expect(snapshot.fetchedAt).toBe(1_700_000_000_000);
     });
 
-    it("sends the key as a bearer token and asks for no Steam ID", async () => {
-        requestMock.mockResolvedValue(reply(200, { steamId: "1", games: [{ appid: 1, name: "Rust" }] }));
-        await new SinfulShadowsProvider("ss_secret").fetchLibrary();
+    it("names the account in the query and the build in the header", async () => {
+        requestMock.mockResolvedValue(
+            reply(200, { steamId: STEAM_ID, games: [{ appid: 1, name: "Rust" }] }),
+        );
+        await new BrokerProvider(STEAM_ID, undefined, "slc_test").fetchLibrary();
 
         const [url, options] = requestMock.mock.calls[0];
-        expect(url).toBe("https://sinfulshadows.com/api/v1/steam/library");
-        expect(options.headers.authorization).toBe("Bearer ss_secret");
-        expect(url).not.toContain("steamid");
+        expect(url).toBe(
+            `https://sinfulshadows.com/api/v1/sluice/steam/library?steamId=${STEAM_ID}`,
+        );
+        expect(options.headers["X-Sluice-Client"]).toBe("slc_test");
+        // Nothing else identifies the caller: there is no key of the user's to send.
+        expect(options.headers.authorization).toBeUndefined();
     });
 
-    it("reports a revoked key distinctly, so it can be surfaced once", async () => {
-        requestMock.mockResolvedValue(reply(401, { error: "key_invalid", message: "nope" }));
+    it("reads a summary without touching the library", async () => {
+        requestMock.mockResolvedValue(
+            reply(200, {
+                steamId: STEAM_ID,
+                personaName: "Nathan",
+                avatarUrl: "https://avatars.steamstatic.com/x.jpg",
+                visible: true,
+                fetchedAt: 1_700_000_000_000,
+                stale: false,
+            }),
+        );
 
-        await expect(new SinfulShadowsProvider("ss_key").fetchLibrary()).rejects.toMatchObject({
-            code: "key_invalid",
+        const summary = await new BrokerProvider(STEAM_ID).fetchSummary();
+
+        expect(requestMock.mock.calls[0][0]).toContain("/sluice/steam/summary?");
+        expect(summary).toEqual({
+            steamId: STEAM_ID,
+            personaName: "Nathan",
+            avatarUrl: "https://avatars.steamstatic.com/x.jpg",
+            visible: true,
+            fetchedAt: 1_700_000_000_000,
+            stale: false,
         });
     });
 
-    it("explains an unlinked Steam account with somewhere to go", async () => {
+    it("passes a private library through as its own case, with somewhere to go", async () => {
         requestMock.mockResolvedValue(
-            reply(409, { error: "steam_not_linked", message: "not linked" }),
+            reply(409, {
+                error: "library_private",
+                message: "Set 'Game details' to Public in your Steam privacy settings.",
+            }),
         );
 
-        const error = await new SinfulShadowsProvider("ss_key").fetchLibrary().catch((e) => e);
+        const error = await new BrokerProvider(STEAM_ID).fetchLibrary().catch((e) => e);
         expect(error).toBeInstanceOf(LibraryError);
-        expect(error.code).toBe("steam_not_linked");
-        expect(error.actionUrl).toContain("/settings/connections");
+        expect(error.code).toBe("library_private");
+        // The broker names the exact setting; paraphrasing it here would lose that.
+        expect(error.message).toContain("Game details");
+        expect(error.actionUrl).toContain("steamcommunity.com");
     });
 
-    it("passes a private library through as its own case", async () => {
-        requestMock.mockResolvedValue(reply(409, { error: "library_private", message: "private" }));
-        await expect(new SinfulShadowsProvider("ss_key").fetchLibrary()).rejects.toMatchObject({
+    it("treats an empty library as private rather than as owning nothing", async () => {
+        // Steam answers a private profile with an empty list, not an error, so a library of
+        // zero games is never worth reporting as one.
+        requestMock.mockResolvedValue(reply(200, { steamId: STEAM_ID, games: [] }));
+
+        await expect(new BrokerProvider(STEAM_ID).fetchLibrary()).rejects.toMatchObject({
             code: "library_private",
         });
     });
 
-    it("treats being rate limited as retryable rather than fatal", async () => {
-        requestMock.mockResolvedValue(reply(429, { error: "rate_limited", message: "slow down" }));
-        await expect(new SinfulShadowsProvider("ss_key").fetchLibrary()).rejects.toMatchObject({
-            code: "rate_limited",
+    it("tells the user to update when the broker has stopped answering this build", async () => {
+        requestMock.mockResolvedValue(reply(426, { error: "client_outdated", message: "old" }));
+
+        const error = await new BrokerProvider(STEAM_ID).fetchLibrary().catch((e) => e);
+        expect(error.code).toBe("client_outdated");
+        expect(error.message).toMatch(/update/i);
+    });
+
+    it("treats an unrecognised token the same as an outdated one", async () => {
+        // 401 and 426 differ only in whether the broker ever knew the token. Neither is
+        // something the user can act on except by updating.
+        requestMock.mockResolvedValue(
+            reply(401, { error: "client_token_invalid", message: "unknown" }),
+        );
+
+        await expect(new BrokerProvider(STEAM_ID).fetchLibrary()).rejects.toMatchObject({
+            code: "client_outdated",
         });
+    });
+
+    it("takes the wait from the Retry-After header, not the body", async () => {
+        // A proxy in between can rewrite one without the other, and the header is the one
+        // that governs.
+        requestMock.mockResolvedValue(
+            reply(429, { error: "rate_limited", message: "slow down", retryAfter: 9999 }, {
+                "retry-after": "42",
+            }),
+        );
+
+        const error = await new BrokerProvider(STEAM_ID).fetchLibrary().catch((e) => e);
+        expect(error.code).toBe("rate_limited");
+        expect(error.retryAfterSeconds).toBe(42);
+    });
+
+    it("reports the broker being down as retryable", async () => {
+        requestMock.mockResolvedValue(
+            reply(503, { error: "steam_unavailable", message: "Steam is unreachable." }, {
+                "retry-after": "600",
+            }),
+        );
+
+        const error = await new BrokerProvider(STEAM_ID).fetchLibrary().catch((e) => e);
+        expect(error.code).toBe("unavailable");
+        expect(error.retryAfterSeconds).toBe(600);
     });
 
     it("reports an unreachable host rather than throwing a raw network error", async () => {
         requestMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
-        await expect(new SinfulShadowsProvider("ss_key").fetchLibrary()).rejects.toMatchObject({
+        await expect(new BrokerProvider(STEAM_ID).fetchLibrary()).rejects.toMatchObject({
             code: "unavailable",
         });
     });
 
-    it("treats a server error as unavailable rather than a bad key", async () => {
-        requestMock.mockResolvedValue(reply(500, { message: "boom" }));
-        await expect(new SinfulShadowsProvider("ss_key").fetchLibrary()).rejects.toMatchObject({
-            code: "unavailable",
-        });
+    it("keeps the broker's own timestamp when it served a cached copy", async () => {
+        // Stale means real data that is merely old. Stamping it with "now" would rest on it
+        // for a full refresh interval instead of trying again sooner.
+        const anHourAgo = Date.now() - 3_600_000;
+        requestMock.mockResolvedValue(
+            reply(200, {
+                steamId: STEAM_ID,
+                personaName: "Nathan",
+                fetchedAt: anHourAgo,
+                stale: true,
+                games: [{ appid: 1, name: "Rust" }],
+            }),
+        );
+
+        const snapshot = await new BrokerProvider(STEAM_ID).fetchLibrary();
+        expect(snapshot.fetchedAt).toBe(anHourAgo);
+        expect(snapshot.stale).toBe(true);
     });
 
     it("honours a custom base URL", async () => {
-        requestMock.mockResolvedValue(reply(200, { steamId: "1", games: [{ appid: 1, name: "Rust" }] }));
-        await new SinfulShadowsProvider("ss_key", "http://localhost:5174/").fetchLibrary();
-        expect(requestMock.mock.calls[0][0]).toBe("http://localhost:5174/api/v1/steam/library");
-    });
-
-    it("verifies a key without fetching the library", async () => {
         requestMock.mockResolvedValue(
-            reply(200, { userId: 7, scopes: [], steam: { linked: true, personaName: "Nathan" } }),
+            reply(200, { steamId: STEAM_ID, games: [{ appid: 1, name: "Rust" }] }),
         );
-
-        await expect(new SinfulShadowsProvider("ss_key").verify()).resolves.toEqual({
-            userId: 7,
-            steamLinked: true,
-            personaName: "Nathan",
-        });
-        expect(requestMock.mock.calls[0][0]).toContain("/api/v1/me");
+        await new BrokerProvider(STEAM_ID, "http://localhost:5174/").fetchLibrary();
+        expect(requestMock.mock.calls[0][0]).toBe(
+            `http://localhost:5174/api/v1/sluice/steam/library?steamId=${STEAM_ID}`,
+        );
     });
 });
 

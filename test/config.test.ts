@@ -50,32 +50,118 @@ describe("loadConfig", () => {
     });
 });
 
+/**
+ * Steam used to be reached with a key the user supplied - their own Steam Web API key, or
+ * one from sinfulshadows.com. It is a broker now and there is no key at all, so every one
+ * of these is somebody's working install being carried across a change they did not ask
+ * for. Nobody should lose their library, and nobody should have to do anything.
+ */
+describe("migrating a key-era Steam config", () => {
+    /** What the config looked like when the user held their own Steam Web API key. */
+    const DIRECT = {
+        steam: {
+            provider: "direct",
+            apiKey: "STEAMKEY",
+            steamId: "76561198000000000",
+            sinfulshadows: { baseUrl: "https://sinfulshadows.com" },
+            refreshHours: 24,
+        },
+    };
+
+    /** What it looked like when sinfulshadows.com held the key and derived the account. */
+    const BORROWED = {
+        steam: {
+            provider: "sinfulshadows",
+            sinfulshadows: { apiKey: "ss_key", baseUrl: "https://sinfulshadows.com" },
+            refreshHours: 24,
+        },
+    };
+
+    it("keeps a direct key's account and throws the key away", async () => {
+        const config = await loadConfig(await tempConfig(DIRECT));
+
+        expect(config.steam.steamId).toBe("76561198000000000");
+        expect(config.steam.linked).toBe("profile");
+        // The key is gone from the object, so the next save takes it off disk too.
+        expect(config.steam).not.toHaveProperty("apiKey");
+        expect(config.steam).not.toHaveProperty("provider");
+        expect(config.steam).not.toHaveProperty("sinfulshadows");
+    });
+
+    it("leaves a borrowed key's install unlinked, for app.ts to adopt from steam.json", async () => {
+        // The Steam ID was never in this config: the site derived it from the linked
+        // account, and the only copy on this machine is in the cached library.
+        const config = await loadConfig(await tempConfig(BORROWED));
+
+        expect(config.steam.linked).toBeNull();
+        expect(config.steam.steamId).toBeUndefined();
+        expect(config.steam).not.toHaveProperty("sinfulshadows");
+    });
+
+    it("keeps a base URL somebody pointed at a local backend", async () => {
+        const config = await loadConfig(
+            await tempConfig({
+                steam: { provider: "sinfulshadows", sinfulshadows: { apiKey: "ss_key", baseUrl: "http://localhost:5174" } },
+            }),
+        );
+
+        expect(config.steam.brokerBaseUrl).toBe("http://localhost:5174");
+    });
+
+    it("asks a config with neither key, so onboarding shows", async () => {
+        const config = await loadConfig(await tempConfig({ priorityGames: ["Rust"] }));
+
+        expect(config.steam.linked).toBeNull();
+        expect(config.steam.brokerBaseUrl).toBe("https://sinfulshadows.com");
+    });
+
+    it("does not re-ask somebody who has already declined", async () => {
+        const config = await loadConfig(await tempConfig({ steam: { linked: "skipped" } }));
+        expect(config.steam.linked).toBe("skipped");
+    });
+
+    it("does not invent a link from a key that never named an account", async () => {
+        // A key pasted and never connected identifies nothing, so there is nothing to keep.
+        const config = await loadConfig(
+            await tempConfig({ steam: { provider: "direct", apiKey: "STEAMKEY" } }),
+        );
+
+        expect(config.steam.linked).toBeNull();
+        expect(config.steam.steamId).toBeUndefined();
+    });
+
+    it("survives a round trip, leaving no key behind on disk", async () => {
+        const path = await tempConfig(DIRECT);
+        const migrated = await loadConfig(path);
+        await saveConfig(path, migrated);
+
+        const { readFile } = await import("node:fs/promises");
+        expect(await readFile(path, "utf8")).not.toContain("STEAMKEY");
+        expect((await loadConfig(path)).steam.linked).toBe("profile");
+    });
+});
+
 describe("secret masking", () => {
     it("masks secrets but keeps non-secret fields readable", () => {
         const masked = maskConfig({
             ...DEFAULT_CONFIG,
-            steam: { refreshHours: 24, apiKey: "REALKEY", steamId: "76561198000000000" },
+            steam: { linked: "profile", refreshHours: 24, brokerBaseUrl: "https://sinfulshadows.com", steamId: "76561198000000000" },
             notifications: {
                 telegram: { botToken: "REALTOKEN", chatId: "12345" },
                 discord: { webhookUrl: "https://discord.com/api/webhooks/real" },
             },
         });
-        expect(masked.steam.apiKey).toBe("********");
         expect(masked.notifications.telegram?.botToken).toBe("********");
         expect(masked.notifications.discord?.webhookUrl).toBe("********");
-        // Not secrets - the UI needs to show these.
+        // Not secrets - the UI needs to show these. A Steam ID names a public profile, and
+        // there is no longer any Steam credential to mask.
         expect(masked.steam.steamId).toBe("76561198000000000");
+        expect(masked.steam.linked).toBe("profile");
         expect(masked.notifications.telegram?.chatId).toBe("12345");
     });
 
-    it("does not invent a mask where no secret is stored", () => {
-        const masked = maskConfig(DEFAULT_CONFIG);
-        expect(masked.steam.apiKey).toBe("");
-        expect(isMasked(masked.steam.apiKey)).toBe(false);
-    });
-
     it("recognises the mask so a resubmitted value is never stored verbatim", () => {
-        // The failure this guards: writing "********" to disk as if it were a real key.
+        // The failure this guards: writing "********" to disk as if it were a real token.
         expect(isMasked("********")).toBe(true);
         expect(isMasked("REALKEY")).toBe(false);
         expect(isMasked(undefined)).toBe(false);

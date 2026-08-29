@@ -124,14 +124,8 @@ export function maskConfig(config: Config): Config {
     const mask = (value: string | undefined) => (value ? "********" : "");
     return {
         ...config,
-        steam: {
-            ...config.steam,
-            apiKey: mask(config.steam.apiKey),
-            sinfulshadows: {
-                ...config.steam.sinfulshadows,
-                apiKey: mask(config.steam.sinfulshadows?.apiKey),
-            },
-        },
+        // Nothing under `steam` is a secret any more: a Steam ID names a public profile,
+        // and the app holds no key of its own to leak.
         notifications: {
             ...(config.notifications.telegram && {
                 telegram: {

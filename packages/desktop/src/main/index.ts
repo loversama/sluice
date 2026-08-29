@@ -142,10 +142,12 @@ let updates: AutoUpdate | null = null;
                 openExternally(url);
             }
         });
-        // The Steam link is a same-tab navigation to our own /api/steam/login, which then
-        // 302s out to steamcommunity.com - so the redirect leg needs catching too. Steam's
-        // return_to points back at our loopback port, which the external browser can reach,
-        // so the round trip finishes there and the dashboard picks it up over SSE.
+        // The Steam link opens a new window, so the handler above sends the whole round
+        // trip out to the real browser. This catches the same journey started any other
+        // way: a same-tab navigation to our own /api/steam/login is ours, but the 302 it
+        // answers with is not. Steam's return_to points back at our loopback port, which
+        // the external browser can reach, so the trip finishes on the confirmation page
+        // there and the window learns about it over SSE.
         win.webContents.on("will-redirect", (event, url) => {
             if (!isOurs(url)) {
                 event.preventDefault();

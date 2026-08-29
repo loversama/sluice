@@ -5,7 +5,6 @@ import { useMinerStore } from "@/stores/miner.js";
 import { boxArt, formatDuration } from "@/lib/format.js";
 
 const store = useMinerStore();
-const steam = ref(null);
 
 /**
  * Unlinked campaigns are the quietest way to lose rewards: progress accrues normally and
@@ -36,10 +35,7 @@ async function load() {
     }
 }
 
-onMounted(async () => {
-    await load();
-    steam.value = await fetch("/api/steam").then((r) => r.json()).catch(() => null);
-});
+onMounted(load);
 
 // Suggestions are derived from campaign state, so they go stale the moment it refreshes.
 watch(() => store.campaigns, load);
@@ -78,7 +74,7 @@ function playtime(entry) {
         <!-- Half the ranking is Steam ownership; without it the page silently sorts on
              one signal and never says so. -->
         <p
-            v-if="!loading && steam && !steam.connected"
+            v-if="!loading && store.loaded && !store.hasSteamLibrary"
             class="card p-3 text-[12px]"
             :style="{ color: 'var(--text-2)' }"
         >

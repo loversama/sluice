@@ -22,7 +22,7 @@ export {
     type Config,
     type LibraryPolicy,
     type UnlinkedPolicy,
-    type SteamProvider,
+    type SteamLinkState,
 } from "./config.js";
 export {
     default as logger,

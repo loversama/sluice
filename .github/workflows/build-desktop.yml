@@ -56,6 +56,34 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The token says which build is calling the Steam broker, so it is stamped in per
+      # release rather than committed. It is cohort control, not a secret - see the comment
+      # on CLIENT_TOKEN in packages/core/src/version.ts - but a build that ships the "dev"
+      # placeholder is a build the broker will not answer, which is what the check further
+      # down refuses to publish.
+      - name: Stamp the Steam client token
+        if: ${{ secrets.SLUICE_CLIENT_TOKEN != '' }}
+        shell: bash
+        env:
+          CLIENT_TOKEN: ${{ secrets.SLUICE_CLIENT_TOKEN }}
+        run: |
+          FILE=packages/core/src/version.ts
+          node -e '
+            const fs = require("node:fs");
+            const file = "packages/core/src/version.ts";
+            const before = fs.readFileSync(file, "utf8");
+            const after = before.replace(
+              /^export const CLIENT_TOKEN = ".*";$/m,
+              () => `export const CLIENT_TOKEN = "${process.env.CLIENT_TOKEN}";`,
+            );
+            if (after === before) {
+              console.error("::error::CLIENT_TOKEN in " + file + " was not substituted.");
+              process.exit(1);
+            }
+            fs.writeFileSync(file, after);
+          '
+          echo "Stamped a client token into $FILE."
+
       - name: Build the dashboard
         run: npm run build:web
 
@@ -68,16 +96,45 @@ jobs:
       - name: Build the desktop shell
         run: npm --prefix packages/desktop run build
 
-      - name: Check the version matches the tag
+      # Three files carry the version and they have to agree with the tag; only the
+      # desktop one used to be checked, so the other two could drift and the mismatch would
+      # show up as an update that quietly never applies. The client token is checked in the
+      # same breath: a release still carrying the "dev" placeholder installs fine and then
+      # cannot read Steam for anybody, which is precisely the kind of failure that has to
+      # be caught before publishing rather than after.
+      #
+      # Read out of the source rather than the build output - version.ts is an ES module
+      # and `require` cannot reach into one.
+      - name: Check the version and client token
         if: github.event_name == 'push'
         shell: bash
         run: |
           TAG="${{ github.ref_name }}"
-          PKG="v$(node -p "require('./packages/desktop/package.json').version")"
-          if [[ "$TAG" != "$PKG" ]]; then
-            echo "::error::Tag $TAG does not match package version $PKG."
-            exit 1
-          fi
+          node -e '
+            const fs = require("node:fs");
+            const tag = process.argv[1];
+            const source = fs.readFileSync("packages/core/src/version.ts", "utf8");
+            const read = (name) =>
+              new RegExp(`^export const ${name} = "(.*)";$`, "m").exec(source)?.[1] ?? "";
+            const versions = {
+              "package.json": require("./package.json").version,
+              "packages/desktop/package.json": require("./packages/desktop/package.json").version,
+              "packages/core/src/version.ts": read("VERSION"),
+            };
+            let failed = false;
+            for (const [file, version] of Object.entries(versions)) {
+              if (`v${version}` !== tag) {
+                console.error(`::error::Tag ${tag} does not match ${file}, which says ${version}.`);
+                failed = true;
+              }
+            }
+            if (read("CLIENT_TOKEN") === "dev") {
+              console.error("::error::This build still carries the placeholder Steam client token.");
+              console.error("Set the SLUICE_CLIENT_TOKEN secret; the stamp step earlier reads it.");
+              failed = true;
+            }
+            process.exit(failed ? 1 : 0);
+          ' "$TAG"
 
       - name: Decide whether to publish
         id: publish

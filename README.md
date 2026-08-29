@@ -33,8 +33,7 @@ Then open <http://127.0.0.1:4400>.
 
 Runtime state lives in `./data` (`config.json`, `auth.json`, `steam.json`), mounted as a
 volume so credentials survive rebuilds. That directory is git-ignored; **never commit it** -
-`auth.json` holds an OAuth token with full access to your Twitch account and `steam.json`
-holds your Steam Web API key.
+`auth.json` holds an OAuth token with full access to your Twitch account.
 
 The port is published to `127.0.0.1` only. The container binds `0.0.0.0` because it must to
 be reachable at all, but what is actually exposed is the mapping in `docker-compose.yml`. To
@@ -171,32 +170,24 @@ Your `priorityGames` list always wins. `priorityMode` decides the order of every
 Connecting Steam lets the bot rank campaigns by the games you actually own and play, and
 shows which Twitch accounts are worth linking.
 
-There are two ways to connect, chosen on the Settings page.
+**No key is needed, of any kind.** Steam is read through a service on
+[sinfulshadows.com](https://sinfulshadows.com) that holds one Steam Web API key, caches what
+it reads and rate-limits by IP. All the bot sends is a Steam ID, which names a public
+profile - so there is nothing to create, nothing to paste and nothing to keep secret.
 
-#### Through SinfulShadows (no Steam key needed)
+You are asked once, just after signing in to Twitch, and there are three answers:
 
-If you have a [sinfulshadows.com](https://sinfulshadows.com) account, it can read the library
-on your behalf using the key the site already holds:
+- **Sign in through Steam.** Steam's own OpenID sign-in, opened in a real browser so the
+  address bar and your password manager both work. It proves who you are and nothing else.
+- **Paste a profile URL.** A profile URL, a custom URL name or a 17-digit Steam ID. Both the
+  profile and its "Game details" have to be set to Public, or there is nothing to read.
+- **Skip.** Remembered by the daemon, not the browser, so it survives a reinstall. Link
+  later from **Settings -> Accounts** whenever you want.
 
-1. Link Steam on the site, under **Settings -> Linked Accounts**.
-2. Create a key under **Settings -> API keys**, and paste it into the bot.
-
-The key is shown once and stored hashed; revoke it there if a machine is lost. It only ever
-reads the Steam account *you* linked - the endpoint takes no Steam ID, so a key cannot be
-pointed at anyone else's library. Config: `steam.provider = "sinfulshadows"` and
-`steam.sinfulshadows.apiKey`.
-
-#### With your own Steam Web API key
-
-1. **Your Steam account** - either "Sign in through Steam" (OpenID), or paste a profile URL
-   or 17-digit Steam ID.
-2. **A Steam Web API key**, from <https://steamcommunity.com/dev/apikey>. Signing in proves
-   who you are but grants no access to the library. Your profile's "Game details" must also
-   be set to Public, or Steam returns an empty list.
-
-Either way the library is cached in `steam.json` and refreshed every `steam.refreshHours`
-(default 24), since libraries change rarely. If the provider is unreachable the cached copy
-keeps being used, and mining continues.
+The library is cached in `steam.json` and refreshed every `steam.refreshHours` (default 24),
+since libraries change rarely. If the service is unreachable the cached copy keeps being
+used and mining carries on; a library that has never loaded is retried within the quarter
+hour, because until one exists the library policy has nothing to check ownership against.
 
 **Two limitations worth knowing:**
 
@@ -204,8 +195,11 @@ keeps being used, and mining continues.
   playtime and last-played only. `steam_recent` therefore ranks by when you last *played* a
   game, which is the closest signal Valve makes available.
 - Steam only fills in that last-played time when the querying key belongs to the account
-  being queried. Read through SinfulShadows it is always absent, so `steam_recent` falls back
-  to two-week playtime, then to total playtime. The Settings page says which is in use.
+  being queried, and a shared key never does. `steam_recent` falls back to two-week
+  playtime, then to total playtime. The Settings page says which is in use.
+
+Upgrading from a version that asked for a key needs nothing done: the key is deleted, the
+account it identified is kept, and the library carries on refreshing.
 
 Game titles are matched between Steam and Twitch by normalising both (stripping trademark
 symbols, edition suffixes and punctuation) and comparing word sets. Sequel numbering is

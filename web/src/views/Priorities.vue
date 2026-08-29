@@ -37,7 +37,6 @@ const PRIORITY_MODES = [
     { value: "priority_only", label: "Nothing else", hint: "Mine only the games listed above." },
 ];
 const newPriority = ref("");
-const steamStatus = ref(null);
 const searchResults = ref([]);
 const searching = ref(false);
 const excludeResults = ref([]);
@@ -119,7 +118,7 @@ function addGame(name) {
 const needsSteam = computed(
     () =>
         PRIORITY_MODES.find((mode) => mode.value === priorityMode.value)?.steam &&
-        !steamStatus.value?.connected,
+        !store.hasSteamLibrary,
 );
 const newExcluded = ref("");
 const saving = ref(false);
@@ -130,9 +129,6 @@ onMounted(async () => {
     if (!store.config) {
         await store.loadConfig();
     }
-    steamStatus.value = await fetch("/api/steam")
-        .then((response) => response.json())
-        .catch(() => null);
 });
 
 watch(
