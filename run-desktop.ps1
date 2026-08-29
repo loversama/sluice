@@ -21,6 +21,11 @@ param(
     [switch]$KeepDocker
 )
 
+# Keep a copy of everything printed here. A failed build scrolls past, or the window closes,
+# and the app's own log is no help because the failure happened before it ever started.
+$transcript = Join-Path $env:TEMP "sluice-run-desktop.log"
+try { Start-Transcript -Path $transcript -Force | Out-Null } catch { }
+
 $ErrorActionPreference = "Stop"
 $repo = $PSScriptRoot
 Set-Location $repo
@@ -97,7 +102,8 @@ Write-Host @"
       * Starting a second copy focuses the first window.
 
     Data lives in:  $env:APPDATA\Sluice
-    Logs:           $env:APPDATA\Sluice\logs\desktop.log
+    App log:        $env:APPDATA\@sluice\desktop\logs\desktop.log
+    This script:    $transcript
 
     Ctrl+C here closes the app.
 
