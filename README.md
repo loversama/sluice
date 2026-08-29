@@ -10,6 +10,57 @@ Written after studying [TychoTheTaco/Twitch-Drops-Bot][tycho] (the Puppeteer bot
 [tycho]: https://github.com/TychoTheTaco/Twitch-Drops-Bot
 [devilxd]: https://github.com/DevilXD/TwitchDropsMiner
 
+![Sluice](docs/sluice.png)
+
+Two layouts from one build: a full dashboard, and a slim panel you can leave down the side
+of a monitor. The desktop app and the container serve the same interface.
+
+## What it does
+
+**Mining**
+
+- Watches the campaigns you can actually earn, ranked by rules you choose — ending soonest,
+  tightest deadline, one game at a time, or by what you play most on Steam.
+- Claims drops the moment they are earned, and moves on without being asked.
+- Follows a campaign's allow-list when it has one, and finds a live channel when it does not.
+- Pause, or skip to the next campaign, from either layout.
+- Drag the queue to reorder it. That order is remembered, and is kept separate from your
+  priority list, so ranking something for today does not enrol it forever.
+
+**Knowing what it is doing**
+
+- A live view of the current channel, drop progress, and the watch beat Twitch is counting.
+- Says *why* nothing is being mined — everything claimed, nothing matching your settings,
+  nothing running on Twitch, or nobody streaming it — and resumes on its own.
+- Notices when another copy of Sluice is earning on the same account, which Twitch silently
+  allows and silently only credits once.
+- Warns before unclaimed progress on an unlinked campaign expires.
+- An activity log, claim history, and totals for drops, campaigns and hours watched.
+
+**Choosing what to mine**
+
+- Restrict mining to games you own on Steam, plus anything you name yourself.
+- Link Steam by signing in or by pasting your profile URL. No API key, yours or anyone's.
+- Exclude games by name; Twitch's own categories, such as Special Events, are always mined
+  because they are not games and cannot be owned.
+- Rank campaigns whose reward cannot be delivered below ones that can, and see which
+  publisher accounts are worth linking.
+
+**Running unattended**
+
+- A schedule, so it only mines during hours you choose.
+- A daily cap on mining hours, with half an hour of latitude to finish a drop in progress.
+- Starts with Windows, into the tray, and keeps mining when the window is closed.
+- Desktop notifications for claims and completed campaigns, carrying the reward's artwork,
+  with sounds you can turn off.
+- Telegram and Discord notifications, set up through a guided flow rather than a config file.
+- Updates itself, with the release notes in the app.
+
+**Two ways to run it**
+
+- A Windows desktop app that installs per-user and needs no administrator.
+- A Docker container serving the same dashboard, comfortable on a Raspberry Pi.
+
 ## Why no browser
 
 Every failure that killed the older bot traces back to driving Chrome: Twitch blocking the
