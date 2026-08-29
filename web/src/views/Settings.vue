@@ -1383,8 +1383,15 @@ const inputStyle = {
             </p>
 
             <!-- The same three options the prompt after sign-in offers, from the same
-                 component, so the two cannot come to say different things. -->
-            <SteamOnboarding v-if="!steamLinked" embedded />
+                 component, so the two cannot come to say different things.
+
+                 Also shown to someone still nominally linked to an account Steam no longer
+                 has - a deleted or renamed profile. That link cannot start working again on
+                 its own, so the way out has to be on screen next to the message saying so. -->
+            <SteamOnboarding
+                v-if="!steamLinked || steam.lastError?.code === 'profile_not_found'"
+                embedded
+            />
         </section>
         <!-- In the narrow window everything is on one page, so the categories that
              are tabs on a wide screen become the same full-bleed bands the compact

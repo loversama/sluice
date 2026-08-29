@@ -263,6 +263,31 @@ describe("BrokerProvider", () => {
         expect(error.retryAfterSeconds).toBe(42);
     });
 
+    it("calls a deleted account its own thing, so it is not retried forever", async () => {
+        // A 404 is permanent where every other failure here is transient. Mapped to
+        // "unavailable" it would leave a renamed or deleted profile behind "Steam is
+        // unavailable" indefinitely, with the library silently never updating again.
+        requestMock.mockResolvedValue(
+            reply(404, { error: "steam_profile_not_found", message: "no such profile" }),
+        );
+
+        const error = await new BrokerProvider(STEAM_ID).fetchLibrary().catch((e) => e);
+        expect(error.code).toBe("profile_not_found");
+        expect(error.message).toMatch(/link your steam account again/i);
+    });
+
+    it("leaves a malformed Steam ID as an ordinary outage", async () => {
+        // IDs are validated before they are stored, so a 400 after linking is our bug and
+        // not something to put in front of the user as an action.
+        requestMock.mockResolvedValue(
+            reply(400, { error: "invalid_steam_id", message: "not a SteamID64" }),
+        );
+
+        await expect(new BrokerProvider(STEAM_ID).fetchLibrary()).rejects.toMatchObject({
+            code: "unavailable",
+        });
+    });
+
     it("treats a rationed Steam allowance as unavailable, not as the user's fault", async () => {
         // The broker sheds our traffic when the Steam allowance it shares with the rest of
         // the site runs low. Nothing is wrong with the account, the profile or the link,

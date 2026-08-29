@@ -220,9 +220,14 @@ export function createApp(options: AppOptions): AppHandle {
                     })
                     .catch(() => {});
             }
-            scheduleFirstLibraryRetry(
-                error instanceof LibraryError ? error.retryAfterSeconds : undefined,
-            );
+            // Nothing to wait for when the account itself is gone: retrying a 404 on a
+            // timer would spend calls forever on an answer that cannot change until the
+            // user links a different account.
+            if (failure.code !== "profile_not_found") {
+                scheduleFirstLibraryRetry(
+                    error instanceof LibraryError ? error.retryAfterSeconds : undefined,
+                );
+            }
             throw error;
         }
     };

@@ -12,6 +12,7 @@ import { CLIENT_TOKEN, VERSION } from "../version.js";
  */
 export type LibraryErrorCode =
     | "library_private"
+    | "profile_not_found"
     | "client_outdated"
     | "rate_limited"
     | "unavailable";
@@ -197,6 +198,16 @@ export class BrokerProvider implements LibraryProvider {
                 "client_outdated",
             );
         }
+        // Permanent, unlike everything else here: Steam has no such account. A deleted or
+        // renamed profile would otherwise sit behind "Steam is unavailable" forever, with
+        // the library quietly never updating again and nothing ever suggesting the one
+        // thing that would fix it.
+        if (status === 404) {
+            throw new LibraryError(
+                "Steam has no account with this ID any more. Link your Steam account again.",
+                "profile_not_found",
+            );
+        }
         if (status === 409) {
             // The broker names the exact Steam setting in its message, so pass it through
             // rather than paraphrasing it here.
@@ -221,10 +232,11 @@ export class BrokerProvider implements LibraryProvider {
                 { retryAfterSeconds },
             );
         }
-        // Everything left - a malformed Steam ID, a profile Steam has never heard of, Steam
-        // itself being down - is retryable in the sense that matters here: the cached
-        // library stays in use and the next cycle tries again. The broker's own message is
-        // what distinguishes them for the user.
+        // Everything left is retryable in the sense that matters here: the cached library
+        // stays in use and the next cycle tries again. That includes a 400 for a malformed
+        // Steam ID, which is deliberate - IDs are validated before they are stored, so one
+        // arriving here is our bug rather than something the user can act on, and the
+        // broker's own message is enough to debug it by.
         throw new LibraryError(message, "unavailable", { retryAfterSeconds });
     }
 
