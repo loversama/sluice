@@ -12,9 +12,10 @@ export interface OwnedGame {
     /**
      * Unix seconds of the last session, or 0 if never played.
      *
-     * NOTE: Steam exposes no purchase or "added to library" date - this is the closest
-     * available recency signal, and Steam only fills it in for a key that belongs to the
-     * account being read, which the broker's key does not.
+     * Always 0 through the broker. Steam exposes no purchase or "added to library" date, so
+     * this is the closest recency signal it has - but it only fills the field in for a key
+     * that owns the account being read, and a shared key never will. Libraries cached
+     * before the broker still carry real values; see `RecencyBasis`.
      */
     lastPlayed: number;
 }

@@ -39,7 +39,13 @@ export interface LibrarySnapshot {
     games: OwnedGame[];
     /** Unix ms of the fetch that produced this data, which may predate the request. */
     fetchedAt: number;
-    /** True when the broker served cached data because Steam was unreachable. */
+    /**
+     * The broker served a cached copy rather than reading Steam.
+     *
+     * Real data that is merely old - Steam was unreachable, or the broker chose not to
+     * spend the last of a shared daily allowance. Not a failure and not worth a banner;
+     * it means only that this is worth trying again sooner than a full refresh interval.
+     */
     stale?: boolean;
 }
 
@@ -129,6 +135,14 @@ export class BrokerProvider implements LibraryProvider {
         return `${this.baseUrl.replace(/\/+$/, "")}/api/v1/sluice/steam/${path}?${query}`;
     }
 
+    /**
+     * One call to the broker.
+     *
+     * Every call counts against a small per-minute burst allowance, cache hits included -
+     * that limit protects the broker's own server rather than Steam's. So nothing here may
+     * retry in a loop: the callers space their attempts out in minutes, and a `Retry-After`
+     * is passed back on the error for them to honour.
+     */
     private async get(path: string): Promise<unknown> {
         let response;
         try {
@@ -191,6 +205,22 @@ export class BrokerProvider implements LibraryProvider {
         if (status === 429) {
             throw new LibraryError(message, "rate_limited", { retryAfterSeconds });
         }
+        // The broker sheds Sluice traffic when the Steam allowance it shares with the rest
+        // of sinfulshadows.com runs low, so the site's own features get the last calls of
+        // the day. It only reaches us when nothing was cached - with a cached copy this
+        // arrives as a perfectly ordinary 200 marked stale - and a shed request is not
+        // charged against the caller's quota either.
+        //
+        // Degraded exactly like anything else being unavailable, but with our own wording:
+        // nothing is wrong with the user's account, profile or link, and the broker's
+        // message is written for whoever is reading its logs, not for them.
+        if (body?.error === "steam_budget_low") {
+            throw new LibraryError(
+                "Steam is busy at the moment. Your library will refresh on its own shortly.",
+                "unavailable",
+                { retryAfterSeconds },
+            );
+        }
         // Everything left - a malformed Steam ID, a profile Steam has never heard of, Steam
         // itself being down - is retryable in the sense that matters here: the cached
         // library stays in use and the next cycle tries again. The broker's own message is
@@ -198,7 +228,14 @@ export class BrokerProvider implements LibraryProvider {
         throw new LibraryError(message, "unavailable", { retryAfterSeconds });
     }
 
-    /** Who this Steam ID belongs to. Cheap, and unaffected by the library being private. */
+    /**
+     * Who this Steam ID belongs to. Unaffected by the library being private.
+     *
+     * Cached and charged separately from the library, so asking for both costs two of the
+     * day's calls rather than one. Worth it at link time, where naming the account is the
+     * point; not worth it on a refresh, where the library response carries the persona
+     * anyway.
+     */
     async fetchSummary(): Promise<SteamSummary> {
         const body = (await this.get("summary")) as SummaryResponse;
         return {
@@ -230,9 +267,11 @@ export class BrokerProvider implements LibraryProvider {
             });
         }
         if (body.stale) {
-            // Real data, just old - Steam was unreachable and a cached copy was served. Not
-            // worth telling the user about; it only shortens the wait before the next try.
-            logger.debug("The Steam service served a cached library - Steam was unreachable.");
+            // Real data, just old. Either Steam was unreachable or the broker declined to
+            // spend the last of a shared daily allowance on us - the two are not worth
+            // telling apart, and neither is worth telling the user about. The timestamp
+            // below is what shortens the wait before the next attempt.
+            logger.debug("The Steam service served a cached library.");
         }
 
         return {

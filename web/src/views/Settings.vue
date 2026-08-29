@@ -1366,13 +1366,16 @@ const inputStyle = {
                 </template>
             </p>
 
-            <!-- Steam only reports a last-played time to a key that owns the account, and
-                 the shared one does not, so recency ranking quietly falls back. Say so. -->
+            <!-- Steam reports a last-played time only to a key that owns the account, and
+                 the shared one never will, so recency ranking always falls back to a
+                 playtime figure. Someone choosing "recently played" should hear that from
+                 here rather than work it out from the order things get mined in. -->
             <p v-if="steamLinked && steam.recencySignal && steam.recencySignal !== 'lastPlayed'"
                class="text-[11px]" :style="{ color: 'var(--text-2)' }">
-                &ldquo;Recently played&rdquo; ranking is using
-                {{ steam.recencySignal === "playtimeRecent" ? "two-week playtime" : "total playtime" }}
-                &mdash; Steam only reveals last-played times to the account's own key.
+                &ldquo;Recently played&rdquo; ranking is approximate: it uses
+                {{ steam.recencySignal === "playtimeRecent" ? "Steam's two-week playtime" : "total playtime" }}
+                rather than an exact last-played date, which Steam reveals only to the
+                account's own key.
             </p>
 
             <p v-if="steam.linked === 'skipped'" class="text-[11px]" :style="{ color: 'var(--text-2)' }">

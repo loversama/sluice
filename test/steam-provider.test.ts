@@ -55,6 +55,9 @@ const STEAM_ID = "76561197971203314";
 
 describe("SteamLibrary recency signal", () => {
     it("ranks on last-played when Steam supplied timestamps", async () => {
+        // Reachable only from a library cached back when the user held their own key, which
+        // keeps ranking on real dates until the next refresh replaces it. The branch is
+        // live, not dead.
         const library = new SteamLibrary();
         await library.refresh(
             providerReturning({
@@ -70,8 +73,9 @@ describe("SteamLibrary recency signal", () => {
     });
 
     it("falls back to two-week playtime when no game has a last-played time", async () => {
-        // What a library read through a shared key looks like: Steam only fills in
-        // rtime_last_played when the querying key belongs to the queried account.
+        // The normal case, not an edge one: Steam fills in rtime_last_played only for a key
+        // that owns the account being read, and the broker's key never does. Every freshly
+        // read library looks like this.
         const library = new SteamLibrary();
         await library.refresh(
             providerReturning({
@@ -259,6 +263,24 @@ describe("BrokerProvider", () => {
         expect(error.retryAfterSeconds).toBe(42);
     });
 
+    it("treats a rationed Steam allowance as unavailable, not as the user's fault", async () => {
+        // The broker sheds our traffic when the Steam allowance it shares with the rest of
+        // the site runs low. Nothing is wrong with the account, the profile or the link,
+        // and the broker's own message is written for its logs rather than for a user.
+        requestMock.mockResolvedValue(
+            reply(503, { error: "steam_budget_low", message: "daily budget exhausted" }, {
+                "retry-after": "600",
+            }),
+        );
+
+        const error = await new BrokerProvider(STEAM_ID).fetchLibrary().catch((e) => e);
+        expect(error.code).toBe("unavailable");
+        expect(error.retryAfterSeconds).toBe(600);
+        expect(error.message).toMatch(/refresh on its own/i);
+        // Nothing that could read as something to go and fix.
+        expect(error.message).not.toMatch(/private|budget|profile|key/i);
+    });
+
     it("reports the broker being down as retryable", async () => {
         requestMock.mockResolvedValue(
             reply(503, { error: "steam_unavailable", message: "Steam is unreachable." }, {
@@ -280,8 +302,10 @@ describe("BrokerProvider", () => {
     });
 
     it("keeps the broker's own timestamp when it served a cached copy", async () => {
-        // Stale means real data that is merely old. Stamping it with "now" would rest on it
-        // for a full refresh interval instead of trying again sooner.
+        // Stale means real data that is merely old - Steam unreachable, or the broker
+        // rationing a shared allowance; the two are not told apart and neither is a
+        // failure. Stamping it with "now" would rest on it for a full refresh interval
+        // instead of trying again sooner.
         const anHourAgo = Date.now() - 3_600_000;
         requestMock.mockResolvedValue(
             reply(200, {
@@ -296,6 +320,24 @@ describe("BrokerProvider", () => {
         const snapshot = await new BrokerProvider(STEAM_ID).fetchLibrary();
         expect(snapshot.fetchedAt).toBe(anHourAgo);
         expect(snapshot.stale).toBe(true);
+    });
+
+    it("serves a rationed library from cache as an ordinary success", async () => {
+        // With something cached, shedding never reaches us as an error at all: it arrives
+        // as a 200 marked stale, and must behave like any other stale copy.
+        requestMock.mockResolvedValue(
+            reply(200, {
+                steamId: STEAM_ID,
+                personaName: "Nathan",
+                fetchedAt: 1_700_000_000_000,
+                stale: true,
+                games: [{ appid: 1, name: "Rust" }],
+            }),
+        );
+
+        const snapshot = await new BrokerProvider(STEAM_ID).fetchLibrary();
+        expect(snapshot.stale).toBe(true);
+        expect(snapshot.games).toHaveLength(1);
     });
 
     it("honours a custom base URL", async () => {

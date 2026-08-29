@@ -122,13 +122,17 @@ export function createApp(options: AppOptions): AppHandle {
     };
 
     /**
-     * How long to wait before trying again when a library has never loaded at all.
+     * The soonest to try again when a library has never loaded at all.
      *
      * Once there is a cached library, a failed refresh costs nothing: mining carries on
      * ranking against yesterday's copy and the next scheduled refresh picks it up. With no
      * library at all the whole library policy is inert - every game counts as unowned - so
      * the gap between a broker hiccup and the next daily refresh is a day of mining the
      * wrong things. One retry closes that without turning into a poll.
+     *
+     * A floor, not a schedule. The broker's per-minute burst allowance counts every call,
+     * cached ones included, so retrying hard would earn a 429 on top of whatever went
+     * wrong; and when it names a wait of its own, that wins.
      */
     const FIRST_LIBRARY_RETRY_MS = 15 * 60_000;
 
@@ -163,10 +167,11 @@ export function createApp(options: AppOptions): AppHandle {
     };
 
     /** Try again later, once, because there is no library to fall back on. */
-    const scheduleFirstLibraryRetry = (): void => {
+    const scheduleFirstLibraryRetry = (retryAfterSeconds?: number): void => {
         if (steamRetryTimer || steamLibrary.isLoaded || !config.steam.steamId) {
             return;
         }
+        const delay = Math.max(FIRST_LIBRARY_RETRY_MS, (retryAfterSeconds ?? 0) * 1000);
         steamRetryTimer = setTimeout(() => {
             steamRetryTimer = null;
             void refreshSteam()
@@ -174,7 +179,7 @@ export function createApp(options: AppOptions): AppHandle {
                 .catch((error) => {
                     logger.debug(`Steam library retry failed: ${(error as Error).message}`);
                 });
-        }, FIRST_LIBRARY_RETRY_MS).unref();
+        }, delay).unref();
     };
 
     const refreshSteam = async (): Promise<number> => {
@@ -215,7 +220,9 @@ export function createApp(options: AppOptions): AppHandle {
                     })
                     .catch(() => {});
             }
-            scheduleFirstLibraryRetry();
+            scheduleFirstLibraryRetry(
+                error instanceof LibraryError ? error.retryAfterSeconds : undefined,
+            );
             throw error;
         }
     };
@@ -259,7 +266,9 @@ export function createApp(options: AppOptions): AppHandle {
             const steamId = await resolveSteamId(input.steamId);
 
             // Whose account it is, before the library, so a link that sticks can still say
-            // who it linked when the library turns out to be private.
+            // who it linked when the library turns out to be private. Two calls rather than
+            // one - the summary is cached and charged separately - which is why this is
+            // done here and nowhere else.
             const summary = await new BrokerProvider(steamId, config.steam.brokerBaseUrl)
                 .fetchSummary()
                 .catch(() => null);

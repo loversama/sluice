@@ -28,9 +28,15 @@ const PRIORITY_MODES = [
         steam: true,
     },
     {
+        // "Recently played" is approximate and the label should not pretend otherwise:
+        // Steam gives an exact last-played date only to a key that owns the account, so
+        // the ranking runs on its two-week playtime figure instead. A game played hard
+        // last Tuesday outranks one touched briefly yesterday.
         value: "steam_recent",
         label: "My Steam games, recently played",
-        hint: "Games you own on Steam first, most recently played first. Needs Steam connected.",
+        hint:
+            "Games you own on Steam first, ranked by Steam's two-week playtime rather than " +
+            "an exact last-played date. Needs Steam connected.",
         steam: true,
     },
     { value: "random", label: "Random order", hint: "Reshuffled on every refresh." },

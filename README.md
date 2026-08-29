@@ -185,18 +185,20 @@ You are asked once, just after signing in to Twitch, and there are three answers
   later from **Settings -> Accounts** whenever you want.
 
 The library is cached in `steam.json` and refreshed every `steam.refreshHours` (default 24),
-since libraries change rarely. If the service is unreachable the cached copy keeps being
-used and mining carries on; a library that has never loaded is retried within the quarter
-hour, because until one exists the library policy has nothing to check ownership against.
+since libraries change rarely. If the service is unreachable, or busy enough that it is
+rationing the day's Steam calls, the cached copy keeps being used and mining carries on. A
+library that has never loaded is retried after a quarter of an hour, because until one
+exists the library policy has nothing to check ownership against.
 
 **Two limitations worth knowing:**
 
 - Steam exposes no purchase or "date added to library" field - `GetOwnedGames` returns
-  playtime and last-played only. `steam_recent` therefore ranks by when you last *played* a
-  game, which is the closest signal Valve makes available.
-- Steam only fills in that last-played time when the querying key belongs to the account
-  being queried, and a shared key never does. `steam_recent` falls back to two-week
-  playtime, then to total playtime. The Settings page says which is in use.
+  playtime and last-played only. `steam_recent` therefore ranks by how recently you have
+  *played* a game, which is the closest signal Valve makes available.
+- Steam only fills in that last-played time for a key that owns the account being read, and
+  a shared key never does, so `steam_recent` is approximate: it ranks on Steam's two-week
+  playtime, and on total playtime for an account idle longer than that. The Settings page
+  says which is in use.
 
 Upgrading from a version that asked for a key needs nothing done: the key is deleted, the
 account it identified is kept, and the library carries on refreshing.

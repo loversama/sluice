@@ -26,11 +26,16 @@ export interface SteamState {
     personaName: string | null;
     gameCount: number;
     /**
-     * Which signal the "recently played" ranking can use. Never "lastPlayed" through the
-     * broker: Steam only reveals last-played times to a key that owns the account.
+     * Which signal the "recently played" ranking is actually using. Two-week playtime for
+     * anything read through the broker: Steam reveals last-played times only to a key that
+     * owns the account.
      */
     recencySignal: RecencyBasis | null;
-    /** The library came from a cache because Steam was unreachable. Real data, just old. */
+    /**
+     * The library came from the broker's cache rather than live from Steam - because Steam
+     * was unreachable, or because it declined to spend the last of a shared daily
+     * allowance. Real data, just old, and not worth surfacing as a fault.
+     */
     stale: boolean;
     /** ISO time the data left Steam, not when it was served. */
     fetchedAt: string | null;
