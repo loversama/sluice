@@ -135,7 +135,12 @@ export function setTrayStatus(text: string): void {
 export function showBalloon(title: string, content: string): void {
     // Windows only; a no-op elsewhere rather than a crash.
     try {
-        tray?.displayBalloon({ title, content });
+        // Named explicitly, because a balloon otherwise borrows the tray's icon - and that
+        // one is white, drawn to sit on a dark taskbar. In a notification it lands on the
+        // notification's own background and all but disappears. This is the app's mark in
+        // its own colour, which is what belongs beside the app's name.
+        const icon = nativeImage.createFromPath(appIconPath());
+        tray?.displayBalloon({ title, content, ...(icon.isEmpty() ? {} : { icon }) });
     } catch {
         // Some platforms have no balloons. Nothing here is important enough to report.
     }
