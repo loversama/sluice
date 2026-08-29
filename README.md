@@ -3,13 +3,6 @@
 A browserless Twitch drop miner. No Chrome, no Puppeteer, no video download — it talks to
 Twitch's GraphQL API directly and reports watch time the same way the web player does.
 
-Written after studying [TychoTheTaco/Twitch-Drops-Bot][tycho] (the Puppeteer bot, dead since
-2023) and [DevilXD/TwitchDropsMiner][devilxd] (Python, actively maintained). See
-[ANALYSIS.md](ANALYSIS.md) for what each got right and why the browser-based one broke.
-
-[tycho]: https://github.com/TychoTheTaco/Twitch-Drops-Bot
-[devilxd]: https://github.com/DevilXD/TwitchDropsMiner
-
 ![Sluice](docs/sluice.png)
 
 Two layouts from one build: a full dashboard, and a slim panel you can leave down the side
