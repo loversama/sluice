@@ -292,7 +292,7 @@ class IconCache {
   }
 }
 const DEFAULTS = {
-  runAtLogin: false,
+  runAtLogin: true,
   closeToTray: true
 };
 function file() {
@@ -319,7 +319,17 @@ function applyLoginItem(enabled) {
   if (process.platform === "linux") {
     return;
   }
-  app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"] });
+  if (!app.isPackaged) {
+    logger.debug("Not a packaged build; leaving the login item alone.");
+    return;
+  }
+  app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: ["--hidden"] });
+  const actual = app.getLoginItemSettings().openAtLogin;
+  if (actual !== enabled) {
+    logger.warn(
+      `Windows was asked to ${enabled ? "start" : "stop starting"} Sluice at login, and reports ${actual}. The setting will not take effect.`
+    );
+  }
 }
 let tray = null;
 function resource(name) {
