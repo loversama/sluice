@@ -98,9 +98,10 @@ $electronPath = Join-Path $repo "node_modules\electron\path.txt"
 if (Test-Path $electronPath) {
     $binary = (Get-Content $electronPath -Raw).Trim()
     if ($binary -ne "electron.exe") {
+        if ([string]::IsNullOrWhiteSpace($binary)) { $binary = "no" }
         Warn "node_modules holds the $binary build, not electron.exe."
         Warn "Something ran npm install from WSL or Linux against this folder."
-        Die  "Fix it from Windows: Remove-Item -Recurse -Force node_modules\electron ; npm install"
+        Die  "Repair it from Windows: node node_modules\electron\install.js"
     }
     Note "electron.exe present."
 } else {

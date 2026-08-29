@@ -131,9 +131,13 @@ at nothing useful. It has happened once already, on the upgrade to Electron 43.
 Run installs from Windows. To repair it from there:
 
 ```powershell
-Remove-Item -Recurse -Force node_modules\electron
-npm install
+node node_modules\electron\install.js
 ```
+
+`npm install` alone does **not** fix it. npm treats the package as already present, skips the
+postinstall that downloads the binary, and leaves `path.txt` empty with no `dist/` at all -
+a worse state than the one being repaired. The install script is what fetches the platform
+binary, and running it is enough on its own.
 
 Building, testing and type checking from WSL are all fine - it is only the install that
 fetches a platform binary. `run-desktop.ps1` now checks `node_modules/electron/path.txt`
