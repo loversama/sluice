@@ -223,6 +223,13 @@ export class Miner extends EventEmitter {
     private readonly claimedDropIds = new Set<string>();
     /** Drops Twitch refused to claim, so a doomed claim is not retried every refresh. */
     private readonly failedClaimIds = new Set<string>();
+    /**
+     * Drops we asked Twitch to claim and Twitch said yes to.
+     *
+     * Kept apart from claimedDropIds, which also holds guesses made from the inventory's
+     * owned-benefit list. Only a guess may be taken back.
+     */
+    private readonly confirmedClaimIds = new Set<string>();
 
     private pubsub: PubSubPool | null = null;
     private currentChannel: Channel | null = null;
@@ -328,6 +335,10 @@ export class Miner extends EventEmitter {
         state.warnedExpiring.forEach((id: string) => this.warnedExpiring.add(id));
         state.notifiedUnlinkedClaims.forEach((id: string) => this.notifiedUnlinkedClaims.add(id));
         state.failedClaims.forEach((id: string) => this.failedClaimIds.add(id));
+        state.confirmedClaims?.forEach((id: string) => {
+            this.confirmedClaimIds.add(id);
+            this.claimedDropIds.add(id);
+        });
         logger.debug(
             `Restored notification state: ${this.warnedExpiring.size} warned campaigns, ` +
                 `${this.notifiedUnlinkedClaims.size} flagged claims`,
@@ -457,6 +468,7 @@ export class Miner extends EventEmitter {
             warnedExpiring: [...this.warnedExpiring],
             notifiedUnlinkedClaims: [...this.notifiedUnlinkedClaims],
             failedClaims: [...this.failedClaimIds],
+            confirmedClaims: [...this.confirmedClaimIds],
         });
     }
 
@@ -1642,6 +1654,8 @@ export class Miner extends EventEmitter {
             if (claimed) {
                 drop.isClaimed = true;
                 this.claimedDropIds.add(drop.id);
+                this.confirmedClaimIds.add(drop.id);
+                this.persistState();
                 logger.info(`Claimed: ${drop.rewardNames} (${campaign.gameName})`);
                 this.recentClaims.push({
                     at: Date.now(),
@@ -2444,11 +2458,21 @@ export class Miner extends EventEmitter {
                     drop.update(entry.self);
                     if (entry.self.isClaimed) {
                         this.claimedDropIds.add(drop.id);
-                    } else {
-                        // Inventory is authoritative, so it also has to be able to take a
-                        // claim back. Without this a wrong guess above is permanent:
-                        // claim() skips anything in this set, so the drop would sit
-                        // finished and unclaimed until the campaign expired.
+                    } else if (!this.confirmedClaimIds.has(drop.id)) {
+                        // Inventory can take back a guess, but not a claim we made and
+                        // Twitch confirmed.
+                        //
+                        // The guess is the owned-benefit inference above, and without a way
+                        // to undo it a wrong one is permanent - claim() skips anything in
+                        // this set, so the drop would sit finished and unclaimed until the
+                        // campaign expired. That is what this branch is for.
+                        //
+                        // Undoing a real claim is a different thing entirely. Twitch's
+                        // inventory has been seen reporting a drop as unclaimed minutes
+                        // after confirming the claim - on GTA V it never caught up at all -
+                        // and each refresh then claimed it again: forty-one claims of one
+                        // drop in nine hours, a notification every time, and a claim history
+                        // full of rewards granted once.
                         this.claimedDropIds.delete(drop.id);
                     }
                 }
