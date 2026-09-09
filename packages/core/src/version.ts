@@ -1,5 +1,5 @@
 /** Single source of the version, shared by the dashboard and outbound User-Agents. */
-export const VERSION = "0.4.7";
+export const VERSION = "0.4.8";
 
 /**
  * Which build is talking to the Steam broker, sent as `X-Sluice-Client`.
