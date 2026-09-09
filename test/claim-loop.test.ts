@@ -64,3 +64,48 @@ describe("what inventory is allowed to take back", () => {
         expect(g.wouldClaimAgain("d1")).toBe(false);
     });
 });
+
+/**
+ * The rule above fixes the cause that was found. This one is the backstop for the cause
+ * that has not been found yet: whatever makes our idea of "claimed" diverge from Twitch's,
+ * the answer is never to keep claiming.
+ */
+describe("the cap on repeated claims", () => {
+    const MAX = 3;
+
+    class Claimer {
+        attempts = new Map<string, number>();
+        givenUp = new Set<string>();
+        calls = 0;
+
+        /** What claim() does, reduced to the counting. */
+        claim(id: string) {
+            if ((this.attempts.get(id) ?? 0) >= MAX) {
+                this.givenUp.add(id);
+                return;
+            }
+            this.attempts.set(id, (this.attempts.get(id) ?? 0) + 1);
+            this.calls += 1;
+        }
+    }
+
+    it("stops after three, however many times it is asked", () => {
+        const c = new Claimer();
+        for (let i = 0; i < 41; i += 1) c.claim("gta-250k");
+        expect(c.calls).toBe(MAX);
+        expect(c.givenUp.has("gta-250k")).toBe(true);
+    });
+
+    it("leaves a normal claim alone", () => {
+        const c = new Claimer();
+        c.claim("d1");
+        expect(c.calls).toBe(1);
+        expect(c.givenUp.size).toBe(0);
+    });
+
+    it("counts each drop separately", () => {
+        const c = new Claimer();
+        for (let i = 0; i < 10; i += 1) { c.claim("a"); c.claim("b"); }
+        expect(c.calls).toBe(MAX * 2);
+    });
+});

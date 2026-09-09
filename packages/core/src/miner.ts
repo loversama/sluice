@@ -87,6 +87,14 @@ function mentionsDrops(channel: Channel): boolean {
 const CAMPAIGN_DETAIL_CONCURRENCY = 4;
 
 /**
+ * How many times one drop may be claimed before the miner stops trying.
+ *
+ * Three, because the correct number is one and anything above that is a disagreement with
+ * Twitch that claiming again will not settle.
+ */
+const MAX_CLAIM_ATTEMPTS = 3;
+
+/**
  * How long the idle wait sleeps before re-checking of its own accord.
  *
  * Selection runs against campaigns already held in memory, so a pass costs almost nothing;
@@ -230,6 +238,16 @@ export class Miner extends EventEmitter {
      * owned-benefit list. Only a guess may be taken back.
      */
     private readonly confirmedClaimIds = new Set<string>();
+    /**
+     * How many times each drop has been claimed this session.
+     *
+     * A backstop rather than a mechanism. A drop is granted once, so claiming the same one
+     * repeatedly always means our idea of what is claimed has diverged from Twitch's -
+     * whatever the reason - and repeating it forever is never the right answer. One such
+     * divergence produced forty-one claims of a GTA V reward in nine hours before anyone
+     * noticed; this caps the damage from the next one at three.
+     */
+    private readonly claimAttempts = new Map<string, number>();
 
     private pubsub: PubSubPool | null = null;
     private currentChannel: Channel | null = null;
@@ -1617,6 +1635,22 @@ export class Miner extends EventEmitter {
         if (this.stopping) {
             return;
         }
+        const attempts = this.claimAttempts.get(drop.id) ?? 0;
+        if (attempts >= MAX_CLAIM_ATTEMPTS) {
+            // Said once, loudly, and then never again: something is wrong that this code
+            // cannot resolve, and the useful thing is a record of it rather than a retry.
+            if (!this.failedClaimIds.has(drop.id)) {
+                logger.warn(
+                    `${drop.name} (${campaign.gameName}) has been claimed ${attempts} times and ` +
+                        `Twitch still reports it as unclaimed. Giving up on it; the reward is ` +
+                        `almost certainly already on the account.`,
+                );
+                this.pushFeed("warn", `Stopped reclaiming ${drop.rewardNames || drop.name}`);
+                this.failedClaimIds.add(drop.id);
+                this.persistState();
+            }
+            return;
+        }
         if (this.claimedDropIds.has(drop.id) || this.failedClaimIds.has(drop.id)) {
             return;
         }
@@ -1650,6 +1684,7 @@ export class Miner extends EventEmitter {
             }
         }
         try {
+            this.claimAttempts.set(drop.id, attempts + 1);
             const claimed = await this.gql.claimDrop(instanceId);
             if (claimed) {
                 drop.isClaimed = true;
