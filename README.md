@@ -386,9 +386,12 @@ checked with `DropsHighlightService_AvailableDrops` to confirm it really grants 
 campaign; a drops-enabled tag alone is not enough, since the channel may be running a
 different campaign for the same game.
 
-**Watching** — every 59 seconds the bot POSTs a base64'd `minute-watched` event to the
-channel's Spade endpoint. That single request is what advances drop progress. If Spade fails,
-it falls back to fetching a live HLS segment header, which Twitch also counts.
+**Watching** — Twitch only credits a channel whose stream is actually being pulled (since
+October 2026 the `minute-watched` event on its own earns nothing). While a channel is being
+watched, a background watcher re-reads its HLS playlist every 10 seconds and sends a `HEAD`
+request for each segment it has not seen yet - no video is downloaded - and once a minute the
+bot still POSTs the `minute-watched` event to the channel's Spade endpoint. A beat counts as
+accepted if either of those is working.
 
 **Tracking** — a PubSub websocket pool delivers `drop-progress`, `drop-claim`, and stream
 up/down events in real time. If PubSub goes quiet for 8 minutes, the bot re-reads the

@@ -291,6 +291,8 @@ export class Miner extends EventEmitter {
      * surviving a restart would silently sink a campaign the user had forgotten skipping.
      */
     private readonly deferredCampaigns = new Map<string, number>();
+    /** Campaigns already warned about as unlinked while mining, so the warning is not repeated. */
+    private readonly warnedUnlinkedMining = new Set<string>();
 
     /** Set when a better campaign appears, so the watch loop yields at its next beat. */
     private switchRequested = false;
@@ -1055,7 +1057,14 @@ export class Miner extends EventEmitter {
             }
             examined++;
 
-            if (this.config.warnUnlinkedAccounts && !campaign.isDeliverable) {
+            // Once per campaign: this runs on every channel hop, and a log that repeats the
+            // same warning for hours buries the lines that matter.
+            if (
+                this.config.warnUnlinkedAccounts &&
+                !campaign.isDeliverable &&
+                !this.warnedUnlinkedMining.has(campaign.id)
+            ) {
+                this.warnedUnlinkedMining.add(campaign.id);
                 logger.warn(
                     `${campaign.gameName} - "${campaign.name}" is not linked to your Twitch ` +
                         "account. Progress is tracked, but rewards will not reach the game.",
