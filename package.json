@@ -1,6 +1,6 @@
 {
   "name": "sluice",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "description": "Sluice - a browserless Twitch drops miner that catches what flows past.",
   "type": "module",
   "main": "packages/daemon/dist/index.js",
