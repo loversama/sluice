@@ -20,6 +20,14 @@ import { loadClaims, saveClaims, summarise, type ClaimHistory, type ClaimStats }
 import { WATCH_INTERVAL_MS } from "./twitch/constants.js";
 import { detectForeignSession, type ProgressSnapshot } from "./foreign-session.js";
 import { dailyLimitVerdict, isWithinSchedule } from "./schedule.js";
+import {
+    applyKnownClaims,
+    describeIdle,
+    describeLeave,
+    describeNext,
+    isDeliberateStop,
+    type WatchEnd,
+} from "./transitions.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -42,6 +50,12 @@ const BEATS_BEFORE_SESSION_CHECK = 3;
 const MAX_BEAT_FAILURES = 3;
 /** How long a channel that failed stays out of the rotation. */
 const CHANNEL_COOLDOWN_MS = 30 * 60_000;
+/**
+ * How long a campaign whose finished drop cannot be claimed stays out of the rotation.
+ * Long enough to break a tight loop, short enough that a claim Twitch was merely slow to
+ * accept is retried the same hour.
+ */
+const CLAIM_STUCK_COOLDOWN_MS = 10 * 60_000;
 /** How many campaigns to try per cycle before giving the loop a rest. */
 const MAX_CAMPAIGNS_PER_CYCLE = 12;
 /**
@@ -875,6 +889,9 @@ export class Miner extends EventEmitter {
             return;
         }
         this.idleState = next;
+        const sentence = describeIdle(next, this.config.campaignRefreshMinutes);
+        logger.info(sentence);
+        this.pushFeed("info", sentence);
         this.emit("idle", next);
     }
 
@@ -1053,11 +1070,37 @@ export class Miner extends EventEmitter {
                 continue;
             }
 
-            await this.watch(channel, campaign, drop);
+            const end = await this.watch(channel, campaign, drop);
+            this.reportTransition(end, channel);
             return true;
         }
 
         return false;
+    }
+
+    /**
+     * Say why a spell of watching ended and what comes next.
+     *
+     * The loop goes straight from one channel to the next, so without this the feed shows a
+     * claim, then a new "Watching" line, and nothing about the decision in between.
+     */
+    private reportTransition(end: WatchEnd, channel: Channel): void {
+        if (this.stopping || isDeliberateStop(end)) {
+            return;
+        }
+        const reason = describeLeave(end, channel.displayName);
+        const top = this.selectCampaigns()[0] ?? null;
+        const next = top
+            ? {
+                  campaign: top,
+                  drop: top.nextDrop({ attemptImpossible: this.config.attemptImpossibleCampaigns }),
+              }
+            : null;
+        const line = reason ? `${reason}. ${describeNext(next)}` : describeNext(next);
+        logger.info(line);
+        if (reason || next) {
+            this.pushFeed("info", line);
+        }
     }
 
     /** Highest-priority campaign that is active and has work left. */
@@ -1404,7 +1447,7 @@ export class Miner extends EventEmitter {
      * Watch `channel` until the drop is claimed, the stream ends, progress stalls, or a
      * higher-priority campaign appears.
      */
-    private async watch(channel: Channel, campaign: Campaign, drop: Drop): Promise<void> {
+    private async watch(channel: Channel, campaign: Campaign, drop: Drop): Promise<WatchEnd> {
         // Watching again, so whatever idleness was reported is over. The `watching`
         // event that follows is what tells the dashboard; there is no separate "resumed".
         this.idleState = null;
@@ -1458,20 +1501,20 @@ export class Miner extends EventEmitter {
                 const beatStart = Date.now();
                 if (!channel.isOnline) {
                     logger.info(`${channel.displayName} went offline.`);
-                    return;
+                    return "offline";
                 }
                 if (!this.withinSchedule() || !this.withinDailyLimit()) {
                     logger.info("Outside the mining window; leaving the channel.");
                     this.switchRequested = true;
-                    return;
+                    return "outside_window";
                 }
                 if (this.paused) {
                     logger.info("Paused; leaving the channel.");
-                    return;
+                    return "paused";
                 }
                 if (this.switchRequested) {
                     logger.info("Switching to a higher-priority campaign.");
-                    return;
+                    return "better_campaign";
                 }
                 // A campaign can expire mid-session. Nothing further can be earned, and the
                 // refresh will have stripped its drops, so keep beating and we would watch a
@@ -1479,7 +1522,7 @@ export class Miner extends EventEmitter {
                 if (!campaign.isActive) {
                     logger.info(`${campaign.gameName} - "${campaign.name}" has ended.`);
                     this.pushFeed("info", `${campaign.gameName} ended - moving on`);
-                    return;
+                    return "campaign_ended";
                 }
 
                 const accepted = await channel.sendWatch();
@@ -1492,7 +1535,7 @@ export class Miner extends EventEmitter {
                     if (beatFailures >= MAX_BEAT_FAILURES) {
                         this.pushFeed("warn", `${channel.displayName} kept rejecting beats`);
                         this.penalise(channel);
-                        return;
+                        return "benched";
                     }
                     // A transient failure; wait out the interval and try the next beat.
                     await sleep(Math.max(0, WATCH_INTERVAL_MS - (Date.now() - beatStart)));
@@ -1507,7 +1550,7 @@ export class Miner extends EventEmitter {
                 // this loop was handed.
                 const live = this.currentDrop ?? drop;
                 if (live.isClaimed) {
-                    return;
+                    return "claimed";
                 }
 
                 // PubSub is the fast path for progress, but it can go quiet. Once enough
@@ -1523,7 +1566,7 @@ export class Miner extends EventEmitter {
                     );
                     this.pushFeed("warn", `${channel.displayName} credited nothing - switching`);
                     this.penalise(channel);
-                    return;
+                    return "benched";
                 }
 
                 if (this.unconfirmedBeats >= MAX_UNCONFIRMED_BEATS) {
@@ -1539,15 +1582,35 @@ export class Miner extends EventEmitter {
                             `${channel.displayName} benched for 30m - watched without earning`,
                         );
                         this.penalise(channel);
-                        return;
+                        return "benched";
                     }
                 }
 
                 if (live.isClaimable && this.config.autoClaimDrops) {
                     // claim() records completion itself, for every path that claims.
-                    await this.claim(live, this.currentCampaign ?? campaign);
-                    // Either the campaign is done or the next drop needs re-selecting.
-                    return;
+                    const owner = this.currentCampaign ?? campaign;
+                    await this.claim(live, owner);
+                    // Either the campaign is done or the next drop needs re-selecting - unless
+                    // the claim did nothing. A finished drop that stays unclaimed is picked
+                    // again at once, and that is how this once turned over every six seconds
+                    // for an hour. Take the campaign out of the rotation for a while instead.
+                    if (live.isClaimable) {
+                        this.channelCooldowns.set(
+                            `campaign:${owner.id}`,
+                            Date.now() + CLAIM_STUCK_COOLDOWN_MS,
+                        );
+                        logger.warn(
+                            `${live.rewardNames || live.name} (${owner.gameName}) is finished but ` +
+                                `was not claimed; setting it aside for ${CLAIM_STUCK_COOLDOWN_MS / 60_000} minutes.`,
+                        );
+                        this.pushFeed(
+                            "warn",
+                            `${live.rewardNames || live.name} is ready but could not be claimed - ` +
+                                `trying again in ${CLAIM_STUCK_COOLDOWN_MS / 60_000} min`,
+                        );
+                        return "claim_stuck";
+                    }
+                    return "claimed";
                 }
 
                 // Sleep the remainder of the interval rather than a flat 59s, so the work
@@ -1557,6 +1620,7 @@ export class Miner extends EventEmitter {
                 const elapsed = Date.now() - beatStart;
                 await sleep(Math.max(0, WATCH_INTERVAL_MS - elapsed));
             }
+            return "stopped";
         } finally {
             await channel.stopSegmentWatch();
             this.pubsub?.unlisten(streamTopic);
@@ -2514,6 +2578,12 @@ export class Miner extends EventEmitter {
                     }
                 }
             }
+        }
+
+        // After the inventory read, so nothing it says can put a known claim back.
+        const settled = applyKnownClaims(next.values(), this.confirmedClaimIds, this.failedClaimIds);
+        if (settled > 0) {
+            logger.debug(`Treating ${settled} drop${settled === 1 ? "" : "s"} as claimed, as recorded.`);
         }
 
         this.checkForForeignSession(next);
