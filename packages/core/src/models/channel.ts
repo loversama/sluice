@@ -4,6 +4,7 @@ import logger from "../logger.js";
 import type { AuthState } from "../twitch/auth.js";
 import type { TwitchGql } from "../twitch/gql.js";
 import { ONLINE_DELAY_MS, USHER_URL } from "../twitch/constants.js";
+import { SegmentWatcher, parseSegmentUrls, type SegmentSource } from "../twitch/segments.js";
 import type { StreamNode } from "../twitch/types.js";
 
 export class WatchError extends Error {}
@@ -11,6 +12,28 @@ export class WatchError extends Error {}
 /** Matches `"spade_url": "https://..."` in either the channel page or its settings bundle. */
 const SPADE_PATTERN = /"spade_?url": ?"(https:\/\/[.\w\-/]+)"/i;
 const SETTINGS_PATTERN = /src="(https:\/\/[\w.]+\/config\/settings\.[0-9a-f]{32}\.js)"/i;
+
+/**
+ * A cheap video rendition from a master playlist: the last one listed, skipping audio-only.
+ *
+ * Twitch can list an audio-only rendition at the end, and fetching that would be pulling
+ * something other than the stream. Which video rendition is chosen does not matter, only
+ * that segments are fetched, so the smaller ones are preferred to save the user's bandwidth.
+ */
+export function lowestVideoVariant(master: string): string | null {
+    const lines = master.trim().split("\n");
+    let chosen: string | null = null;
+    lines.forEach((line, index) => {
+        if (!line.startsWith("http")) {
+            return;
+        }
+        const info = lines[index - 1] ?? "";
+        if (!/audio_only/i.test(info)) {
+            chosen = line.trim();
+        }
+    });
+    return chosen;
+}
 
 export interface StreamState {
     broadcastId: string;
@@ -23,14 +46,16 @@ export interface StreamState {
 /**
  * A Twitch channel the miner may watch.
  *
- * Watch credit does not require playing the video. Twitch's player reports viewing by POSTing
- * a "minute-watched" analytics event to a per-channel Spade endpoint; sending that event
- * directly is sufficient to advance drop progress, which is why this bot needs no browser.
+ * Watch credit does not require playing the video, but it does require the stream to be
+ * pulled. Twitch used to credit the player's "minute-watched" analytics event on its own;
+ * since October 2026 it only does so alongside real segment fetches, so the segment watcher
+ * HEADs each new HLS segment (no video is downloaded) and the analytics event rides along.
  */
 export class Channel {
     /** Cached per channel - resolving it costs one or two page fetches. */
     private spadeUrl: string | null = null;
     private streamUrl: string | null = null;
+    private readonly segments: SegmentWatcher;
     /**
      * Set only when we learned this channel came online from a stream-up event. Twitch sends
      * that event slightly before the stream is actually ready, so watching immediately earns
@@ -48,7 +73,9 @@ export class Channel {
         readonly displayName: string,
         private readonly auth: AuthState,
         private readonly gql: TwitchGql,
-    ) {}
+    ) {
+        this.segments = new SegmentWatcher(this.segmentSource(), login);
+    }
 
     static fromDirectory(node: StreamNode, auth: AuthState, gql: TwitchGql): Channel | null {
         if (!node.broadcaster) {
@@ -102,6 +129,16 @@ export class Channel {
         // The Spade URL is per-broadcast; drop it so the next session re-resolves.
         this.spadeUrl = null;
         this.streamUrl = null;
+        void this.stopSegmentWatch();
+    }
+
+    /** Begin requesting the stream's segments, which Twitch requires for watch credit. */
+    startSegmentWatch(): void {
+        this.segments.start();
+    }
+
+    stopSegmentWatch(): Promise<void> {
+        return this.segments.stop();
     }
 
     /** Refresh live state from Twitch. Returns true if the channel is online. */
@@ -129,28 +166,25 @@ export class Channel {
     }
 
     /**
-     * Send one "minute watched" beat. Returns true if Twitch accepted it.
+     * Send one "minute watched" beat. Returns true if this channel is being watched.
      *
-     * Falls back to fetching a stream chunk if the Spade endpoint fails, since Twitch has
-     * moved between these two mechanisms more than once.
+     * The analytics event alone no longer earns anything, so the beat counts as accepted if
+     * either it went through or the segment watcher has been fetching recently. A channel
+     * where both fail is genuinely unwatchable and gets benched by the caller.
      */
     async sendWatch(): Promise<boolean> {
         if (!this.stream) {
             return false;
         }
+        // Idempotent: covers a channel whose watcher was stopped by a brief offline blip.
+        this.segments.start();
+        let spadeOk = false;
         try {
-            if (await this.sendWatchSpade()) {
-                return true;
-            }
+            spadeOk = await this.sendWatchSpade();
         } catch (error) {
             logger.debug(`Spade watch failed for ${this.login}:`, error);
         }
-        try {
-            return await this.sendWatchPlaylist();
-        } catch (error) {
-            logger.debug(`Playlist watch failed for ${this.login}:`, error);
-            return false;
-        }
+        return spadeOk || this.segments.healthy;
     }
 
     /**
@@ -239,39 +273,43 @@ export class Channel {
         return nested[1];
     }
 
-    /**
-     * Fallback: request the head of a live stream chunk. Twitch counts the CDN fetch as
-     * viewing, without us downloading the segment body.
-     */
-    private async sendWatchPlaylist(): Promise<boolean> {
-        const playlistUrl = this.streamUrl ?? (await this.resolveStreamUrl());
-        if (!playlistUrl) {
-            return false;
-        }
-        this.streamUrl = playlistUrl;
-
-        const response = await request(playlistUrl, {
-            method: "GET",
-            headers: { ...this.auth.headers(), Connection: "close" },
-        });
-        if (response.statusCode >= 400) {
-            // A 404 here means the stream ended.
-            await response.body.dump();
-            this.streamUrl = null;
-            return false;
-        }
-        const playlist = await response.body.text();
-        const lines = playlist
-            .trim()
-            .split("\n")
-            .filter((line) => line.startsWith("http"));
-        const chunk = lines.at(-1);
-        if (!chunk) {
-            return false;
-        }
-        const head = await request(chunk, { method: "HEAD", headers: this.auth.headers() });
-        await head.body.dump();
-        return head.statusCode === 200;
+    /** How the segment watcher reaches this channel's stream. */
+    private segmentSource(): SegmentSource {
+        return {
+            resolvePlaylistUrl: async () => {
+                if (!this.stream) {
+                    return null;
+                }
+                this.streamUrl ??= await this.resolveStreamUrl();
+                return this.streamUrl;
+            },
+            invalidatePlaylistUrl: () => {
+                this.streamUrl = null;
+            },
+            fetchPlaylist: async (url, signal) => {
+                const response = await request(url, {
+                    method: "GET",
+                    headers: this.auth.headers(),
+                    signal,
+                });
+                if (response.statusCode >= 400) {
+                    // A 404 here means the stream ended or the signed URL expired.
+                    await response.body.dump();
+                    return null;
+                }
+                const text = await response.body.text();
+                return parseSegmentUrls(text).length ? text : null;
+            },
+            headSegment: async (url, signal) => {
+                const response = await request(url, {
+                    method: "HEAD",
+                    headers: this.auth.headers(),
+                    signal,
+                });
+                await response.body.dump();
+                return response.statusCode;
+            },
+        };
     }
 
     /** Obtain a signed HLS playlist URL for this channel. */
@@ -295,11 +333,6 @@ export class Channel {
             return null;
         }
         const text = await response.body.text();
-        // The master playlist lists qualities best-first; the last is the lowest bitrate.
-        const variants = text
-            .trim()
-            .split("\n")
-            .filter((line) => line.startsWith("http"));
-        return variants.at(-1) ?? null;
+        return lowestVideoVariant(text);
     }
 }

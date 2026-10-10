@@ -1453,6 +1453,7 @@ export class Miner extends EventEmitter {
                 await sleep(15_000);
             }
 
+            channel.startSegmentWatch();
             while (!this.stopping) {
                 const beatStart = Date.now();
                 if (!channel.isOnline) {
@@ -1557,6 +1558,7 @@ export class Miner extends EventEmitter {
                 await sleep(Math.max(0, WATCH_INTERVAL_MS - elapsed));
             }
         } finally {
+            await channel.stopSegmentWatch();
             this.pubsub?.unlisten(streamTopic);
             // Per-channel, unlike the points topic, so it has to go when the channel does.
             this.pubsub?.unlisten(settingsTopic);
