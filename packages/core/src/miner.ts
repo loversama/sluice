@@ -13,6 +13,8 @@ import {
 import { Channel } from "./models/channel.js";
 import type { AuthState } from "./twitch/auth.js";
 import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
+import { fetchCatalogue } from "./twitch/catalogue.js";
+import type { DropCampaign } from "./twitch/types.js";
 import { PubSubPool, type DropProgressMessage } from "./twitch/websocket.js";
 import type { SteamLibrary } from "./steam/library.js";
 import { loadState, saveState } from "./state.js";
@@ -297,6 +299,8 @@ export class Miner extends EventEmitter {
     /** Set when a better campaign appears, so the watch loop yields at its next beat. */
     private switchRequested = false;
     private stopping = false;
+    /** Campaigns came from the public catalogue last refresh; logged once, not every sweep. */
+    private usingCatalogue = false;
     /** Why there is nothing to mine, or null while watching. */
     private idleState: IdleState | null = null;
     /** Resolves the interruptible idle wait early. Set only while that wait is in progress. */
@@ -2346,10 +2350,30 @@ export class Miner extends EventEmitter {
         const background = this.currentChannel !== null;
         this.emit("loading", { phase: "campaigns", background });
         logger.debug("Refreshing campaigns...");
-        const [listed, inventory] = await Promise.all([
+        let [listed, inventory] = await Promise.all([
             this.gql.getCampaigns(),
             this.gql.getInventory().catch(() => null),
         ]);
+
+        // A login made with the TV client is shown an empty dashboard - the only kind of
+        // login Twitch still issues. The public catalogue supplies the campaigns and their
+        // details instead; everything about this account still comes from Twitch.
+        let catalogue: Map<string, DropCampaign> | null = null;
+        if (listed.length === 0) {
+            const fromCatalogue = await fetchCatalogue();
+            if (fromCatalogue.length > 0) {
+                if (!this.usingCatalogue) {
+                    logger.info(
+                        "Twitch lists no campaigns for this login, so they come from the " +
+                            `public drops catalogue instead (${fromCatalogue.length} found). ` +
+                            "Progress and claiming still go through Twitch.",
+                    );
+                }
+                listed = fromCatalogue;
+                catalogue = new Map(fromCatalogue.map((campaign) => [campaign.id, campaign]));
+            }
+        }
+        this.usingCatalogue = catalogue !== null;
 
         // New shuffle each cycle, so "random" mode does not settle on a fixed order.
         this.randomKeys = new Map();
@@ -2434,7 +2458,8 @@ export class Miner extends EventEmitter {
                 }
 
                 try {
-                    const details = await this.gql.getCampaignDetails(campaign.id);
+                    const details =
+                        catalogue?.get(campaign.id) ?? (await this.gql.getCampaignDetails(campaign.id));
                     if (details) {
                         next.set(campaign.id, campaign.merge(details));
                     }
