@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import type { EventEmitter } from "node:events";
 import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -186,6 +187,16 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 /** Loopback names a browser can legitimately reach this server by. */
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
 
+/**
+ * Extra names from SLUICE_ALLOWED_HOSTS (comma separated), on top of config.allowedHosts.
+ * A container cannot see the host's name, so an installer passes it in this way rather than
+ * editing config.json.
+ */
+const ENV_ALLOWED_HOSTS: readonly string[] = (process.env.SLUICE_ALLOWED_HOSTS ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+
 /** The hostname a request claims it reached us by, without the port. */
 export function hostnameOf(value: string): string {
     const trimmed = value.trim().toLowerCase();
@@ -203,6 +214,11 @@ export function hostnameOf(value: string): string {
  * controls at 127.0.0.1, wait for the browser's DNS cache to turn over, and from then on its
  * scripts are same-origin with whatever is listening there - free to read replies, not merely
  * send requests. Pinning the Host closes that for the price of a string compare.
+ *
+ * A bare IP address is always accepted. Rebinding needs a name the attacker controls - the
+ * browser has to look something up for the answer to change - so a Host that is already an
+ * address cannot be the result of one. That is what lets `http://<server-ip>:4400` work on
+ * a NAS with nothing configured.
  */
 export function isKnownHost(
     hostHeader: string | undefined,
@@ -214,6 +230,9 @@ export function isKnownHost(
     }
     const host = hostnameOf(hostHeader);
     if (LOOPBACK_HOSTS.has(host) || host === options.boundHost.toLowerCase()) {
+        return true;
+    }
+    if (isIP(host.replace(/^\[|\]$/g, "")) !== 0) {
         return true;
     }
     return options.allowedHosts.some((allowed) => allowed.trim().toLowerCase() === host);
@@ -332,7 +351,7 @@ export class ApiServer {
 
         if (!isKnownHost(request.headers.host, {
             boundHost: this.boundHost,
-            allowedHosts: this.context.getConfig().allowedHosts,
+            allowedHosts: [...this.context.getConfig().allowedHosts, ...ENV_ALLOWED_HOSTS],
         })) {
             const claimed = request.headers.host ?? "";
             logger.warn(

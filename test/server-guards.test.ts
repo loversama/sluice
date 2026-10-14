@@ -41,6 +41,17 @@ describe("isKnownHost", () => {
             .toBe(true);
     });
 
+    it("accepts any bare IP address, which DNS rebinding cannot produce", () => {
+        for (const host of ["192.168.1.50:4400", "10.0.0.7", "100.109.244.82:4400", "[fe80::1]:4400"]) {
+            expect(isKnownHost(host, local)).toBe(true);
+        }
+    });
+
+    it("still refuses a name that merely looks numeric", () => {
+        expect(isKnownHost("192.168.1.50.evil.example:4400", local)).toBe(false);
+        expect(isKnownHost("1.2.3.4.nip.io", local)).toBe(false);
+    });
+
     it("accepts a hostname the user added for a reverse proxy", () => {
         expect(
             isKnownHost("drops.example.com", {

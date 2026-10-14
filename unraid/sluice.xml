@@ -11,7 +11,7 @@
 &#xD;
 First run: open the container's log (or the WebUI) and enter the code it shows at twitch.tv/activate. Everything else is created in the appdata folder on launch.&#xD;
 &#xD;
-The dashboard has no password. To open it by hostname from another machine, add that hostname to "allowedHosts" in config.json. Don't run it on the same Twitch account as another copy of Sluice.</Overview>
+The dashboard has no password, so keep it on your home network. It opens by the server's IP; to use a name like http://tower:4400, list it under Allowed hostnames. Don't run it on the same Twitch account as another copy of Sluice.</Overview>
   <Category>Tools: Status:Beta</Category>
   <WebUI>http://[IP]:[PORT:4400]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/loversama/sluice/master/unraid/sluice.xml</TemplateURL>
@@ -21,6 +21,7 @@ The dashboard has no password. To open it by hostname from another machine, add 
   <Config Name="Dashboard port" Target="4400" Default="4400" Mode="tcp" Description="Web dashboard." Type="Port" Display="always" Required="true" Mask="false">4400</Config>
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/sluice" Mode="rw" Description="Settings, Twitch login and history. Created on first launch." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/sluice</Config>
   <Config Name="TZ" Target="TZ" Default="Europe/London" Mode="" Description="Time zone for logs and the run schedule." Type="Variable" Display="always" Required="false" Mask="false">Europe/London</Config>
+  <Config Name="Allowed hostnames" Target="SLUICE_ALLOWED_HOSTS" Default="tower,tower.local" Mode="" Description="Comma-separated names you open the dashboard by, such as your server's name. Opening it by IP address always works." Type="Variable" Display="always" Required="false" Mask="false">tower,tower.local</Config>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User that owns the data folder." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group that owns the data folder." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
   <Config Name="SLUICE_CLIENT_TOKEN" Target="SLUICE_CLIENT_TOKEN" Default="" Mode="" Description="Optional. Only needed to link a Steam library from a non-release build." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
