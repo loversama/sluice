@@ -35,15 +35,18 @@ COPY --from=build /app/packages/server/dist ./packages/server/dist
 COPY --from=build /app/packages/daemon/dist ./packages/daemon/dist
 COPY --from=build /app/web/dist ./web/dist
 
-# Runtime state lives on a volume so credentials survive rebuilds.
-RUN mkdir -p /data && chown -R node:node /data /app
-USER node
+# Runtime state lives on a volume so credentials survive rebuilds. The entrypoint starts
+# as root only to give /data to PUID:PGID (default 1000, the node user), then drops to it.
+RUN apk add --no-cache su-exec && mkdir -p /data && chown -R node:node /data
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENV PUID=1000 PGID=1000
 VOLUME ["/data"]
 EXPOSE 4400
 
 # Binding to 0.0.0.0 is required for the port to be reachable from outside the
 # container. What is actually exposed is decided by the port mapping in compose,
 # which publishes to 127.0.0.1 by default.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "packages/daemon/dist/index.js", \
      "--web", "--web-addr", "0.0.0.0:4400", \
      "--config", "/data/config.json", \
