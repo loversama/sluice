@@ -24,5 +24,5 @@ The dashboard has no password, so keep it on your home network. It opens by the 
   <Config Name="Allowed hostnames" Target="SLUICE_ALLOWED_HOSTS" Default="tower,tower.local" Mode="" Description="Comma-separated names you open the dashboard by, such as your server's name. Opening it by IP address always works." Type="Variable" Display="always" Required="false" Mask="false">tower,tower.local</Config>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User that owns the data folder." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group that owns the data folder." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
-  <Config Name="SLUICE_CLIENT_TOKEN" Target="SLUICE_CLIENT_TOKEN" Default="" Mode="" Description="Optional. Only needed to link a Steam library from a non-release build." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="SLUICE_CLIENT_TOKEN" Target="SLUICE_CLIENT_TOKEN" Default="" Mode="" Description="Leave empty. Only for an image you built yourself, to link a Steam library." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 </Container>

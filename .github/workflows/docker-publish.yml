@@ -22,6 +22,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same stamp as build-desktop.yml. Without it the image calls itself "dev" and the
+      # Steam broker answers 426, which the dashboard shows as "update Sluice" - advice no
+      # Docker user can act on. No `if:` on the secret; see the note in build-desktop.yml.
+      - name: Stamp the Steam client token
+        shell: bash
+        env:
+          CLIENT_TOKEN: ${{ secrets.SLUICE_CLIENT_TOKEN }}
+        run: |
+          FILE=packages/core/src/version.ts
+          if [[ -z "$CLIENT_TOKEN" ]]; then
+            echo "::warning::SLUICE_CLIENT_TOKEN is not set; this image cannot link Steam."
+            exit 0
+          fi
+          node -e '
+            const fs = require("node:fs");
+            const file = "packages/core/src/version.ts";
+            const before = fs.readFileSync(file, "utf8");
+            const after = before.replace(
+              /^export const CLIENT_TOKEN = ".*";$/m,
+              () => `export const CLIENT_TOKEN = "${process.env.CLIENT_TOKEN}";`,
+            );
+            if (after === before) {
+              console.error("::error::CLIENT_TOKEN in " + file + " was not substituted.");
+              process.exit(1);
+            }
+            fs.writeFileSync(file, after);
+          '
+          echo "Stamped a client token into $FILE."
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3

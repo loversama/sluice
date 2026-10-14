@@ -149,9 +149,10 @@ can use it. For access from outside, put it behind something that authenticates 
 [Reaching the dashboard safely](#reaching-the-dashboard-safely)) rather than forwarding the
 port.
 
-**Steam library linking** goes through a broker that only accepts released builds. The
-Docker image reports itself as `dev` and is refused, so either set `SLUICE_CLIENT_TOKEN` to
-the token a release ships with, or leave Steam unlinked. Mining works the same either way.
+**Steam library linking** works in the published image, which carries the same release
+token as the desktop app. Only an image you build yourself reports itself as `dev` and is
+refused by the broker. Set `SLUICE_CLIENT_TOKEN` for that case, or leave Steam unlinked;
+mining works the same either way.
 
 **One copy per account.** Don't run the Unraid container and the desktop app on the same
 Twitch account at the same time. They can't detect each other across machines, and Twitch
