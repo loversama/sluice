@@ -72,8 +72,32 @@ export function randomAndroidUserAgent(): string {
     return ANDROID_USER_AGENTS[index] ?? ANDROID_USER_AGENTS[0];
 }
 
-/** The client identity used for all authenticated work. */
-export const DEFAULT_CLIENT = ANDROID_CLIENT;
+/**
+ * The Twitch Android TV ("SmartBox") app's client ID.
+ *
+ * Twitch began refusing device-code sign-ins for ANDROID_CLIENT ("invalid client", Oct 2026)
+ * while tokens it had already issued kept working. The TV app's client still issues device
+ * codes - device-code login is how a TV is meant to sign in - and is likewise outside the
+ * web client's integrity challenge. The same rule applies: the token has to be issued by this
+ * client and every request has to present it, with the TV origin to match.
+ */
+export const TV_CLIENT: ClientInfo = {
+    clientUrl: "https://android.tv.twitch.tv",
+    clientId: "ue6666qo983tsx6so1t0vnawi233wa",
+    userAgent:
+        "Mozilla/5.0 (Linux; Android 7.1; Smart Box C1) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+};
+
+/** The client identity new sign-ins use. */
+export const DEFAULT_CLIENT = TV_CLIENT;
+
+/**
+ * Every client whose stored token is still honoured. A token issued by ANDROID_CLIENT before
+ * the switch keeps running under that client rather than being discarded, since signing in
+ * again would put it on TV_CLIENT anyway and there is nothing to gain by forcing it.
+ */
+export const KNOWN_CLIENTS: readonly ClientInfo[] = [TV_CLIENT, ANDROID_CLIENT];
 
 export const GQL_URL = "https://gql.twitch.tv/gql";
 export const PUBSUB_URL = "wss://pubsub-edge.twitch.tv/v1";

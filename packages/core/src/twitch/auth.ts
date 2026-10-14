@@ -7,7 +7,9 @@ import { request } from "undici";
 
 import logger from "../logger.js";
 import {
+    ANDROID_CLIENT,
     DEFAULT_CLIENT,
+    KNOWN_CLIENTS,
     OAUTH_DEVICE_URL,
     OAUTH_TOKEN_URL,
     OAUTH_REVOKE_URL,
@@ -41,6 +43,17 @@ function randomHex(length: number): string {
 }
 
 /**
+ * The Android app ships under many phone models, so a fresh install picks one; load()
+ * replaces it with the stored one. Other clients present their single fixed string.
+ */
+function withDeviceString(client: ClientInfo): ClientInfo {
+    if (client.clientId !== ANDROID_CLIENT.clientId) {
+        return { ...client };
+    }
+    return { ...client, userAgent: randomAndroidUserAgent() };
+}
+
+/**
  * Holds the OAuth credentials and the per-install identifiers that every request carries.
  *
  * Authentication uses the OAuth *device code* flow: we ask Twitch for a short code, the user
@@ -61,8 +74,7 @@ export class AuthState {
     login = "";
 
     constructor(client: ClientInfo = DEFAULT_CLIENT) {
-        // A fresh install picks one device string; load() replaces it with the stored one.
-        this.client = { ...client, userAgent: randomAndroidUserAgent() };
+        this.client = withDeviceString(client);
         this.deviceId = randomHex(32);
         this.sessionId = randomHex(16);
     }
@@ -123,8 +135,12 @@ export class AuthState {
             // erroring cleanly, so discard it and force a fresh login instead.
             // Missing clientId means it predates this field, so it cannot be trusted either.
             if (stored.clientId !== this.client.clientId) {
-                logger.info("Stored credentials were issued by a different client; re-authorizing.");
-                return false;
+                const issuer = KNOWN_CLIENTS.find((known) => known.clientId === stored.clientId);
+                if (!issuer) {
+                    logger.info("Stored credentials were issued by a different client; re-authorizing.");
+                    return false;
+                }
+                this.client = withDeviceString(issuer);
             }
             this.accessToken = stored.accessToken;
             this.refreshToken = stored.refreshToken;

@@ -87,6 +87,71 @@ than widening that line - the dashboard has no login of its own.
 If you have already logged in outside Docker, copy `auth.json` into `./data` and the
 container will start already authorized.
 
+### Unraid
+
+No image is published, so build one on the server first. From an Unraid terminal (or SSH),
+with the source checked out somewhere on the array:
+
+```sh
+cd /mnt/user/appdata/sluice-src        # wherever you cloned the repo
+docker build -t sluice .
+mkdir -p /mnt/user/appdata/sluice
+chown 1000:1000 /mnt/user/appdata/sluice
+```
+
+Rebuild with the same command after pulling new source, then restart the container.
+
+Then **Docker → Add Container** (turn on *Advanced View*):
+
+| Field | Value | Notes |
+| --- | --- | --- |
+| Name | `sluice` | |
+| Repository | `sluice` | The tag you built above. Leave the Docker Hub URL empty. |
+| Network Type | `bridge` | |
+| Port | Container `4400` → Host `4400` | Any free host port works. |
+| Path | Container `/data` → Host `/mnt/user/appdata/sluice` | Access mode read/write. All state lives here. |
+| Variable | `TZ` = e.g. `Europe/London` | Optional. Only affects log timestamps and schedule times. |
+| Variable | `SLUICE_CLIENT_TOKEN` | Optional. Only needed to link a Steam library; see below. |
+| WebUI | `http://[IP]:[PORT:4400]/` | Adds *WebUI* to the container's menu. |
+
+The image runs as uid 1000, not Unraid's usual `nobody` (99:100), which is why the appdata
+folder is chowned above. If you prefer 99:100, add `--user 99:100` to *Extra Parameters*
+and leave the folder as Unraid made it.
+
+**Nothing else needs passing in.** On first launch Sluice creates everything in `/data`:
+
+| File | What it is |
+| --- | --- |
+| `config.json` | Settings with defaults; edit from the dashboard or by hand. |
+| `auth.json` | Your Twitch login, written once you approve the sign-in code. |
+| `steam.json`, `state.json`, `claims.json`, `users/` | Caches and history, rebuilt as it runs. |
+
+To sign in, open the container's **Logs** (or the dashboard). It shows a code to enter at
+<https://www.twitch.tv/activate>. After that the login is reused on every restart.
+
+**Reaching the dashboard from another machine.** Unraid publishes the port on your LAN,
+and the dashboard has no password, so anyone on the network can use it. It also only
+answers to hostnames it knows, so opening `http://tower:4400/` will be refused at first.
+Add the names you use, without the port, to `allowedHosts` in
+`/mnt/user/appdata/sluice/config.json` and restart:
+
+```json
+"allowedHosts": ["tower", "tower.local", "192.168.1.50"]
+```
+
+For access from outside your network, put it behind something that authenticates (see
+[Reaching the dashboard safely](#reaching-the-dashboard-safely)) rather than forwarding the
+port.
+
+**Steam library linking** goes through a broker that only accepts released builds. A
+self-built image reports itself as `dev` and is refused, so either set
+`SLUICE_CLIENT_TOKEN` to the token a release ships with, or leave Steam unlinked. Mining
+works the same either way.
+
+**One copy per account.** Don't run the Unraid container and the desktop app on the same
+Twitch account at the same time. They can't detect each other across machines, and Twitch
+credits only one watch session, so both lose progress.
+
 ## Setup (without Docker)
 
 Requires Node 20+.
