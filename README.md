@@ -89,35 +89,46 @@ container will start already authorized.
 
 ### Unraid
 
-A ready-built image is published at `ghcr.io/loversama/sluice:latest`, so nothing needs
-building. There are two ways to add it.
+Open the Unraid terminal (the `>_` icon, top right), paste this, and press Enter:
 
-**With the template (fills in every field):**
+```sh
+curl -fsSL https://raw.githubusercontent.com/loversama/sluice/master/unraid/install.sh | bash
+```
 
-1. **Docker** tab → scroll to the bottom → **Template Repositories**.
-2. Paste `https://github.com/loversama/sluice` on a new line and click **Save**.
-3. **Add Container** → pick **sluice** from the *Template* list → **Apply**.
+It downloads `ghcr.io/loversama/sluice:latest`, creates the `sluice` container with its port
+and appdata folder, and prints the dashboard address and a Twitch sign-in code. The container
+then appears in the **Docker** tab like any other, with its icon, *WebUI* and *Edit*. It
+starts with the array. Running the command again replaces the container, which is a quick
+way to repair one, and keeps your data and login.
 
-**By hand:** **Docker → Add Container**, turn on *Advanced View*, and fill in:
+What it sets up:
 
-| Field | Value | Notes |
+| Setting | Value |
+| --- | --- |
+| Port | `4400`, or the next free port if that one's taken |
+| Data | `/mnt/user/appdata/sluice` → `/data` |
+| Owner | `PUID=99`, `PGID=100` (`nobody:users`) |
+| Allowed hostnames | The server's name, e.g. `tower,tower.local` |
+| Time zone | The server's own |
+
+> **Template Repositories no longer works.** Current Unraid ignores that box on the Docker
+> tab, so pasting this repo's URL there does nothing. Use the command above.
+
+**By hand instead:** **Docker → Add Container**, turn on *Advanced View*, set *Repository*
+to `ghcr.io/loversama/sluice:latest` (exactly that, with no `https://`), then use *Add
+another Path, Port, Variable* for each of these. Without the port and path, the container
+runs with nothing reachable and nothing saved to appdata.
+
+| Type | Container | Host / value |
 | --- | --- | --- |
-| Name | `sluice` | |
-| Repository | `ghcr.io/loversama/sluice:latest` | |
-| Network Type | `bridge` | |
-| Port | Container `4400` → Host `4400` | Any free host port works. |
-| Path | Container `/data` → Host `/mnt/user/appdata/sluice` | Read/write. All state lives here. |
-| Variable | `PUID` = `99`, `PGID` = `100` | Owner of the data folder. Unraid's usual `nobody:users`. |
-| Variable | `TZ` = e.g. `Europe/London` | Optional. Log timestamps and the run schedule. |
-| Variable | `SLUICE_CLIENT_TOKEN` | Optional. Only needed to link a Steam library; see below. |
-| WebUI | `http://[IP]:[PORT:4400]/` | Adds *WebUI* to the container's menu. |
+| Port (TCP) | `4400` | `4400` |
+| Path | `/data` | `/mnt/user/appdata/sluice` |
+| Variable | `PUID` / `PGID` | `99` / `100` |
+| Variable | `SLUICE_ALLOWED_HOSTS` | Your server's name, e.g. `tower,tower.local`. Optional |
+| Variable | `TZ` | e.g. `Europe/London`. Optional |
 
-You don't need to create or chown the appdata folder. On start the container takes
-ownership of `/data` as `PUID:PGID` and then drops root.
-
-To update, use **Check for Updates** on the Docker tab, or `docker pull
-ghcr.io/loversama/sluice:latest` and restart. `:latest` follows `master`; release tags such
-as `:0.4.10` are published too, if you'd rather pin one.
+To update, use **Check for Updates** on the Docker tab, or run the install command again.
+`:latest` follows `master`; release tags such as `:0.4.10` are published too.
 
 **Nothing else needs passing in.** On first launch Sluice creates everything in `/data`:
 
@@ -130,17 +141,11 @@ as `:0.4.10` are published too, if you'd rather pin one.
 To sign in, open the container's **Logs** (or the dashboard). It shows a code to enter at
 <https://www.twitch.tv/activate>. After that the login is reused on every restart.
 
-**Reaching the dashboard from another machine.** Unraid publishes the port on your LAN,
-and the dashboard has no password, so anyone on the network can use it. It also only
-answers to hostnames it knows, so opening `http://tower:4400/` will be refused at first.
-Add the names you use, without the port, to `allowedHosts` in
-`/mnt/user/appdata/sluice/config.json` and restart:
-
-```json
-"allowedHosts": ["tower", "tower.local", "192.168.1.50"]
-```
-
-For access from outside your network, put it behind something that authenticates (see
+**Reaching the dashboard from another machine.** `http://<server-ip>:4400/` always works.
+A name like `http://tower:4400/` works if it's listed in `SLUICE_ALLOWED_HOSTS`, which the
+installer fills in, or in `allowedHosts` in `config.json`. Any other name is refused, which
+is what stops DNS-rebinding attacks. The dashboard has no password, so anyone on your network
+can use it. For access from outside, put it behind something that authenticates (see
 [Reaching the dashboard safely](#reaching-the-dashboard-safely)) rather than forwarding the
 port.
 
@@ -235,7 +240,9 @@ since "only on localhost" is weaker than it sounds:
 - **Unknown `Host` headers are refused.** A hostile page can point a domain it controls at
   `127.0.0.1` and, once the browser's DNS cache turns over, its scripts are same-origin with
   whatever is listening there - able to read replies, not just send requests. Only loopback
-  names, the bound address, and anything in `allowedHosts` are answered.
+  names, bare IP addresses, the bound address, and anything in `allowedHosts` or
+  `SLUICE_ALLOWED_HOSTS` are answered. An IP address is safe to accept because rebinding
+  needs a name the attacker controls.
 
 Neither helps against someone who can already reach the port directly. **If you want the
 dashboard from another machine, put it behind something that authenticates** - a reverse
