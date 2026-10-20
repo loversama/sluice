@@ -3,10 +3,12 @@ import { logger } from "@sluice/core";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { applyLinuxAutostart } from "./linux-autostart.js";
+
 /** Settings that only mean anything on the desktop, so they never enter the shared config. */
 export interface DesktopSettings {
     /**
-     * Start with Windows, into the tray.
+     * Start at login, into the tray.
      *
      * On by default. The app exists to mine while you are doing something else, and a
      * miner that only runs when you remember to open it earns a fraction of what it could.
@@ -46,23 +48,33 @@ export function writeDesktopSettings(next: Partial<DesktopSettings>): DesktopSet
 }
 
 /**
- * Ask Windows to start us at login, into the tray rather than in the user's face.
+ * Ask the OS to start us at login, into the tray rather than in the user's face.
  *
  * Kept next to the setting so the stored value and the OS cannot drift apart: writing the
  * file without telling Windows would leave a toggle that lies.
  */
 export function applyLoginItem(enabled: boolean): void {
-    if (process.platform === "linux") {
-        // Electron's implementation here depends on the desktop environment; skip rather
-        // than write a .desktop file we would then have to own.
-        return;
-    }
-
     // A run from source must never register itself. process.execPath is then Electron's own
-    // binary inside node_modules, so Windows would launch a bare Electron at every login
+    // binary inside node_modules, so the OS would launch a bare Electron at every login
     // from a path that disappears the moment the checkout is moved or cleaned.
     if (!app.isPackaged) {
         logger.debug("Not a packaged build; leaving the login item alone.");
+        return;
+    }
+
+    if (process.platform === "linux") {
+        // An AppImage runs from a temporary mount, so process.execPath is somewhere under
+        // /tmp that is gone after exit; APPIMAGE is the file the user actually has. A deb
+        // install has no APPIMAGE and its execPath is stable.
+        const path = process.env.APPIMAGE ?? process.execPath;
+        try {
+            const refused = applyLinuxAutostart(enabled, path);
+            if (refused) {
+                logger.warn(`Not starting Sluice at login: ${refused}.`);
+            }
+        } catch (error) {
+            logger.warn(`Could not update the login autostart entry: ${(error as Error).message}`);
+        }
         return;
     }
 
