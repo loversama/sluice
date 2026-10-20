@@ -4,7 +4,9 @@ const requestMock = vi.hoisted(() => vi.fn());
 vi.mock("undici", () => ({ request: requestMock }));
 
 // Imported after the mock so the client picks up the stub.
-const { TwitchGql, AuthExpiredError } = await import("../packages/core/src/twitch/gql.js");
+const { TwitchGql, AuthExpiredError, GqlError, retryAfterMs } = await import(
+    "../packages/core/src/twitch/gql.js"
+);
 
 function reply(statusCode: number, body: unknown = {}, headers: Record<string, string> = {}) {
     return {
@@ -68,5 +70,50 @@ describe("GQL retries", () => {
         await assertion;
 
         expect(auth.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits out a 429 and then succeeds", async () => {
+        requestMock.mockResolvedValueOnce(reply(429, {}, { "retry-after": "5" })).mockResolvedValueOnce(ok());
+
+        const result = new TwitchGql(fakeAuth() as never).getGameSlug("A Game");
+        // Not before Twitch said to: the backoff alone would have retried at ~2s.
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(requestMock).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(await result).toBe("a-game");
+        expect(requestMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives up on a 429 that persists, after the usual number of attempts", async () => {
+        requestMock.mockResolvedValue(reply(429, {}, { "retry-after": "1" }));
+
+        const result = new TwitchGql(fakeAuth() as never).getGameSlug("A Game");
+        const assertion = expect(result).rejects.toBeInstanceOf(GqlError);
+        await vi.runAllTimersAsync();
+        await assertion;
+
+        expect(requestMock).toHaveBeenCalledTimes(4);
+    });
+
+    it("caps how long a Retry-After is honoured", async () => {
+        requestMock
+            .mockResolvedValueOnce(reply(429, {}, { "retry-after": "3600" }))
+            .mockResolvedValueOnce(ok());
+
+        const result = new TwitchGql(fakeAuth() as never).getGameSlug("A Game");
+        await vi.advanceTimersByTimeAsync(70_000);
+
+        expect(await result).toBe("a-game");
+    });
+});
+
+describe("retryAfterMs", () => {
+    it("reads seconds and HTTP dates, and ignores nonsense", () => {
+        const now = Date.parse("2026-10-20T12:00:00Z");
+        expect(retryAfterMs("7", now)).toBe(7_000);
+        expect(retryAfterMs("Tue, 20 Oct 2026 12:00:30 GMT", now)).toBe(30_000);
+        expect(retryAfterMs("soon", now)).toBe(0);
+        expect(retryAfterMs(undefined, now)).toBe(0);
     });
 });

@@ -49,6 +49,27 @@ export class StaleQueryHashError extends GqlError {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The longest a Retry-After is honoured for. Twitch's own figure wins below this, but a
+ * request is not worth holding a refresh sweep up for longer: past it the request fails
+ * and the next sweep tries again.
+ */
+const MAX_RATE_LIMIT_WAIT_MS = 60_000;
+
+/** Retry-After as milliseconds, in either of its forms; 0 when absent or unreadable. */
+export function retryAfterMs(header: string | string[] | undefined, now = Date.now()): number {
+    const value = Array.isArray(header) ? header[0] : header;
+    if (!value) {
+        return 0;
+    }
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) {
+        return Math.max(0, seconds * 1000);
+    }
+    const at = Date.parse(value);
+    return Number.isNaN(at) ? 0 : Math.max(0, at - now);
+}
+
 interface GqlResponse<T> {
     data?: T;
     errors?: { message: string; [key: string]: unknown }[];
@@ -85,12 +106,15 @@ export class TwitchGql {
         const retries = options.retries ?? 3;
 
         let lastError: unknown;
+        /** How long Twitch asked us to wait, when the last attempt was rate limited. */
+        let rateLimitWait = 0;
         for (let attempt = 0; attempt <= retries; attempt++) {
             if (attempt > 0) {
                 // Exponential backoff, capped - Twitch rate-limits aggressive clients.
                 // The +/-10% variance stops repeated failures from re-syncing into a
                 // regular pattern of retries.
-                const backoff = Math.min(1000 * 2 ** attempt, 15_000);
+                const backoff = Math.max(Math.min(1000 * 2 ** attempt, 15_000), rateLimitWait);
+                rateLimitWait = 0;
                 await sleep(backoff * (0.9 + Math.random() * 0.2));
             }
             try {
@@ -117,6 +141,20 @@ export class TwitchGql {
                         continue;
                     }
                     throw new AuthExpiredError();
+                }
+                // Rate limited. Worth waiting out rather than failing at once - a detail
+                // sweep that gives up here leaves its campaign with no drops - but only
+                // within the same bounded retries as anything else, so a client that is
+                // being throttled does not go on to hammer.
+                if (response.statusCode === 429) {
+                    await response.body.dump();
+                    rateLimitWait = Math.min(
+                        retryAfterMs(response.headers["retry-after"]),
+                        MAX_RATE_LIMIT_WAIT_MS,
+                    );
+                    lastError = new GqlError(`${query.operationName} was rate limited (429)`);
+                    logger.debug(`${query.operationName} rate limited; backing off.`);
+                    continue;
                 }
                 if (response.statusCode >= 500) {
                     await response.body.dump();
