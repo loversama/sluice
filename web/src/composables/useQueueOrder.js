@@ -2,7 +2,7 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
-import { orderDraggedGame } from "@/lib/ranking.js";
+import { orderDraggedGame, priorityGameBelow, reorderPriorityGames } from "@/lib/ranking.js";
 
 /**
  * Dragging the queue into a different order, from either layout.
@@ -41,10 +41,12 @@ export function useQueueOrder() {
     onUnmounted(() => clearTimeout(settleTimer));
 
     /**
-     * Persist a drag - see orderDraggedGame for the rule.
+     * Persist a drag - see orderDraggedGame and reorderPriorityGames for the rules.
      *
-     * Writes queueOrder and nothing else. The priority list is the user's own and is never
-     * touched from here.
+     * A game already on the priority list moves within that list, because the list outranks
+     * everything a drag can write elsewhere. Any other game goes to queueOrder, unless it
+     * was dropped above a priority game: that can never hold, so it is put back with a note
+     * saying how to rank it there instead. The priority list never gains an entry here.
      *
      * Refuses to write if settings were never loaded, since treating a failed fetch as an
      * empty list would delete an order the user had built up.
@@ -63,13 +65,27 @@ export function useQueueOrder() {
             return;
         }
 
+        const priorityGames = store.config?.priorityGames ?? [];
+        const reordered = reorderPriorityGames(order.value, priorityGames, movedIndex);
+        if (!reordered && priorityGameBelow(order.value, priorityGames, movedIndex)) {
+            const game = order.value[movedIndex]?.game?.name ?? "That game";
+            ElMessage.info(
+                `${game} isn't on your priority list, so it can't go above games that are. ` +
+                    "Add it on the Priorities page to rank it among them.",
+            );
+            order.value = [...store.upNext];
+            return;
+        }
+
         pending.value = true;
         saving.value = true;
 
-        const next = orderDraggedGame(order.value, existing, movedIndex);
+        const patch = reordered
+            ? { priorityGames: reordered }
+            : { queueOrder: orderDraggedGame(order.value, existing, movedIndex) };
 
         try {
-            await store.saveConfig({ queueOrder: next });
+            await store.saveConfig(patch);
         } catch (error) {
             ElMessage.error(error.message);
             order.value = [...store.upNext];
