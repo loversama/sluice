@@ -88,6 +88,9 @@ function buildPayload(query: PersistedQuery, variables?: Record<string, unknown>
 }
 
 export class TwitchGql {
+    /** Whether a missing currentUser on the campaign list has been reported yet. */
+    private warnedNoCampaignUser = false;
+
     constructor(private readonly auth: AuthState) {}
 
     /**
@@ -261,9 +264,19 @@ export class TwitchGql {
 
     /** Every campaign visible to this account, without per-drop detail. */
     async getCampaigns(): Promise<DropCampaign[]> {
-        const data = await this.query<{ currentUser: { dropCampaigns: DropCampaign[] | null } }>(
-            "campaigns",
-        );
+        const data = await this.query<{
+            currentUser: { dropCampaigns: DropCampaign[] | null } | null;
+        }>("campaigns");
+        // Not thrown: an empty list is what sends a TV-client login to the public catalogue,
+        // and nothing yet shows that login gets a currentUser back rather than null. But it
+        // is said, once, because the other reading is a token Twitch no longer recognises.
+        if (!data.currentUser && !this.warnedNoCampaignUser) {
+            this.warnedNoCampaignUser = true;
+            logger.warn(
+                "Twitch answered the campaign list without a current user; treating it as " +
+                    "no campaigns. If nothing is ever found, sign out and back in.",
+            );
+        }
         return data.currentUser?.dropCampaigns ?? [];
     }
 
