@@ -22,10 +22,15 @@ import { StaleQueryHashError, AuthExpiredError } from "./twitch/gql.js";
 export function wireMinerToBus(deps: {
     miner: Miner;
     bus: EventEmitter;
-    notifier: NotifierGroup;
+    /**
+     * Asked at the moment of sending rather than captured once. Saving settings builds a
+     * new notifier, and a captured one went on delivering to the old Telegram chat or
+     * webhook - or to none at all - until the next restart.
+     */
+    getNotifier(): NotifierGroup;
     getConfig(): Config;
 }): () => void {
-    const { miner, bus, notifier } = deps;
+    const { miner, bus } = deps;
 
     // Translate miner events into the JSON shapes the dashboard consumes.
     miner.on("watching", ({ channel, campaign, drop }) => {
@@ -63,7 +68,7 @@ export function wireMinerToBus(deps: {
         // An unlinked claim used to send two messages at once - a claim and a separate
         // warning about the same drop. The warning is folded in here instead.
         const deliverable = campaign.isDeliverable;
-        void notifier.send({
+        void deps.getNotifier().send({
             kind: deliverable ? "claim" : "warning",
             title: deliverable ? "Drop claimed" : campaign.gameName,
             lines: [
@@ -106,7 +111,7 @@ export function wireMinerToBus(deps: {
             // which left the desktop notification as the one announcement with no picture.
             boxArtUrl: campaign.boxArtUrl(),
         });
-        void notifier.send({
+        void deps.getNotifier().send({
             kind: "complete",
             title: "Campaign complete",
             lines: [
@@ -127,7 +132,7 @@ export function wireMinerToBus(deps: {
     });
     miner.on("unlinked-expiring", ({ campaign, earnedMinutes, rewards, hoursLeft }) => {
         const hours = hoursLeft < 1 ? "under an hour" : `${Math.round(hoursLeft)} hours`;
-        void notifier.send({
+        void deps.getNotifier().send({
             kind: "warning",
             // Game name leads: it is what the reader recognises at a glance in a
             // notification list, with the reason for the alert on the line beneath.
@@ -150,7 +155,7 @@ export function wireMinerToBus(deps: {
         if (!held) {
             return;
         }
-        void notifier.send({
+        void deps.getNotifier().send({
             kind: "warning",
             title: campaign.gameName,
             lines: [
@@ -178,7 +183,7 @@ export function wireMinerToBus(deps: {
             message: error.message,
         });
         if (fatal) {
-            void notifier.send({
+            void deps.getNotifier().send({
                 kind: "warning",
                 title: "Mining stopped",
                 lines: [error.message],

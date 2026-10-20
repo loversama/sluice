@@ -473,7 +473,7 @@ export function createApp(options: AppOptions): AppHandle {
         unwire = wireMinerToBus({
             miner,
             bus,
-            notifier,
+            getNotifier: () => notifier,
             getConfig: () => config,
         });
         return true;
