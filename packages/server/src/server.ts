@@ -61,6 +61,9 @@ const RELAYED_EVENTS = [
     // Sign-in finishes in an external browser on the desktop build, so without this the
     // window has no way of learning that Steam was linked short of a reload.
     "steam",
+    // Paused, resumed, outside the schedule, at the daily limit, or off a channel. Carries
+    // nothing; the page re-reads /api/state on it.
+    "status",
 ] as const;
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

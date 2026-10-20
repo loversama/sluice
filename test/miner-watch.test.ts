@@ -90,3 +90,94 @@ describe("watching", () => {
         expect(miner.minedTodayMinutes).toBe(0);
     });
 });
+
+describe("the status event", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    /** Count status events, and record what the miner reported at the moment of each. */
+    function listen(miner: InstanceType<typeof Miner>) {
+        const seen: { mining: unknown; paused: boolean }[] = [];
+        miner.on("status", (...args: unknown[]) => {
+            expect(args).toEqual([]);
+            seen.push({ mining: miner.getMiningState(), paused: miner.isPaused });
+        });
+        return seen;
+    }
+
+    it("is sent on pause and resume, once per change", () => {
+        const miner = makeMiner();
+        const seen = listen(miner);
+
+        miner.pause();
+        miner.pause();
+        expect(seen).toEqual([{ mining: null, paused: true }]);
+
+        miner.resume();
+        miner.resume();
+        expect(seen).toHaveLength(2);
+        expect(seen[1]!.paused).toBe(false);
+    });
+
+    it("is sent when the schedule closes and opens", () => {
+        const closed = { enabled: true, windows: [{ days: [], from: "00:00", to: "00:01" }] };
+        const miner = makeMiner({ schedule: closed });
+        const seen = listen(miner);
+
+        expect(miner.withinSchedule()).toBe(false);
+        expect(miner.withinSchedule()).toBe(false);
+        expect(seen).toHaveLength(1);
+
+        miner.applyConfig({ ...miner.getConfig(), schedule: { enabled: false, windows: [] } });
+        expect(miner.withinSchedule()).toBe(true);
+        expect(seen).toHaveLength(2);
+    });
+
+    it("is sent on reaching the daily limit, and again on a new day's allowance", () => {
+        const miner = makeMiner({ dailyLimit: { enabled: true, hours: 1 } });
+        const internals = miner as unknown as { minedToday: number; minedTodayOn: string };
+        internals.minedToday = 60;
+        const seen = listen(miner);
+
+        expect(miner.withinDailyLimit()).toBe(false);
+        expect(miner.withinDailyLimit()).toBe(false);
+        expect(seen).toHaveLength(1);
+
+        // Midnight: yesterday's tally no longer counts.
+        internals.minedTodayOn = "a day long gone";
+        expect(miner.withinDailyLimit()).toBe(true);
+        expect(seen).toHaveLength(2);
+
+        // And the limit is announced again when today's is reached.
+        internals.minedTodayOn = new Date().toDateString();
+        internals.minedToday = 60;
+        expect(miner.withinDailyLimit()).toBe(false);
+        expect(seen).toHaveLength(3);
+    });
+
+    it("is sent on leaving a channel, after the channel is cleared", async () => {
+        const miner = makeMiner();
+        const seen = listen(miner);
+        const campaign = new Campaign(makeCampaign({ id: "c" }));
+        const watching = (miner as unknown as Watching).watch(
+            fakeChannel(),
+            campaign,
+            campaign.drops[0],
+        );
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(miner.getMiningState()).not.toBeNull();
+        expect(seen).toHaveLength(0);
+
+        miner.pause();
+        await vi.advanceTimersByTimeAsync(WATCH_INTERVAL_MS);
+        expect(await watching).toBe("paused");
+
+        // Once for the pause itself, once for leaving - and by then nothing is being mined.
+        expect(seen).toHaveLength(2);
+        expect(seen.at(-1)!.mining).toBeNull();
+    });
+});

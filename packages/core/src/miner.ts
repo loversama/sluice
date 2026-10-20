@@ -151,6 +151,14 @@ export interface MinerEvents {
     loading: [{ phase: LoadingPhase; done?: number; total?: number; background?: boolean }];
     /** Human-readable activity line for the dashboard feed. */
     feed: [FeedEntry];
+    /**
+     * Whether the miner is running has changed: paused or resumed, outside the schedule
+     * or back in it, at the daily limit or past it, or off the channel it was watching.
+     *
+     * Carries nothing. It is sent after the change has been made, so anything read in
+     * response - the dashboard's state snapshot - already reflects it.
+     */
+    status: [];
     error: [Error];
 }
 
@@ -281,7 +289,8 @@ export class Miner extends EventEmitter {
      */
     private minedToday = 0;
     private minedTodayOn = new Date().toDateString();
-    private limitReported = false;
+    /** Whether the daily limit was stopping mining last time it was looked at. */
+    private atDailyLimit = false;
     private lastProgressAt = 0;
 
     /** Drop minutes as of the last sweep, for spotting another session earning as us. */
@@ -533,7 +542,6 @@ export class Miner extends EventEmitter {
         if (today !== this.minedTodayOn) {
             this.minedTodayOn = today;
             this.minedToday = 0;
-            this.limitReported = false;
         }
         this.minedToday += 1;
     }
@@ -551,12 +559,21 @@ export class Miner extends EventEmitter {
         const remaining = drop ? Math.max(0, drop.requiredMinutes - drop.currentMinutes) : null;
         const verdict = dailyLimitVerdict(this.config.dailyLimit, this.minedTodayMinutes, remaining);
 
-        if (verdict === "stop" && !this.limitReported) {
-            this.limitReported = true;
-            logger.info("Daily mining limit reached; stopping until tomorrow.");
-            this.pushFeed("info", "Daily limit reached - mining again tomorrow");
+        const stop = verdict === "stop";
+        // On change, in both directions. Only arriving was ever noticed, and the flag that
+        // noticed it was reset by the next minute mined - which, at the limit, never came -
+        // so the second day's limit passed without a word.
+        if (stop !== this.atDailyLimit) {
+            this.atDailyLimit = stop;
+            if (stop) {
+                logger.info("Daily mining limit reached; stopping until tomorrow.");
+                this.pushFeed("info", "Daily limit reached - mining again tomorrow");
+            } else {
+                logger.info("A new day's mining allowance; mining again.");
+            }
+            this.emit("status");
         }
-        return verdict !== "stop";
+        return !stop;
     }
 
     withinSchedule(): boolean {
@@ -565,6 +582,7 @@ export class Miner extends EventEmitter {
             this.scheduleAllowed = allowed;
             logger.info(allowed ? "Schedule window opened; mining." : "Outside the mining schedule; waiting.");
             this.pushFeed("info", allowed ? "Schedule window opened" : "Outside the mining schedule");
+            this.emit("status");
         }
         return allowed;
     }
@@ -582,6 +600,7 @@ export class Miner extends EventEmitter {
         this.switchRequested = true;
         logger.info("Paused by request.");
         this.pushFeed("info", "Paused");
+        this.emit("status");
     }
 
     resume(): void {
@@ -593,6 +612,7 @@ export class Miner extends EventEmitter {
         this.paused = false;
         logger.info("Resumed by request.");
         this.pushFeed("info", "Resumed");
+        this.emit("status");
     }
 
     /**
@@ -1676,6 +1696,9 @@ export class Miner extends EventEmitter {
             this.currentDrop = null;
             this.currentCampaign = null;
             this.miningSince = null;
+            // After the clearing, so a dashboard re-reading its state on this no longer
+            // finds the channel it just left.
+            this.emit("status");
         }
     }
 

@@ -52,4 +52,14 @@ describe("wireMinerToBus", () => {
         expect(before.sent).toHaveLength(1);
         expect(after.sent).toHaveLength(1);
     });
+
+    it("relays the miner's status changes to the dashboard", () => {
+        const { miner, bus } = wire(() => new RecordingNotifier());
+        const heard: unknown[][] = [];
+        bus.on("status", (...args: unknown[]) => heard.push(args));
+
+        miner.emit("status");
+
+        expect(heard).toEqual([[]]);
+    });
 });

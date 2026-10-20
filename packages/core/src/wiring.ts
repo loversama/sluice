@@ -169,6 +169,8 @@ export function wireMinerToBus(deps: {
     });
 
     miner.on("beat", (payload) => bus.emit("beat", payload));
+    // No payload: the dashboard re-reads its state when it hears this.
+    miner.on("status", () => bus.emit("status"));
     miner.on("feed", (entry) => bus.emit("feed", entry));
     miner.on("error", (error) => {
         const fatal = error instanceof StaleQueryHashError || error instanceof AuthExpiredError;
