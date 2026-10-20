@@ -458,6 +458,7 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         "
                         :style="{ background: 'var(--surface)' }"
                         tabindex="0"
+                        aria-keyshortcuts="Control+ArrowUp Control+ArrowDown"
                         @keydown.ctrl.up.prevent="move(index, -1)"
                         @keydown.ctrl.down.prevent="move(index, 1)"
                     >
@@ -509,7 +510,8 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         <span
                             class="drag-handle cursor-grab select-none text-[12px] shrink-0 pl-0.5"
                             :style="{ color: 'var(--muted)' }"
-                            title="Drag to rank"
+                            title="Drag to rank, or focus the row and press Ctrl+↑/↓"
+                            aria-hidden="true"
                         >&#10287;</span>
                     </div>
                 </template>
