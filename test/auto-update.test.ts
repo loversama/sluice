@@ -1,7 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 
-import { nextCheckDelay, AutoUpdate, type UpdaterLike } from "../packages/desktop/src/main/auto-update.js";
+import {
+    nextCheckDelay,
+    AutoUpdate,
+    installsOnQuit,
+    type UpdaterLike,
+} from "../packages/desktop/src/main/auto-update.js";
 
 /** Stands in for electron-updater, so a test can decide what it reports and when. */
 class FakeUpdater extends EventEmitter implements UpdaterLike {
@@ -45,6 +51,12 @@ describe("AutoUpdate", () => {
         expect(updater.autoDownload).toBe(true);
         expect(updater.autoInstallOnAppQuit).toBe(true);
         expect(updater.installs).toBe(0);
+    });
+
+    it("leaves a deb install to the user, rather than asking for a password at every quit", () => {
+        new AutoUpdate(bus).start(updater, installsOnQuit("deb\n"));
+        expect(updater.autoDownload).toBe(true);
+        expect(updater.autoInstallOnAppQuit).toBe(false);
     });
 
     it("reports progress through to ready", () => {
@@ -255,6 +267,7 @@ describe("deciding whether an update failure is worth reporting", () => {
     it("keeps quiet while a release is still uploading its metadata", () => {
         expect(isTransientUpdateError("Cannot find latest.yml in the latest release")).toBe(true);
         expect(isTransientUpdateError("HttpError: 404 Not Found")).toBe(true);
+        expect(isTransientUpdateError("Cannot find latest-linux.yml in the latest release")).toBe(true);
     });
 
     it("still reports a failure that will not fix itself", () => {
@@ -270,5 +283,20 @@ describe("deciding whether an update failure is worth reporting", () => {
     it("does not mistake a version number for a status code", () => {
         // A bare "5xx" match would swallow real failures mentioning a version.
         expect(isTransientUpdateError("Update 1.502.0 could not be verified")).toBe(false);
+    });
+});
+
+describe("installing on quit", () => {
+    it("is what every package does except a deb", () => {
+        expect(installsOnQuit(null)).toBe(true);
+        expect(installsOnQuit("rpm")).toBe(true);
+        expect(installsOnQuit("deb")).toBe(false);
+        expect(installsOnQuit("deb\n")).toBe(false);
+    });
+
+    it("is decided from the package-type file electron-builder ships", () => {
+        const main = readFileSync("packages/desktop/src/main/index.ts", "utf8");
+        expect(main).toMatch(/join\(process\.resourcesPath, "package-type"\)/);
+        expect(main).toMatch(/installsOnQuit\(readPackageType\(\)\)/);
     });
 });

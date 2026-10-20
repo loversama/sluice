@@ -1,14 +1,20 @@
 # Sluice
 
 A browserless Twitch drop miner. Two distributions from one build: a container, and a
-Windows desktop app that wraps the same daemon and dashboard.
+desktop app for Windows and Linux that wraps the same daemon and dashboard.
 
 ## Cutting a release
 
 Releases are built by `.github/workflows/build-desktop.yml`, triggered by pushing a version
-tag. The installer and `latest.yml` are published to **`loversama/sluice-releases`** — a
-separate public repository, so people can download builds without the private source. The
-desktop app updates itself from there.
+tag. Windows and Linux build side by side on their own runners, and one publish job then
+makes the release with every file in it — the Windows installer, its blockmap and
+`latest.yml`; the Linux AppImage, the deb and `latest-linux.yml` — on
+**`loversama/sluice-releases`**, a separate public repository, so people can download builds
+without the private source. The desktop app updates itself from there.
+
+The Linux packages are only ever built in CI. Do not run electron-builder locally for them:
+from WSL it would package against the shared `node_modules` (see below), and nothing about
+a local AppImage says it is the one that will ship.
 
 Four things have to line up, and the release fails if any of them does not:
 
@@ -118,8 +124,9 @@ dots. The updater then asks for `Sluice-Setup-X.Y.Z.exe`, GitHub has `Sluice.Set
 and the download 404s. Both 0.4.1 and 0.4.2 shipped that way and could not update themselves.
 
 Two things prevent it now: `artifactName` in `electron-builder.yml` removes the spaces at
-source, and the publish step checks the `path:` in `latest.yml` against the release's asset
-list, deleting the release if they disagree. Do not "simplify" either one away.
+source, and the publish step checks every file `latest.yml` and `latest-linux.yml` name
+(`path:` and each `url:`) against the release's asset list, deleting the release if they
+disagree. Do not "simplify" either one away.
 
 ## Never run npm install from WSL
 
@@ -191,7 +198,8 @@ and re-run it rather than editing any of the outputs, which are all overwritten.
 The tray mark is **white**, and stays white unless Windows positively reports a light
 taskbar — read from the taskbar's own registry value, which is a different setting from the
 one applications follow. A failed read, or any other platform, keeps it white. The purple
-variant exists only so a light taskbar does not show white on white.
+variant exists only so a light taskbar does not show white on white. Linux gets the same
+pair as PNGs (`tray-light.png`, `tray-dark.png`), since its trays do not take an ICO.
 
 It also generates the NSIS wizard artwork. `installerSidebar.bmp` matters: without it the
 uninstaller's welcome page falls back to `nsis3-metro.bmp`, a stock NSIS graphic.

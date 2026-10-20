@@ -46,6 +46,7 @@ export class AutoUpdate {
     private retryTimer: NodeJS.Timeout | null = null;
     private updater: UpdaterLike | null = null;
     private lastStatus: UpdateStatus = { status: "idle" };
+    private installOnQuit = true;
 
     /**
      * @param enabled whether automatic checking is switched on. Read at each check rather
@@ -66,7 +67,13 @@ export class AutoUpdate {
         this.bus.emit("update", status);
     }
 
-    start(updater: UpdaterLike): void {
+    /**
+     * @param installOnQuit whether a downloaded update installs by itself at the next quit.
+     *                      Off for a deb install, where installing means a password prompt -
+     *                      asking for one every time the app closes is worse than waiting
+     *                      for the user to choose the moment. See installsOnQuit.
+     */
+    start(updater: UpdaterLike, installOnQuit = true): void {
         // Guarded because the caller loads this from a CommonJS module across an ESM
         // boundary, and got undefined in the packaged build while working in development.
         if (!updater || typeof updater.on !== "function") {
@@ -78,7 +85,8 @@ export class AutoUpdate {
         // Downloading is fine unattended; installing is not, since it restarts the app and
         // would end a mining session without warning.
         updater.autoDownload = true;
-        updater.autoInstallOnAppQuit = true;
+        updater.autoInstallOnAppQuit = installOnQuit;
+        this.installOnQuit = installOnQuit;
 
         updater.on("checking-for-update", () => this.publish({ status: "checking" }));
         updater.on("update-available", (info) =>
@@ -97,7 +105,10 @@ export class AutoUpdate {
         updater.on("update-downloaded", (info) => {
             // Also fires on a later check when the download is already cached - which is
             // how a pending update announces itself again after the app is reopened.
-            logger.info(`Update ${info?.version ?? ""} downloaded; it will install on quit.`);
+            logger.info(
+                `Update ${info?.version ?? ""} downloaded; ` +
+                    (this.installOnQuit ? "it will install on quit." : "it installs when you choose to."),
+            );
             this.publish({ status: "ready", version: info?.version ?? "" });
         });
 
@@ -187,6 +198,18 @@ export class AutoUpdate {
     }
 }
 
+/**
+ * Whether a downloaded update should install itself when the app quits, given the contents
+ * of the `package-type` file electron-builder ships in resources (null when there is none).
+ *
+ * Everywhere but a deb, yes. A deb update goes through pkexec, so installing on quit would
+ * ask for a password every time the app closed with an update waiting - including at
+ * shutdown, where nobody is there to answer. The dashboard's install button still works.
+ */
+export function installsOnQuit(packageType: string | null): boolean {
+    return packageType?.trim() !== "deb";
+}
+
 /** The slice of electron-updater this uses, so tests need not stand the real one up. */
 export interface UpdaterLike {
     autoDownload: boolean;
@@ -207,6 +230,8 @@ export interface UpdaterLike {
 export function isTransientUpdateError(message: string): boolean {
     return (
         message.includes("latest.yml") ||
+        // The same file for Linux builds, which does not contain "latest.yml".
+        message.includes("latest-linux.yml") ||
         message.includes("404") ||
         message.includes("ENOTFOUND") ||
         message.includes("ECONNRESET") ||

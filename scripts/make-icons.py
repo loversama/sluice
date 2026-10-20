@@ -44,6 +44,7 @@ APP_MARGIN = 0.08
 TRAY_MARGIN = 0.02
 
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+TRAY_PNG_SIZE = 64
 
 # NSIS wizard art. The sidebar is a fixed size and must be a BMP: without one the installer
 # falls back to nsis3-metro.bmp, a stock NSIS graphic with nothing to do with this app.
@@ -127,6 +128,11 @@ def main() -> None:
     # one is kept for a light taskbar, where white would be invisible.
     write(DESKTOP / "tray-light.ico", coloured(tray, (255, 255, 255), 256), ICO_SIZES)
     write(DESKTOP / "tray-dark.ico", coloured(tray, PURPLE, 256), ICO_SIZES)
+
+    # The same two marks for Linux, whose trays take a PNG rather than an ICO. 64px gives
+    # the panel room to scale down cleanly at any of the sizes desktops draw it at.
+    write(DESKTOP / "tray-light.png", coloured(tray, (255, 255, 255), TRAY_PNG_SIZE))
+    write(DESKTOP / "tray-dark.png", coloured(tray, PURPLE, TRAY_PNG_SIZE))
 
     # The installer wizard. The header icon appears beside every page's title; the sidebar
     # is the tall panel on the welcome and finish pages.

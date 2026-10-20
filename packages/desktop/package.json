@@ -2,7 +2,9 @@
   "name": "@sluice/desktop",
   "version": "0.4.12",
   "private": true,
-  "description": "Windows desktop build: the same daemon and dashboard, without Docker.",
+  "description": "Desktop build for Windows and Linux: the same daemon and dashboard, without Docker.",
+  "homepage": "https://github.com/loversama/sluice-releases",
+  "desktopName": "sluice.desktop",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
@@ -11,6 +13,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "pack": "electron-builder --win --publish never",
+    "pack:linux": "electron-builder --linux --publish never",
     "dist": "npm run build && electron-builder --win --publish always",
     "smoke": "node scripts/smoke.mjs"
   },

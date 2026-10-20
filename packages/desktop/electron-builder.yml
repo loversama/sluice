@@ -43,6 +43,51 @@ win:
     - target: nsis
       arch: [x64]
 
+linux:
+  icon: resources/icon.png
+  # Lower case and without spaces, so the deb's /usr/bin entry and the process name are
+  # what someone would type. The data directory is unaffected: it comes from package.json's
+  # name, as on Windows.
+  executableName: sluice
+  # Names the installed .desktop file after desktopName in package.json, so it matches the
+  # window's app_id and the dock groups the window under Sluice rather than as a stranger.
+  syncDesktopName: true
+  category: Network
+  synopsis: Mine Twitch drops in the background
+  description: >-
+    Sluice watches Twitch drop campaigns for you and claims the rewards, without a
+    browser. The same daemon and dashboard as the Docker build, as a desktop app.
+  maintainer: loversama <loversama@users.noreply.github.com>
+  vendor: loversama
+  desktop:
+    entry:
+      Comment: Mine Twitch drops in the background
+      Keywords: twitch;drops;miner;
+  target:
+    # The AppImage is the one that updates itself; a deb update needs a password, so the
+    # app leaves installing it to the user. See installsOnQuit in auto-update.ts.
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  # Linux trays and window icons take PNGs. The ICOs above still ship; they are a few KB.
+  extraResources:
+    - from: "resources/icon.png"
+      to: "icon.png"
+    - from: "resources/tray-light.png"
+      to: "tray-light.png"
+    - from: "resources/tray-dark.png"
+      to: "tray-dark.png"
+
+# Both names avoid spaces for the reason given at artifactName above, and neither uses
+# ${name}: that is "@sluice/desktop", and a slash in a file name is a directory.
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+deb:
+  packageName: sluice
+  artifactName: sluice_${version}_${arch}.${ext}
+
 nsis:
   # Per-user, no elevation. Hearth asks for administrator because it installs a Windows
   # service; this mines drops and has no business holding that.

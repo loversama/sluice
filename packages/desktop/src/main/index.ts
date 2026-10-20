@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from "electron";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +15,20 @@ import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./des
 import { appIconPath, createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { idleTooltip } from "./idle-tooltip.js";
 import { importFromDockerData } from "./import-docker.js";
-import { AutoUpdate } from "./auto-update.js";
+import { AutoUpdate, installsOnQuit } from "./auto-update.js";
+
+/**
+ * Which package this install came from - "deb" for a deb, absent for the AppImage and the
+ * Windows installer. electron-builder writes it into resources; electron-updater reads the
+ * same file to decide how to update.
+ */
+function readPackageType(): string | null {
+    try {
+        return readFileSync(join(process.resourcesPath, "package-type"), "utf8");
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Only one copy may run.
@@ -203,9 +217,14 @@ let updates: AutoUpdate | null = null;
             win?.hide();
             if (!warnedAboutTray) {
                 warnedAboutTray = true;
+                // A Linux desktop may have no tray to point at - GNOME shows none without an
+                // extension, and Electron cannot tell - so the copy there does not promise
+                // one. Opening Sluice again reaches this window through the instance lock.
                 showBalloon(
                     "Still mining",
-                    "Sluice is in the tray. Quit from there to stop it.",
+                    process.platform === "linux"
+                        ? "Sluice is still running. Open Sluice again to bring the window back."
+                        : "Sluice is in the tray. Quit from there to stop it.",
                 );
             }
         });
@@ -231,7 +250,12 @@ let updates: AutoUpdate | null = null;
     // notification from the installed Sluice arriving titled "Electron", with Electron's
     // icon, because Windows resolved the shared id to a shortcut pointing at
     // node_modules/electron/dist/electron.exe.
-    app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : `${APP_USER_MODEL_ID}.dev`);
+    //
+    // Windows only. Elsewhere there is no shortcut to match, and the desktop entry named by
+    // desktopName in package.json does this job on Linux.
+    if (process.platform === "win32") {
+        app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : `${APP_USER_MODEL_ID}.dev`);
+    }
 
     app.whenReady().then(
         async () => {
@@ -301,7 +325,7 @@ let updates: AutoUpdate | null = null;
                 } else {
                     // No credential: the releases repository is public, so the updater reads
                     // it anonymously. Nothing to embed, leak, expire or rotate.
-                    updates.start(autoUpdater as never);
+                    updates.start(autoUpdater as never, installsOnQuit(readPackageType()));
                 }
             }
 
@@ -366,7 +390,10 @@ let updates: AutoUpdate | null = null;
                 // a URL, and the art is the most recognisable part of a claim.
                 const icon = (await icons?.pathFor(toast.imageUrl)) ?? undefined;
 
-                if (config?.desktopNotificationStyle === "themed") {
+                // Wayland does not let a window place itself, so the themed card cannot sit
+                // in the corner it is drawn for. The native style is used there instead.
+                const canPlaceToasts = process.env.XDG_SESSION_TYPE !== "wayland";
+                if (config?.desktopNotificationStyle === "themed" && canPlaceToasts) {
                     toasts?.show({ ...toast, imageUrl: toast.imageUrl ?? null });
                     return;
                 }

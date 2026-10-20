@@ -1,9 +1,13 @@
-# Builds and publishes the Windows installer.
+# Builds the Windows installer and the Linux AppImage and deb, then publishes them together.
 #
 # Tag-driven, not branch-driven: pushing to a feature branch never produces a release, and
 # tagging is a deliberate act. The job additionally refuses to run for a tag that is not an
 # ancestor of the default branch, so a tag pushed from a side branch by accident cannot
 # publish an installer built from unreviewed code.
+#
+# Each platform builds on its own runner and only uploads artifacts. One publish job then
+# makes the release once, with every file in it - two jobs each deleting and recreating the
+# release would race, and whichever finished second would leave the other's files out.
 name: Build Sluice Desktop
 
 on:
@@ -27,8 +31,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      # One platform failing means no release at all, so there is no point finishing the
+      # other.
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            builder: --win
+            metadata: latest.yml
+          - os: ubuntu-latest
+            platform: linux
+            builder: --linux
+            metadata: latest-linux.yml
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -144,15 +162,129 @@ jobs:
             process.exit(failed ? 1 : 0);
           ' "$TAG"
 
-      - name: Decide whether to publish
-        id: publish
+      # Built here, uploaded by the publish job. electron-builder's own GitHub publisher was
+      # doing both, and across repositories it uploaded the blockmap, skipped the installer
+      # and latest.yml, and still exited 0 - leaving a release that looked published and
+      # could neither be installed nor updated from. Separating them means the upload either
+      # happens or fails loudly.
+      - name: Build the packages
+        working-directory: packages/desktop
+        shell: bash
+        run: npx electron-builder ${{ matrix.builder }} --publish never
+
+      # latest.yml (latest-linux.yml on Linux) is what the updater reads. Without it a
+      # release installs but never offers an update, and nothing about it looks wrong - so
+      # its absence fails here rather than being discovered months later.
+      #
+      # Tested as a file on disk. An earlier version looked for the name in the list of
+      # paths, and a path with no wildcard in it is in that list whether the file exists or
+      # not, so the check passed on a directory that held nothing at all.
+      - name: Refuse a build the updater cannot read
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "push" || "${{ inputs.publish }}" == "true" ]]; then
-            echo "flag=always" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=never" >> "$GITHUB_OUTPUT"
+          shopt -s nullglob
+          FOUND=(packages/desktop/release/*/${{ matrix.metadata }})
+          if [[ ${#FOUND[@]} -eq 0 ]]; then
+            echo "::error::${{ matrix.metadata }} was not produced; refusing a build nothing can update from."
+            echo "What the build actually left behind:"
+            ls -R packages/desktop/release || true
+            exit 1
           fi
+
+      # Packaging can succeed and leave an app that dies on launch - a missing shared
+      # library, a sandbox the runner will not allow, a main-process throw. The unpacked
+      # build is started on a virtual display with a throwaway home, so it touches no real
+      # settings, and left to sit at the sign-in screen. Still running when the time is up
+      # is a pass; exiting early with an error, or crashing, is not.
+      #
+      # Xvfb is started by hand rather than through xvfb-run, so the timeout signals the
+      # app itself rather than a wrapper script that waits on it.
+      - name: Start the Linux build
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          APPS=(packages/desktop/release/*/linux-unpacked/sluice)
+          if [[ ${#APPS[@]} -eq 0 ]]; then
+            echo "::error::No unpacked Linux build to start."
+            ls -R packages/desktop/release || true
+            exit 1
+          fi
+          command -v Xvfb >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q xvfb; }
+
+          SANDBOX=$(mktemp -d)
+          Xvfb :99 -screen 0 1280x900x24 >/dev/null 2>&1 &
+          XVFB=$!
+          sleep 2
+
+          set +e
+          # --no-sandbox: the unpacked chrome-sandbox is not setuid here, and Ubuntu's
+          # AppArmor rules refuse the namespace sandbox to an unconfined binary. The
+          # installed packages are unaffected.
+          DISPLAY=:99 HOME="$SANDBOX" XDG_CONFIG_HOME="$SANDBOX/config" \
+            timeout --kill-after=5s 20s "${APPS[0]}" --no-sandbox --disable-gpu > smoke.log 2>&1
+          CODE=$?
+          set -e
+          kill "$XVFB" 2>/dev/null || true
+
+          echo "--- output ---"
+          cat smoke.log
+          LOG=$(find "$SANDBOX" -name desktop.log -print -quit)
+          if [[ -n "$LOG" ]]; then
+            echo "--- $LOG ---"
+            cat "$LOG"
+          fi
+
+          case "$CODE" in
+            124|137)
+              echo "Still running after 20 seconds; the build starts."
+              if [[ -z "$LOG" ]] || ! grep -q "Dashboard listening" "$LOG"; then
+                echo "::warning::The app kept running but did not log that the dashboard was listening."
+              fi
+              ;;
+            0)
+              echo "::warning::The app exited cleanly before the time was up, which it should not do at sign-in."
+              ;;
+            *)
+              echo "::error::The Linux build exited early with code $CODE."
+              exit 1
+              ;;
+          esac
+
+      # "Always" needs saying out loud: without it the step is skipped whenever an earlier
+      # one fails, which is precisely when a built package is worth keeping.
+      - name: Keep the packages as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sluice-${{ matrix.platform }}
+          # One level down, which is the directory named for the version. Two levels down
+          # are win-unpacked and linux-unpacked, which are inputs to the packages and
+          # hundreds of megabytes each.
+          path: |
+            packages/desktop/release/*/*.exe
+            packages/desktop/release/*/*.blockmap
+            packages/desktop/release/*/*.AppImage
+            packages/desktop/release/*/*.deb
+            packages/desktop/release/*/latest*.yml
+          if-no-files-found: warn
+
+  publish:
+    needs: build
+    # A tag push always publishes; a manual run only when asked, and otherwise stops at the
+    # artifacts above.
+    if: github.event_name == 'push' || inputs.publish == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect the packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: sluice-*
+          merge-multiple: true
 
       # electron-builder publishes the installer, then makes a second call to attach
       # latest.yml - the file the updater actually reads. That call creates a *published*
@@ -160,64 +292,48 @@ jobs:
       # repository. The source tag lives in this repo; the release lives in the other. So
       # the tag has to exist in both, and it is made here rather than by hand.
       - name: Mirror the tag into the releases repo
-        if: steps.publish.outputs.flag == 'always'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          # No leading slash: this runs under Git Bash on Windows, which rewrites a
+          # No leading slash. This used to run under Git Bash on Windows, which rewrites a
           # leading-slash argument into a Windows path - /repos/... arrived as
-          # "C:/Program Files/Git/repos/...".
+          # "C:/Program Files/Git/repos/..." - and it costs nothing to keep it portable.
           SHA=$(gh api repos/loversama/sluice-releases/git/refs/heads/main --jq .object.sha)
           gh api -X POST repos/loversama/sluice-releases/git/refs \
             -f ref="refs/tags/$TAG" -f sha="$SHA" \
             || echo "Tag $TAG already there; carrying on."
 
-      # Built here, uploaded next. electron-builder's own GitHub publisher was doing both,
-      # and across repositories it uploaded the blockmap, skipped the installer and
-      # latest.yml, and still exited 0 - leaving a release that looked published and could
-      # neither be installed nor updated from. Separating them means the upload either
-      # happens or fails loudly.
-      - name: Build the installer
-        working-directory: packages/desktop
-        shell: bash
-        run: npx electron-builder --win --publish never
-
-      - name: Publish it
-        if: steps.publish.outputs.flag == 'always'
+      - name: Publish them
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
           REPO=loversama/sluice-releases
-          shopt -s nullglob
-          # electron-builder writes into a directory named for the version, so everything is
-          # one level below release/. A recursive glob reaches it, but also sweeps up the
-          # unpacked build - a 210MB Sluice.exe and elevate.exe - which are inputs to the
-          # installer rather than things anyone should download.
-          DIR="packages/desktop/release/${TAG#v}"
+          echo "Collected:"
+          find dist -type f -print
 
-          # latest.yml is what the updater reads. Without it a release installs but never
-          # offers an update, and nothing about it looks wrong - so its absence fails here
-          # rather than being discovered months later.
-          #
-          # Tested as a file on disk. The previous version looked for the name in the list
-          # of paths, and a path with no wildcard in it is in that list whether the file
-          # exists or not, so the check passed on a directory that held nothing at all.
-          if [[ ! -f "$DIR/latest.yml" ]]; then
-            echo "::error::$DIR/latest.yml was not produced; refusing to publish a release nothing can update from."
-            echo "What the build actually left behind:"
-            ls -R packages/desktop/release || true
-            exit 1
-          fi
+          # Both update feeds have to be here: a release missing either installs on that
+          # platform and never offers an update, and nothing about it looks wrong.
+          for META in latest.yml latest-linux.yml; do
+            if [[ -z "$(find dist -type f -name "$META" -print -quit)" ]]; then
+              echo "::error::$META is missing; refusing to publish a release nothing can update from."
+              exit 1
+            fi
+          done
 
-          FILES=("$DIR"/*.exe "$DIR"/*.blockmap "$DIR/latest.yml")
-          if [[ ${#FILES[@]} -lt 3 ]]; then
-            echo "::error::expected an installer, its blockmap and latest.yml; found: ${FILES[*]}"
-            exit 1
-          fi
+          mapfile -t FILES < <(find dist -type f \( -name '*.exe' -o -name '*.blockmap' \
+            -o -name '*.AppImage' -o -name '*.deb' -o -name 'latest.yml' -o -name 'latest-linux.yml' \) | sort)
+          for EXT in exe AppImage deb; do
+            # Matched in bash rather than piped to grep -q, which can exit before the
+            # writer finishes - and under pipefail that reads as "not found".
+            if [[ " ${FILES[*]} " != *".$EXT "* ]]; then
+              echo "::error::no .$EXT among the packages; found: ${FILES[*]}"
+              exit 1
+            fi
+          done
 
           # The notes are the annotated tag's message, and getting hold of it takes care.
           # actions/checkout leaves behind a lightweight tag pointing at the commit, so
@@ -269,32 +385,27 @@ jobs:
           # holding that file under any other name the download 404s, the update fails, and
           # nothing about the release looks wrong from the outside - which is exactly how
           # 0.4.1 and 0.4.2 both shipped unable to update themselves.
-          WANTED=$(sed -n 's/^path: *//p' "$DIR/latest.yml" | tr -d '\r')
-          if [[ -z "$WANTED" ]]; then
-            echo "::error::latest.yml has no path: entry, so nothing can be verified."
-            gh release delete "$TAG" --repo "$REPO" --yes || true
-            exit 1
-          fi
-          if ! gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -qxF "$WANTED"; then
-            echo "::error::latest.yml points at '$WANTED', which is not among the published assets:"
-            gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
-            gh release delete "$TAG" --repo "$REPO" --yes || true
-            exit 1
-          fi
+          #
+          # Every name either feed points at is checked: path:, and each url: under files:.
+          # latest-linux.yml can name more than one package there.
+          ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')
+          for META in latest.yml latest-linux.yml; do
+            FILE=$(find dist -type f -name "$META" -print -quit)
+            WANTED=$(sed -n -e 's/^path: *//p' -e 's/^ *- *url: *//p' "$FILE" | tr -d "\r\"'" | sort -u)
+            if [[ -z "$WANTED" ]]; then
+              echo "::error::$META names no file, so nothing can be verified."
+              gh release delete "$TAG" --repo "$REPO" --yes || true
+              exit 1
+            fi
+            while IFS= read -r NAME; do
+              if ! grep -qxF "$NAME" <<< "$ASSETS"; then
+                echo "::error::$META points at '$NAME', which is not among the published assets:"
+                echo "$ASSETS"
+                gh release delete "$TAG" --repo "$REPO" --yes || true
+                exit 1
+              fi
+            done <<< "$WANTED"
+            echo "$META: the updater will fetch $(echo $WANTED)."
+          done
 
-          echo "Published $TAG with ${#FILES[@]} files; the updater will fetch $WANTED."
-
-      # "Either way" needs saying out loud: without this the step is skipped whenever an
-      # earlier one fails, which is precisely when a built installer is worth keeping.
-      - name: Keep the installer as an artifact either way
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sluice-windows
-          # One level down, which is the directory named for the version. Two levels down
-          # is win-unpacked, whose 210MB Sluice.exe is an input to the installer.
-          path: |
-            packages/desktop/release/*/*.exe
-            packages/desktop/release/*/*.blockmap
-            packages/desktop/release/*/latest.yml
-          if-no-files-found: warn
+          echo "Published $TAG with ${#FILES[@]} files."
