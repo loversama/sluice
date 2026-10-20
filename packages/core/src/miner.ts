@@ -12,7 +12,7 @@ import {
 } from "./models/campaign.js";
 import { Channel } from "./models/channel.js";
 import type { AuthState } from "./twitch/auth.js";
-import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
+import { AuthExpiredError, StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
 import { fetchCatalogue } from "./twitch/catalogue.js";
 import type { DropCampaign } from "./twitch/types.js";
 import { PubSubPool, type DropProgressMessage } from "./twitch/websocket.js";
@@ -301,6 +301,8 @@ export class Miner extends EventEmitter {
     private stopping = false;
     /** Campaigns came from the public catalogue last refresh; logged once, not every sweep. */
     private usingCatalogue = false;
+    /** The last refresh could not read the inventory; reported once per run of failures. */
+    private inventoryFailing = false;
     /** Why there is nothing to mine, or null while watching. */
     private idleState: IdleState | null = null;
     /** Resolves the interruptible idle wait early. Set only while that wait is in progress. */
@@ -2339,6 +2341,30 @@ export class Miner extends EventEmitter {
         console.log(`\n${line}\nDry run complete. Nothing was watched or claimed.\n${line}\n`);
     }
 
+    /**
+     * Carry on without the inventory, but say so.
+     *
+     * Without it every drop reads as unstarted and nothing already earned is claimed, so a
+     * silent failure looked like progress being lost. A rotated hash or a dead token is not
+     * this kind of failure: nothing else will work either, and those go to the caller.
+     */
+    private inventoryFailed(error: unknown): null {
+        if (error instanceof StaleQueryHashError || error instanceof AuthExpiredError) {
+            throw error;
+        }
+        if (!this.inventoryFailing) {
+            this.inventoryFailing = true;
+            logger.warn(
+                `Could not read the drop inventory: ${(error as Error).message}. ` +
+                    "Progress and claims will catch up on a later refresh.",
+            );
+            this.pushFeed("warn", "Could not read your drop inventory - progress may look behind");
+        } else {
+            logger.debug("Inventory still unavailable:", error);
+        }
+        return null;
+    }
+
     private async refreshCampaigns(): Promise<void> {
         // Whatever this finds, the idle loop's decision was made against older data.
         // Waking is cheap and the recheck is against memory.
@@ -2352,8 +2378,11 @@ export class Miner extends EventEmitter {
         logger.debug("Refreshing campaigns...");
         let [listed, inventory] = await Promise.all([
             this.gql.getCampaigns(),
-            this.gql.getInventory().catch(() => null),
+            this.gql.getInventory().catch((error: unknown) => this.inventoryFailed(error)),
         ]);
+        if (inventory) {
+            this.inventoryFailing = false;
+        }
 
         // A login made with the TV client is shown an empty dashboard - the only kind of
         // login Twitch still issues. The public catalogue supplies the campaigns and their

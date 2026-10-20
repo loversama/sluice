@@ -293,7 +293,14 @@ export class TwitchGql {
     }
 
     async getInventory(): Promise<Inventory> {
-        const data = await this.query<{ currentUser: { inventory: Inventory } }>("inventory");
+        const data = await this.query<{ currentUser: { inventory: Inventory | null } | null }>(
+            "inventory",
+        );
+        // Named rather than left to a null dereference: the caller tells "could not read
+        // the inventory" apart from a bug by the error type.
+        if (!data.currentUser?.inventory) {
+            throw new GqlError("Inventory returned no current user");
+        }
         return data.currentUser.inventory;
     }
 
