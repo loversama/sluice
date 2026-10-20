@@ -21,6 +21,8 @@ export const useMinerStore = defineStore("miner", {
     state: () => ({
         loaded: false,
         loadError: null,
+        /** What to do about `loadError`, when the daemon said - a refused host name, say. */
+        loadHint: null,
         /** "connecting" | "open" | "lost" - drives the status strip. */
         connection: "connecting",
 
@@ -89,6 +91,7 @@ export const useMinerStore = defineStore("miner", {
 
         source: null,
         clockTimer: null,
+        retryTimer: null,
     }),
 
     getters: {
@@ -160,13 +163,22 @@ export const useMinerStore = defineStore("miner", {
             try {
                 const response = await fetch("/api/state");
                 if (!response.ok) {
-                    throw new Error(`Daemon returned ${response.status}`);
+                    // The daemon explains its refusals - a 421 names the host it would not
+                    // answer to and how to allow it. Dropping that left only a status code.
+                    const body = await response.json().catch(() => ({}));
+                    const error = new Error(body.error ?? `Daemon returned ${response.status}`);
+                    error.hint = body.hint ?? null;
+                    throw error;
                 }
                 this.applySnapshot(await response.json());
                 this.loadError = null;
+                this.loadHint = null;
                 this.loaded = true;
             } catch (error) {
-                this.loadError = error.message;
+                // A TypeError is fetch failing to connect at all; anything else is the daemon
+                // (or something in front of it) answering, and its words are the useful part.
+                this.loadError = error instanceof TypeError ? "Daemon unreachable" : error.message;
+                this.loadHint = error.hint ?? null;
                 this.loaded = true;
             }
         },
@@ -175,6 +187,9 @@ export const useMinerStore = defineStore("miner", {
             // A snapshot means the daemon is answering, so any previous fatal has passed
             // or the process was replaced.
             this.fatal = null;
+            // Nothing else ends a background sweep whose "ready" was lost in a reconnect, and
+            // the note would then sit there for good. The next sweep sets it again.
+            this.refreshing = false;
             this.daemon = snapshot.daemon;
             this.allowStreamEmbed = snapshot.allowStreamEmbed ?? false;
             this.sounds = snapshot.sounds ?? this.sounds;
@@ -200,6 +215,12 @@ export const useMinerStore = defineStore("miner", {
 
         async loadConfig() {
             const response = await fetch("/api/config");
+            // Not assigned on failure: an error body taken for settings reads as empty lists,
+            // and the next save from any page would write those over the real ones.
+            if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body.error ?? `Settings did not load (${response.status})`);
+            }
             this.config = await response.json();
             return this.config;
         },
@@ -215,6 +236,11 @@ export const useMinerStore = defineStore("miner", {
                 throw new Error(body.error ?? `Save failed (${response.status})`);
             }
             this.config = await response.json();
+            // The snapshot carries these too, and the app reads them from there - so without
+            // this a change made in Settings waited for the next reload to take effect.
+            this.allowStreamEmbed = this.config.allowStreamEmbed ?? this.allowStreamEmbed;
+            this.sounds = this.config.sounds ?? this.sounds;
+            this.sidebarMode = this.config.sidebarMode ?? this.sidebarMode;
             return this.config;
         },
 
@@ -237,6 +263,11 @@ export const useMinerStore = defineStore("miner", {
          * made, not that anything arrived, and the difference is the whole point of the
          * button.
          */
+        /** Put back every campaign sent to the back of the queue with Next. */
+        async restoreDeferred() {
+            return this.action("restore");
+        },
+
         async testNotification(service) {
             const response = await fetch("/api/notify/test", {
                 method: "POST",
@@ -264,15 +295,27 @@ export const useMinerStore = defineStore("miner", {
             this.source = source;
 
             source.onopen = () => {
-                if (this.connection === "lost") {
+                if (this.connection === "lost" || this.loadError) {
                     // Re-fetch after a gap: SSE replay only covers what the server still holds.
+                    // Also after a failed first load, which nothing else would ever retry.
                     this.hydrate();
                 }
                 this.connection = "open";
             };
             source.onerror = () => {
-                // EventSource reconnects on its own; we only reflect the state.
                 this.connection = "lost";
+                // EventSource reconnects on its own after a dropped connection, but gives up
+                // for good on an answer that is not a stream - a refused host, a daemon still
+                // starting behind a proxy. Without this the page never recovered from one.
+                if (source.readyState === EventSource.CLOSED) {
+                    source.close();
+                    if (this.source === source) this.source = null;
+                    clearTimeout(this.retryTimer);
+                    this.retryTimer = setTimeout(() => {
+                        this.retryTimer = null;
+                        this.connect();
+                    }, 3000);
+                }
             };
 
             const on = (event, handler) =>
@@ -289,6 +332,15 @@ export const useMinerStore = defineStore("miner", {
                 if (payload.status === "ok") {
                     this.hydrate();
                 }
+            });
+
+            /**
+             * Pausing, resuming, the schedule or the daily limit starting or ending, leaving a
+             * channel. None of these has an event of its own, and each changes what the top
+             * of the page should say - it used to keep showing the channel it had left.
+             */
+            on("status", () => {
+                this.hydrate();
             });
 
             // Sent whenever the link, the library or the last error changes - including a
@@ -380,6 +432,9 @@ export const useMinerStore = defineStore("miner", {
                 }
                 this.refreshing = false;
                 this.loading = payload.phase === "ready" ? null : payload;
+                // The first sweep after signing in is when claims and totals become known;
+                // the snapshot taken at sign-in predates them.
+                if (payload.phase === "ready") this.hydrate();
             });
 
             on("campaign-completed", (payload) => {
@@ -422,6 +477,8 @@ export const useMinerStore = defineStore("miner", {
         disconnect() {
             this.source?.close();
             this.source = null;
+            clearTimeout(this.retryTimer);
+            this.retryTimer = null;
             if (this.clockTimer) {
                 clearInterval(this.clockTimer);
                 this.clockTimer = null;
