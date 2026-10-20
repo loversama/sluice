@@ -346,6 +346,8 @@ export class Miner extends EventEmitter {
     private boundaryTimer: NodeJS.Timeout | null = null;
     /** Held so a config change can re-arm it, and so stop() can actually cancel it. */
     private refreshTimer: NodeJS.Timeout | null = null;
+    /** Bumped each time the refresh timer is armed; a tick from an older chain stops. */
+    private refreshGeneration = 0;
     /** Watch beats accepted since Twitch last confirmed progress. */
     private unconfirmedBeats = 0;
     /**
@@ -1954,9 +1956,14 @@ export class Miner extends EventEmitter {
         // interval could never change without restarting the process: editing it in
         // Settings updated the file and the countdown and left the actual cadence alone.
         const interval = () => this.config.campaignRefreshMinutes * 60_000;
+        // Which chain of ticks this is. Re-arming while a tick was mid-refresh cleared a
+        // timer that had already fired, started a second chain, and then the running tick
+        // scheduled its successor anyway - two sweeps per interval from then on.
+        const generation = ++this.refreshGeneration;
+        const current = () => !this.stopping && generation === this.refreshGeneration;
         this.nextRefreshAt = Date.now() + interval();
         const tick = async () => {
-            if (this.stopping) {
+            if (!current()) {
                 return;
             }
             try {
@@ -1970,9 +1977,12 @@ export class Miner extends EventEmitter {
             } catch (error) {
                 logger.error("Campaign refresh failed:", error);
             } finally {
-                this.nextRefreshAt = Date.now() + interval();
-                this.refreshTimer = setTimeout(tick, interval());
-                this.refreshTimer.unref();
+                // Superseded or stopped while refreshing: the chain ends here.
+                if (current()) {
+                    this.nextRefreshAt = Date.now() + interval();
+                    this.refreshTimer = setTimeout(tick, interval());
+                    this.refreshTimer.unref();
+                }
             }
         };
         this.refreshTimer = setTimeout(tick, interval());

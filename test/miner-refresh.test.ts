@@ -256,3 +256,65 @@ describe("overlapping refreshes", () => {
         expect(gql.claims).toEqual(["i"]);
     });
 });
+
+describe("re-arming the refresh timer", () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("keeps one chain of refreshes when re-armed in the middle of one", async () => {
+        vi.useFakeTimers();
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "c" })];
+        let release: () => void = () => {};
+        let calls = 0;
+        gql.getCampaigns = async () => {
+            calls += 1;
+            // The first scheduled sweep is still running when the interval is changed.
+            if (calls === 1) {
+                await new Promise<void>((resolve) => (release = resolve));
+            }
+            return gql.listed;
+        };
+        const miner = makeMiner(gql, { campaignRefreshMinutes: 20 });
+        (miner as unknown as { scheduleCampaignRefresh(): void }).scheduleCampaignRefresh();
+
+        await vi.advanceTimersByTimeAsync(20 * 60_000);
+        expect(calls).toBe(1);
+
+        miner.applyConfig({ ...miner.getConfig(), campaignRefreshMinutes: 30 });
+        release();
+        await vi.advanceTimersByTimeAsync(0);
+
+        await vi.advanceTimersByTimeAsync(30 * 60_000);
+        expect(calls).toBe(2);
+        await vi.advanceTimersByTimeAsync(30 * 60_000);
+        expect(calls).toBe(3);
+    });
+
+    it("schedules nothing more once stopped mid-refresh", async () => {
+        vi.useFakeTimers();
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "c" })];
+        let release: () => void = () => {};
+        let calls = 0;
+        gql.getCampaigns = async () => {
+            calls += 1;
+            await new Promise<void>((resolve) => (release = resolve));
+            return gql.listed;
+        };
+        const miner = makeMiner(gql, { campaignRefreshMinutes: 20 });
+        (miner as unknown as { scheduleCampaignRefresh(): void }).scheduleCampaignRefresh();
+
+        await vi.advanceTimersByTimeAsync(20 * 60_000);
+        miner.stop();
+        release();
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Not even a timer waiting to find out it should do nothing: one would keep the
+        // stopped Miner reachable for a whole interval.
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        expect(calls).toBe(1);
+    });
+});
