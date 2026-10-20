@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from "electron";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +15,20 @@ import { readDesktopSettings, writeDesktopSettings, applyLoginItem } from "./des
 import { appIconPath, createTray, destroyTray, setTrayStatus, showBalloon } from "./tray.js";
 import { idleTooltip } from "./idle-tooltip.js";
 import { importFromDockerData } from "./import-docker.js";
-import { AutoUpdate } from "./auto-update.js";
+import { AutoUpdate, installsOnQuit } from "./auto-update.js";
+
+/**
+ * Which package this install came from - "deb" for a deb, absent for the AppImage and the
+ * Windows installer. electron-builder writes it into resources; electron-updater reads the
+ * same file to decide how to update.
+ */
+function readPackageType(): string | null {
+    try {
+        return readFileSync(join(process.resourcesPath, "package-type"), "utf8");
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Only one copy may run.
@@ -311,7 +325,7 @@ let updates: AutoUpdate | null = null;
                 } else {
                     // No credential: the releases repository is public, so the updater reads
                     // it anonymously. Nothing to embed, leak, expire or rotate.
-                    updates.start(autoUpdater as never);
+                    updates.start(autoUpdater as never, installsOnQuit(readPackageType()));
                 }
             }
 
