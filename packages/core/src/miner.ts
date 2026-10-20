@@ -651,6 +651,11 @@ export class Miner extends EventEmitter {
         return true;
     }
 
+    /** Whether a campaign was sent to the back of the queue with Next. */
+    isDeferred(campaignId: string): boolean {
+        return this.deferredCampaigns.has(campaignId);
+    }
+
     /** Put everything skipped by hand back in its usual place. */
     clearDeferrals(): number {
         const count = this.deferredCampaigns.size;

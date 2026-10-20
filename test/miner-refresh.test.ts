@@ -10,6 +10,7 @@ vi.mock("../packages/core/src/twitch/catalogue.js", () => ({ fetchCatalogue: asy
 
 const { Miner } = await import("../packages/core/src/miner.js");
 const { DEFAULT_CONFIG } = await import("../packages/core/src/config.js");
+const { serializeCampaign } = await import("../packages/core/src/api/serialize.js");
 const { AuthExpiredError, GqlError, StaleQueryHashError } = await import(
     "../packages/core/src/twitch/gql.js"
 );
@@ -452,5 +453,37 @@ describe("a claim Twitch refuses", () => {
         expect(campaign!.nextDrop({ attemptImpossible: true })).toBeNull();
         expect(completed).not.toHaveBeenCalled();
         expect(feedOf(miner).filter((line) => /Could not claim/.test(line))).toHaveLength(1);
+    });
+});
+
+describe("campaigns skipped with Next", () => {
+    it("are reported as deferred to the dashboard until restored", async () => {
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "a" }), makeCampaign({ id: "b" })];
+        const miner = makeMiner(gql);
+        await miner.refreshNow();
+        const [a] = miner.getCampaigns();
+        (miner as unknown as { currentCampaign: unknown }).currentCampaign = a;
+
+        expect(miner.skipCampaign()).toBe(true);
+        const shown = () =>
+            miner
+                .getCampaigns()
+                .map((c) => [c.id, serializeCampaign(c, DEFAULT_CONFIG, null, miner.isDeferred(c.id)).isDeferred]);
+        expect(shown()).toEqual([
+            ["a", true],
+            ["b", false],
+        ]);
+
+        miner.clearDeferrals();
+        expect(shown()).toEqual([
+            ["a", false],
+            ["b", false],
+        ]);
+    });
+
+    it("default to not deferred where the caller does not say", () => {
+        const campaign = new Campaign(makeCampaign({ id: "a" }));
+        expect(serializeCampaign(campaign, DEFAULT_CONFIG).isDeferred).toBe(false);
     });
 });

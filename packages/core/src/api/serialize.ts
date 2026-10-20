@@ -53,6 +53,8 @@ export interface CampaignJson {
     priorityRank: number | null;
     isExcluded: boolean;
     isCompleted: boolean;
+    /** Sent to the back of the queue with Next; cleared on restart or by restoring. */
+    isDeferred: boolean;
     drops: DropJson[];
 }
 
@@ -84,6 +86,7 @@ export function serializeCampaign(
     campaign: Campaign,
     config: Config,
     owns: ((name: string) => boolean) | null = null,
+    deferred = false,
 ): CampaignJson {
     const rank = config.priorityGames.findIndex((game) => matchesGame(game, campaign));
     return {
@@ -115,6 +118,7 @@ export function serializeCampaign(
         priorityRank: rank === -1 ? null : rank,
         isExcluded: config.excludedGames.some((game) => matchesGame(game, campaign)),
         isCompleted: campaign.isCompleted,
+        isDeferred: deferred,
         drops: campaign.drops.map(serializeDrop),
     };
 }

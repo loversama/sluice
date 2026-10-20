@@ -258,7 +258,11 @@ export function createApp(options: AppOptions): AppHandle {
             void gameArt.ensure(next.priorityGames);
             if (miner) {
                 bus.emit("campaigns", {
-                    campaigns: miner.getCampaigns().map((c) => serializeCampaign(c, next, miner?.ownsPredicate ?? null)),
+                    campaigns: miner
+                        .getCampaigns()
+                        .map((c) =>
+                            serializeCampaign(c, next, miner?.ownsPredicate ?? null, miner?.isDeferred(c.id)),
+                        ),
                     queue: miner.getMineableCampaigns().map((c) => c.id),
                 });
             }
