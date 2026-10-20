@@ -47,4 +47,19 @@ describe("writeFileAtomic", () => {
         expect([1, 2]).toContain(observed.n);
         expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ n: 2 });
     });
+
+    it("survives overlapping writes to the same file", async () => {
+        // State is saved fire-and-forget at every change, so writes overlap routinely.
+        const dir = await tempDir();
+        const path = join(dir, "out.json");
+        const writes = Array.from({ length: 20 }, (_, n) =>
+            writeFileAtomic(path, JSON.stringify({ n })),
+        );
+        await expect(Promise.all(writes)).resolves.toBeDefined();
+
+        const final = JSON.parse(await readFile(path, "utf8")) as { n: number };
+        expect(final.n).toBeGreaterThanOrEqual(0);
+        expect(final.n).toBeLessThan(20);
+        expect(await readdir(dir)).toEqual(["out.json"]);
+    });
 });
