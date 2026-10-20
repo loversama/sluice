@@ -306,6 +306,8 @@ const steamBusy = ref(false);
 /** Suppresses the autosave watcher while the form is being populated from the daemon. */
 let hydrating = true;
 let saveTimer = null;
+/** True from the moment an edit is queued until its save has answered. */
+let saveInFlight = false;
 
 const LANGUAGES = [
     ["EN", "English"], ["ES", "Spanish"], ["DE", "German"], ["FR", "French"],
@@ -325,6 +327,10 @@ watch(
     () => store.config,
     (config) => {
         if (!config) return;
+        // Every save answers with the whole config, and refilling the form from it dropped
+        // whatever had been typed while the save was on its way. The form already holds
+        // what was sent, so while an edit is pending it is the better copy.
+        if (saveTimer || saveInFlight) return;
         hydrating = true;
         Object.assign(form, {
             autoClaimDrops: config.autoClaimDrops,
@@ -383,6 +389,9 @@ watch(
 );
 
 async function save() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    saveInFlight = true;
     const notifications = {};
     if (form.telegramBotToken || form.telegramChatId) {
         notifications.telegram = { botToken: form.telegramBotToken, chatId: form.telegramChatId };
@@ -424,6 +433,8 @@ async function save() {
         setTimeout(() => (saved.value = false), 2500);
     } catch (error) {
         ElMessage.error(error.message);
+    } finally {
+        saveInFlight = false;
     }
 }
 
