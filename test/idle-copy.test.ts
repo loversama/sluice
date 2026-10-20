@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error - plain JS module shared with the dashboard build.
-import { idleCopy, idleTooltip } from "../web/src/lib/idleCopy.js";
+import { idleCopy, idleHeadline, idleTooltip } from "../web/src/lib/idleCopy.js";
 
 const state = (reason: string, detail: Record<string, number> = {}) => ({ reason, detail });
 
@@ -69,5 +69,32 @@ describe("what the dashboard says when nothing is being mined", () => {
             expect(tip).not.toContain("\n");
         }
         expect(idleTooltip(null)).toBe("Sluice");
+    });
+});
+
+/**
+ * Both layouts take their idle headline from here. The narrow one used to say "Nothing being
+ * mined right now" whether it was paused, out of hours or simply out of campaigns.
+ */
+describe("idleHeadline", () => {
+    const idle = state("all_claimed", { completed: 2 });
+
+    it("puts a pause ahead of everything else", () => {
+        expect(idleHeadline({ paused: true, atDailyLimit: true, outsideSchedule: true, idle }).title).toBe("Paused");
+    });
+
+    it("then the daily limit, then the schedule", () => {
+        expect(idleHeadline({ atDailyLimit: true, outsideSchedule: true, idle }).title).toBe("Daily limit reached");
+        expect(idleHeadline({ outsideSchedule: true, idle }).title).toBe("Outside your hours");
+    });
+
+    it("otherwise says what the daemon said", () => {
+        expect(idleHeadline({ idle })).toEqual({ title: idleCopy(idle).title, body: idleCopy(idle).body });
+    });
+
+    it("never leaves the band blank", () => {
+        const headline = idleHeadline({});
+        expect(headline.title).not.toBe("");
+        expect(headline.body).not.toBe("");
     });
 });

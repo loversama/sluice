@@ -306,6 +306,8 @@ const steamBusy = ref(false);
 /** Suppresses the autosave watcher while the form is being populated from the daemon. */
 let hydrating = true;
 let saveTimer = null;
+/** True from the moment an edit is queued until its save has answered. */
+let saveInFlight = false;
 
 const LANGUAGES = [
     ["EN", "English"], ["ES", "Spanish"], ["DE", "German"], ["FR", "French"],
@@ -318,13 +320,18 @@ onMounted(async () => {
         update.value = (await desktop.updateStatus?.()) ?? { status: "idle" };
         desktop.onUpdateStatus?.((next) => (update.value = next));
     }
-    if (!store.config) await store.loadConfig();
+    // On failure the form keeps its defaults and never autosaves them - see `hydrating`.
+    if (!store.config) await store.loadConfig().catch((error) => ElMessage.error(error.message));
 });
 
 watch(
     () => store.config,
     (config) => {
         if (!config) return;
+        // Every save answers with the whole config, and refilling the form from it dropped
+        // whatever had been typed while the save was on its way. The form already holds
+        // what was sent, so while an edit is pending it is the better copy.
+        if (saveTimer || saveInFlight) return;
         hydrating = true;
         Object.assign(form, {
             autoClaimDrops: config.autoClaimDrops,
@@ -383,6 +390,9 @@ watch(
 );
 
 async function save() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    saveInFlight = true;
     const notifications = {};
     if (form.telegramBotToken || form.telegramChatId) {
         notifications.telegram = { botToken: form.telegramBotToken, chatId: form.telegramChatId };
@@ -424,6 +434,8 @@ async function save() {
         setTimeout(() => (saved.value = false), 2500);
     } catch (error) {
         ElMessage.error(error.message);
+    } finally {
+        saveInFlight = false;
     }
 }
 
@@ -487,6 +499,13 @@ async function disconnectSteam() {
  * environment check, nothing to keep in sync.
  */
 const desktop = window.desktopBridge ?? null;
+
+/**
+ * The desktop app also runs on Linux, where there is no "Windows" to start with and a tray
+ * is up to the desktop environment. A bridge too old to say which platform it is on is a
+ * Windows build, since that was the only one.
+ */
+const onWindows = (desktop?.platform ?? "win32") === "win32";
 const desktopSettings = ref({ runAtLogin: false, closeToTray: true });
 const desktopVersion = ref("");
 const importing = ref(false);
@@ -1345,7 +1364,7 @@ const inputStyle = {
                     <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
                         {{ steam.gameCount }} games
                         &middot; {{ steam.linked === "openid" ? "signed in through Steam" : "linked by profile" }}
-                        <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt) }}</template>
+                        <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt, store.now) }}</template>
                     </p>
                 </div>
                 <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface)', color: 'var(--text)' }"
@@ -1505,10 +1524,10 @@ const inputStyle = {
 
             <label class="flex items-center justify-between gap-4">
                 <span>
-                    <span class="text-[13px]">Start with Windows</span>
+                    <span class="text-[13px]">{{ onWindows ? "Start with Windows" : "Start at login" }}</span>
                     <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Starts hidden in the tray, so mining resumes without a window
-                        appearing.
+                        Starts hidden{{ onWindows ? " in the tray" : "" }}, so mining resumes
+                        without a window appearing.
                     </span>
                 </span>
                 <el-switch
@@ -1519,7 +1538,7 @@ const inputStyle = {
 
             <label class="flex items-center justify-between gap-4">
                 <span>
-                    <span class="text-[13px]">Close to tray</span>
+                    <span class="text-[13px]">{{ onWindows ? "Close to tray" : "Keep running when closed" }}</span>
                     <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
                         Closing the window keeps mining. Turn this off and the close button
                         quits instead.
@@ -1646,7 +1665,7 @@ const inputStyle = {
                 <dt :style="{ color: 'var(--text-2)' }">Version</dt>
                 <dd class="tabular">{{ store.daemon?.version ?? "-" }}</dd>
                 <dt :style="{ color: 'var(--text-2)' }">Running since</dt>
-                <dd class="tabular">{{ store.daemon ? formatRelative(store.daemon.startedAt) : "-" }}</dd>
+                <dd class="tabular">{{ store.daemon ? formatRelative(store.daemon.startedAt, store.now) : "-" }}</dd>
             </dl>
         </section>
         </div>
