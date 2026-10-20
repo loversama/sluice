@@ -9,6 +9,18 @@ import type { StreamNode } from "../twitch/types.js";
 
 export class WatchError extends Error {}
 
+/**
+ * How long a beat waits for a freshly started segment watcher's first poll. Resolving the
+ * stream and reading its playlist takes a few seconds; this only bounds a slow one.
+ */
+const FIRST_POLL_GRACE_MS = 20_000;
+/**
+ * How long to stop looking for the Spade URL after failing to find it. Finding it costs a
+ * channel page and a settings bundle, and a page that did not have it a minute ago will
+ * not have it now.
+ */
+const SPADE_RETRY_MS = 30 * 60_000;
+
 /** Matches `"spade_url": "https://..."` in either the channel page or its settings bundle. */
 const SPADE_PATTERN = /"spade_?url": ?"(https:\/\/[.\w\-/]+)"/i;
 const SETTINGS_PATTERN = /src="(https:\/\/[\w.]+\/config\/settings\.[0-9a-f]{32}\.js)"/i;
@@ -54,6 +66,8 @@ export interface StreamState {
 export class Channel {
     /** Cached per channel - resolving it costs one or two page fetches. */
     private spadeUrl: string | null = null;
+    /** Until when not to try resolving the Spade URL again, after failing to. */
+    private spadeUnavailableUntil = 0;
     private streamUrl: string | null = null;
     private readonly segments: SegmentWatcher;
     /**
@@ -128,6 +142,7 @@ export class Channel {
         this.pendingOnlineUntil = null;
         // The Spade URL is per-broadcast; drop it so the next session re-resolves.
         this.spadeUrl = null;
+        this.spadeUnavailableUntil = 0;
         this.streamUrl = null;
         void this.stopSegmentWatch();
     }
@@ -159,6 +174,7 @@ export class Channel {
         // A new broadcast ID means a fresh stream, so the cached Spade URL is stale.
         if (previousBroadcast && previousBroadcast !== this.stream.broadcastId) {
             this.spadeUrl = null;
+            this.spadeUnavailableUntil = 0;
             this.streamUrl = null;
             this.markPendingOnline();
         }
@@ -168,9 +184,15 @@ export class Channel {
     /**
      * Send one "minute watched" beat. Returns true if this channel is being watched.
      *
-     * The analytics event alone no longer earns anything, so the beat counts as accepted if
-     * either it went through or the segment watcher has been fetching recently. A channel
-     * where both fail is genuinely unwatchable and gets benched by the caller.
+     * Segment fetches are what Twitch credits, so they alone decide. The analytics event
+     * used to count as well, and Spade answers 204 whether or not anything is being
+     * earned: a channel whose stream could not be pulled at all went on passing every
+     * beat, and was only found out by the slower progress checks.
+     *
+     * The event is still sent, as the player sends it, but as a courtesy rather than as
+     * evidence - DevilXD/TwitchDropsMiner has dropped it from its watch loop entirely and
+     * earns without it. Keeping it costs one small POST a minute and changes nothing that
+     * was working.
      */
     async sendWatch(): Promise<boolean> {
         if (!this.stream) {
@@ -178,13 +200,13 @@ export class Channel {
         }
         // Idempotent: covers a channel whose watcher was stopped by a brief offline blip.
         this.segments.start();
-        let spadeOk = false;
+        await this.segments.waitForFirstPoll(FIRST_POLL_GRACE_MS);
         try {
-            spadeOk = await this.sendWatchSpade();
+            await this.sendWatchSpade();
         } catch (error) {
             logger.debug(`Spade watch failed for ${this.login}:`, error);
         }
-        return spadeOk || this.segments.healthy;
+        return this.segments.healthy;
     }
 
     /**
@@ -198,10 +220,20 @@ export class Channel {
         return this.spadeUrl;
     }
 
-    /** Primary method: POST a minute-watched event to the channel's Spade endpoint. */
+    /** POST a minute-watched event to the channel's Spade endpoint, if it can be found. */
     private async sendWatchSpade(): Promise<boolean> {
         if (!this.spadeUrl) {
-            this.spadeUrl = await this.resolveSpadeUrl();
+            // Not every beat: each attempt fetches the channel page, which used to happen
+            // once a minute for as long as the page lacked the URL.
+            if (Date.now() < this.spadeUnavailableUntil) {
+                return false;
+            }
+            try {
+                this.spadeUrl = await this.resolveSpadeUrl();
+            } catch (error) {
+                this.spadeUnavailableUntil = Date.now() + SPADE_RETRY_MS;
+                throw error;
+            }
         }
         const payload = [
             {

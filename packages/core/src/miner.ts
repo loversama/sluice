@@ -46,7 +46,7 @@ const MAX_UNCONFIRMED_BEATS = 15;
  */
 const BEATS_BEFORE_SESSION_CHECK = 3;
 /**
- * Consecutive rejected beats tolerated before benching the channel. A single CDN or Spade
+ * Consecutive rejected beats tolerated before benching the channel. A single CDN or playlist
  * hiccup is common and should not cost a thirty-minute exclusion.
  */
 const MAX_BEAT_FAILURES = 3;

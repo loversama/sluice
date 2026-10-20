@@ -121,6 +121,57 @@ describe("SegmentWatcher", () => {
     });
 });
 
+describe("SegmentWatcher.waitForFirstPoll", () => {
+    it("waits for the first playlist read, so a fresh watcher is not judged unread", async () => {
+        let release: () => void = () => {};
+        const watcher = new SegmentWatcher(
+            source({
+                fetchPlaylist: async () => {
+                    await new Promise<void>((resolve) => (release = resolve));
+                    return PLAYLIST;
+                },
+            }),
+            "chan",
+            1_000,
+        );
+        watcher.start();
+        expect(watcher.healthy).toBe(false);
+
+        let waited = false;
+        const waiting = watcher.waitForFirstPoll(5_000).then(() => (waited = true));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(waited).toBe(false);
+
+        release();
+        await waiting;
+        expect(watcher.healthy).toBe(true);
+        await watcher.stop();
+    });
+
+    it("gives up waiting on a poll that hangs", async () => {
+        const watcher = new SegmentWatcher(
+            source({ fetchPlaylist: () => new Promise<string | null>(() => {}) }),
+            "chan",
+        );
+        watcher.start();
+        const started = Date.now();
+        await watcher.waitForFirstPoll(30);
+        expect(Date.now() - started).toBeLessThan(1_000);
+        expect(watcher.healthy).toBe(false);
+        void watcher.stop();
+    });
+
+    it("does not wait once the first poll is done", async () => {
+        const watcher = new SegmentWatcher(source(), "chan", 1_000);
+        watcher.start();
+        await watcher.waitForFirstPoll(5_000);
+        const started = Date.now();
+        await watcher.waitForFirstPoll(5_000);
+        expect(Date.now() - started).toBeLessThan(100);
+        await watcher.stop();
+    });
+});
+
 describe("lowestVideoVariant", () => {
     it("skips the audio-only rendition at the end of the list", () => {
         const master = [
