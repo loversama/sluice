@@ -1493,7 +1493,6 @@ export class Miner extends EventEmitter {
         }
         this.lastWatchedLogin = channel.login;
         this.lastProgressAt = Date.now();
-        this.countMinuteMined();
         this.lastBeatAt = null;
         this.unconfirmedBeats = 0;
         this.switchRequested = false;
@@ -1576,6 +1575,11 @@ export class Miner extends EventEmitter {
                 }
                 beatFailures = 0;
                 this.lastBeatAt = Date.now();
+                // Here, per accepted beat. Counted on entering the channel instead, the
+                // daily limit measured how often the miner switched rather than how long
+                // it watched - every claim and switch re-enters - and an hour on one
+                // streamer counted as a single minute.
+                this.countMinuteMined();
                 this.unconfirmedBeats++;
                 this.emit("beat", { at: this.lastBeatAt });
 
