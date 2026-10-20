@@ -325,7 +325,9 @@ function onGameCommand(command, game) {
                             Un-exclude
                         </el-dropdown-item>
                         <el-dropdown-item v-else command="exclude">Exclude</el-dropdown-item>
-                        <el-dropdown-item command="rank" divided>Rank on Priorities &rarr;</el-dropdown-item>
+                        <el-dropdown-item v-if="rankOf(group[0].game, group[0]) !== -1" command="rank" divided>
+                            Rank on Priorities &rarr;
+                        </el-dropdown-item>
                     </el-dropdown-menu>
                 </template>
             </el-dropdown>
