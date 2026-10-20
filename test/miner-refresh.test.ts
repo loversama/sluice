@@ -392,3 +392,65 @@ describe("the idle wait", () => {
         expect(ended()).toBe(true);
     });
 });
+
+describe("a claim Twitch refuses", () => {
+    function finished() {
+        return makeCampaign({
+            id: "c",
+            drops: [
+                makeDrop({
+                    id: "d",
+                    self: { currentMinutesWatched: 60, dropInstanceID: "i", isClaimed: false },
+                }),
+            ],
+        });
+    }
+
+    it("is asked again rather than abandoned at the first refusal", async () => {
+        const gql = new FakeGql();
+        gql.listed = [finished()];
+        gql.claimResult = false;
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+        await miner.refreshNow();
+
+        expect(gql.claims).toEqual(["i", "i"]);
+        expect(miner.getCampaigns()[0]!.drops[0]!.isClaimable).toBe(true);
+    });
+
+    it("lands if Twitch accepts a later attempt", async () => {
+        const gql = new FakeGql();
+        gql.listed = [finished()];
+        gql.claimResult = false;
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+        gql.claimResult = true;
+        await miner.refreshNow();
+
+        expect(miner.getCampaigns()[0]!.drops[0]!.isClaimed).toBe(true);
+    });
+
+    it("is given up after the capped number of attempts, and not reported as claimed", async () => {
+        const gql = new FakeGql();
+        gql.listed = [finished()];
+        gql.claimResult = false;
+        const miner = makeMiner(gql);
+        const completed = vi.fn();
+        miner.on("campaign-completed", completed);
+
+        for (let refresh = 0; refresh < 6; refresh += 1) {
+            await miner.refreshNow();
+        }
+
+        expect(gql.claims).toHaveLength(3);
+        const [campaign] = miner.getCampaigns();
+        const drop = campaign!.drops[0]!;
+        expect(drop.isClaimed).toBe(false);
+        expect(drop.givenUp).toBe(true);
+        expect(campaign!.nextDrop({ attemptImpossible: true })).toBeNull();
+        expect(completed).not.toHaveBeenCalled();
+        expect(feedOf(miner).filter((line) => /Could not claim/.test(line))).toHaveLength(1);
+    });
+});

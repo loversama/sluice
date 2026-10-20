@@ -28,7 +28,7 @@ export function isDeliberateStop(end: WatchEnd): boolean {
 }
 
 /**
- * Mark every drop we already know was collected as claimed.
+ * Mark every drop we already know the outcome of: claimed, or given up on.
  *
  * Twitch's inventory can go on reporting a claimed drop as unclaimed - it has been seen doing
  * so on GTA V and on EVE Online - and the miner rightly refuses to claim it again. But the
@@ -40,7 +40,9 @@ export function isDeliberateStop(end: WatchEnd): boolean {
  * source, so selection, completion and the dashboard all agree.
  *
  * `confirmed` are claims Twitch acknowledged; `givenUp` are drops the miner stopped trying to
- * claim after repeated attempts. Neither can be undone by a later inventory read. Returns how
+ * claim after repeated attempts. Neither can be undone by a later inventory read. A given-up
+ * drop is set aside rather than marked claimed: nothing says its reward ever arrived, and
+ * reporting it as claimed - or its campaign as complete - would say otherwise. Returns how
  * many drops changed, so a caller can say so.
  */
 export function applyKnownClaims(
@@ -51,11 +53,16 @@ export function applyKnownClaims(
     let changed = 0;
     for (const campaign of campaigns) {
         for (const drop of campaign.drops) {
-            if (drop.isClaimed || !(confirmed.has(drop.id) || givenUp.has(drop.id))) {
+            if (drop.isClaimed) {
                 continue;
             }
-            drop.update({ isClaimed: true });
-            changed++;
+            if (confirmed.has(drop.id)) {
+                drop.update({ isClaimed: true });
+                changed++;
+            } else if (givenUp.has(drop.id) && !drop.givenUp) {
+                drop.givenUp = true;
+                changed++;
+            }
         }
     }
     return changed;

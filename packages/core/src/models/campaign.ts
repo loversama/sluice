@@ -9,6 +9,14 @@ export class Drop {
     isClaimed: boolean;
     /** Only populated once the drop is claimable. Required to actually claim it. */
     dropInstanceId: string | null;
+    /**
+     * Finished, but Twitch would not let it be claimed however often it was asked.
+     *
+     * Not claimed - nothing says the reward arrived, and the dashboard must not say so -
+     * but nothing more can be done about it here either, so it is neither work to select
+     * nor a claim to retry.
+     */
+    givenUp = false;
 
     constructor(
         readonly data: TimeBasedDrop,
@@ -63,7 +71,12 @@ export class Drop {
         // gift drop that Twitch grants by other means. Without this guard `0 >= 0` makes
         // every such drop look permanently ready, and each refresh retries a claim that
         // Twitch will never accept.
-        return this.requiredMinutes > 0 && !this.isClaimed && this.currentMinutes >= this.requiredMinutes;
+        return (
+            this.requiredMinutes > 0 &&
+            !this.isClaimed &&
+            !this.givenUp &&
+            this.currentMinutes >= this.requiredMinutes
+        );
     }
 
     get isActive(): boolean {
@@ -267,15 +280,15 @@ export class Campaign {
             return false;
         }
         // Drops that need no watch time are not ours to finish, so they must not hold a
-        // campaign open indefinitely either.
+        // campaign open indefinitely either - and nor must one given up on.
         return this.drops.every(
-            (drop) => drop.isClaimed || !drop.isActive || drop.requiredMinutes <= 0,
+            (drop) => drop.isClaimed || drop.givenUp || !drop.isActive || drop.requiredMinutes <= 0,
         );
     }
 
     /** The tightest slack across this campaign's unfinished drops. */
     get slack(): number {
-        const pending = this.drops.filter((drop) => !drop.isClaimed && drop.isActive);
+        const pending = this.drops.filter((drop) => !drop.isClaimed && !drop.givenUp && drop.isActive);
         if (pending.length === 0) {
             return Number.POSITIVE_INFINITY;
         }
@@ -301,7 +314,7 @@ export class Campaign {
      */
     nextDrop(options: { attemptImpossible?: boolean } = {}): Drop | null {
         for (const drop of this.drops) {
-            if (drop.isClaimed || !drop.isActive) {
+            if (drop.isClaimed || drop.givenUp || !drop.isActive) {
                 continue;
             }
             // A drop needing no watch time cannot be advanced by watching. Twitch grants

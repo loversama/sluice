@@ -445,6 +445,11 @@ export class Miner extends EventEmitter {
         if (!campaign.isCompleted || this.claimHistory.completedCampaignIds.includes(campaign.id)) {
             return;
         }
+        // Done with, but not complete: a drop that could not be claimed is a reward the
+        // user does not have, and "Campaign complete" would tell them they do.
+        if (campaign.drops.some((drop) => drop.givenUp)) {
+            return;
+        }
         this.claimHistory.completedCampaignIds.push(campaign.id);
         this.persistClaims();
         logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
@@ -1627,6 +1632,10 @@ export class Miner extends EventEmitter {
                     // claim() records completion itself, for every path that claims.
                     const owner = this.currentCampaign ?? campaign;
                     await this.claim(live, owner);
+                    // Out of attempts; giveUpClaim has already said so.
+                    if (live.givenUp) {
+                        return "claim_stuck";
+                    }
                     // Either the campaign is done or the next drop needs re-selecting - unless
                     // the claim did nothing. A finished drop that stays unclaimed is picked
                     // again at once, and that is how this once turned over every six seconds
@@ -1740,18 +1749,7 @@ export class Miner extends EventEmitter {
         }
         const attempts = this.claimAttempts.get(drop.id) ?? 0;
         if (attempts >= MAX_CLAIM_ATTEMPTS) {
-            // Said once, loudly, and then never again: something is wrong that this code
-            // cannot resolve, and the useful thing is a record of it rather than a retry.
-            if (!this.failedClaimIds.has(drop.id)) {
-                logger.warn(
-                    `${drop.name} (${campaign.gameName}) has been claimed ${attempts} times and ` +
-                        `Twitch still reports it as unclaimed. Giving up on it; the reward is ` +
-                        `almost certainly already on the account.`,
-                );
-                this.pushFeed("warn", `Stopped reclaiming ${drop.rewardNames || drop.name}`);
-                this.failedClaimIds.add(drop.id);
-                this.persistState();
-            }
+            this.giveUpClaim(drop, campaign, attempts);
             return;
         }
         if (this.claimedDropIds.has(drop.id) || this.failedClaimIds.has(drop.id)) {
@@ -1825,15 +1823,48 @@ export class Miner extends EventEmitter {
                 this.emit("drop-claimed", { drop, campaign });
                 this.recordCompletionIfFinished(campaign);
             } else {
-                // Almost always a drop Twitch considers ineligible rather than a transient
-                // failure, so stop asking rather than repeating it every refresh.
-                this.failedClaimIds.add(drop.id);
-                this.persistState();
-                logger.debug(`Twitch did not confirm the claim for ${drop.name}`);
+                // Not the end of it on the first refusal. One reply used to settle a drop
+                // for good - persisted, so not even a restart retried it - and a refusal
+                // that was only Twitch being slow cost the reward outright. The watch loop
+                // sets the campaign aside for a while and the next sweep asks again, up to
+                // the cap.
+                const made = attempts + 1;
+                logger.warn(
+                    `Twitch did not accept the claim for ${drop.name} (${campaign.gameName}); ` +
+                        `attempt ${made} of ${MAX_CLAIM_ATTEMPTS}.`,
+                );
+                if (made >= MAX_CLAIM_ATTEMPTS) {
+                    this.giveUpClaim(drop, campaign, made);
+                }
             }
         } catch (error) {
             logger.error(`Failed to claim ${drop.name}:`, error);
         }
+    }
+
+    /**
+     * Stop trying to claim a drop, and remember that across restarts.
+     *
+     * Said once, loudly, and then never again: something is wrong that retrying will not
+     * resolve, and the useful thing is a record of it. The drop is set aside rather than
+     * marked claimed, so nothing reports a reward the user may not have.
+     */
+    private giveUpClaim(drop: Drop, campaign: Campaign, attempts: number): void {
+        drop.givenUp = true;
+        if (this.failedClaimIds.has(drop.id)) {
+            return;
+        }
+        logger.warn(
+            `${drop.name} (${campaign.gameName}) could not be claimed after ${attempts} ` +
+                "attempts. Giving up on it; if it is still listed in your Twitch inventory, " +
+                "it can be claimed there.",
+        );
+        this.pushFeed(
+            "warn",
+            `Could not claim ${drop.rewardNames || drop.name} - claim it from your Twitch inventory`,
+        );
+        this.failedClaimIds.add(drop.id);
+        this.persistState();
     }
 
     private attachPubSubHandlers(pubsub: PubSubPool): void {
@@ -2020,7 +2051,7 @@ export class Miner extends EventEmitter {
         const campaign = next.get(campaignId);
         const drop = campaign?.drops.find((candidate) => candidate.id === dropId);
 
-        if (!campaign || !drop || drop.isClaimed || !campaign.isActive) {
+        if (!campaign || !drop || drop.isClaimed || drop.givenUp || !campaign.isActive) {
             // Nothing left to earn here; let the loop yield at its next beat.
             this.switchRequested = true;
             return;
@@ -2721,7 +2752,9 @@ export class Miner extends EventEmitter {
         // After the inventory read, so nothing it says can put a known claim back.
         const settled = applyKnownClaims(next.values(), this.confirmedClaimIds, this.failedClaimIds);
         if (settled > 0) {
-            logger.debug(`Treating ${settled} drop${settled === 1 ? "" : "s"} as claimed, as recorded.`);
+            logger.debug(
+                `Treating ${settled} drop${settled === 1 ? "" : "s"} as claimed or given up, as recorded.`,
+            );
         }
 
         this.checkForForeignSession(next);

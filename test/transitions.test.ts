@@ -44,10 +44,13 @@ describe("applyKnownClaims", () => {
         expect(campaign.drops[0]!.isClaimable).toBe(false);
     });
 
-    it("does the same for a drop the miner gave up claiming", () => {
+    it("sets aside a drop the miner gave up claiming, without calling it claimed", () => {
         const campaign = finishedButUnclaimed();
-        applyKnownClaims([campaign], new Set(), new Set(["eve-d1"]));
+        expect(applyKnownClaims([campaign], new Set(), new Set(["eve-d1"]))).toBe(1);
         expect(campaign.nextDrop()).toBeNull();
+        expect(campaign.drops[0]!.isClaimable).toBe(false);
+        // Nothing says the reward arrived, so nothing may report that it did.
+        expect(campaign.drops[0]!.isClaimed).toBe(false);
     });
 
     it("leaves drops it knows nothing about alone", () => {
