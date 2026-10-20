@@ -320,7 +320,8 @@ onMounted(async () => {
         update.value = (await desktop.updateStatus?.()) ?? { status: "idle" };
         desktop.onUpdateStatus?.((next) => (update.value = next));
     }
-    if (!store.config) await store.loadConfig();
+    // On failure the form keeps its defaults and never autosaves them - see `hydrating`.
+    if (!store.config) await store.loadConfig().catch((error) => ElMessage.error(error.message));
 });
 
 watch(
