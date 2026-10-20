@@ -54,6 +54,11 @@ export class InstanceLock {
         }
         await this.write(owner);
         this.held = true;
+        // The same lock is acquired again at every sign-in. Without this the previous
+        // session's heartbeat kept running beside the new one, one more per sign-out.
+        if (this.timer) {
+            clearInterval(this.timer);
+        }
         this.timer = setInterval(() => {
             void this.write(owner).catch(() => {});
         }, HEARTBEAT_MS);
