@@ -43,7 +43,7 @@ of a monitor. The desktop app and the container serve the same interface.
 
 - A schedule, so it only mines during hours you choose.
 - A daily cap on mining hours, with half an hour of latitude to finish a drop in progress.
-- Starts with Windows, into the tray, and keeps mining when the window is closed.
+- Starts at login, into the tray, and keeps mining when the window is closed.
 - Desktop notifications for claims and completed campaigns, carrying the reward's artwork,
   with sounds you can turn off.
 - Telegram and Discord notifications, set up through a guided flow rather than a config file.
@@ -51,7 +51,8 @@ of a monitor. The desktop app and the container serve the same interface.
 
 **Two ways to run it**
 
-- A Windows desktop app that installs per-user and needs no administrator.
+- A desktop app for Windows, installed per-user with no administrator, and for Linux as an
+  AppImage or a deb.
 - A Docker container serving the same dashboard, comfortable on a Raspberry Pi.
 
 ## Why no browser
@@ -63,6 +64,36 @@ problem. This bot keeps that layer and throws the browser away.
 
 Practical effect: a few HTTPS requests per minute and some idle websockets. Runs comfortably
 on a Raspberry Pi.
+
+## Desktop app
+
+Downloads are on the [releases page](https://github.com/loversama/sluice-releases/releases).
+
+**Windows:** run `Sluice-Setup-<version>.exe`. It installs for your user only and does not ask
+for administrator rights.
+
+**Linux** (x64), either of:
+
+- **AppImage** - `Sluice-<version>-x86_64.AppImage`. Make it executable and run it:
+
+  ```sh
+  chmod +x Sluice-*.AppImage
+  ./Sluice-*.AppImage
+  ```
+
+  AppImages need FUSE 2: `sudo apt install libfuse2` (on Ubuntu 24.04 and later the package
+  is `libfuse2t64`).
+- **deb** - `sluice_<version>_amd64.deb`, for Debian and Ubuntu:
+  `sudo apt install ./sluice_*.deb`.
+
+Only the AppImage updates itself without a password. The deb downloads updates on its own,
+but installing one goes through the system package manager, so it waits for you to choose
+**Install** in the app and asks for your password then.
+
+The tray icon needs a desktop with a system tray. GNOME has none out of the box; install the
+AppIndicator extension (`gnome-shell-extension-appindicator` on Ubuntu, where it is usually
+already on). Without a tray the app still runs and mines - close the window and open Sluice
+again from the application menu to bring it back.
 
 ## Docker
 

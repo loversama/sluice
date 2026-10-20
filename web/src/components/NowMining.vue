@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
-import { idleCopy } from "@/lib/idleCopy.js";
+import { idleHeadline } from "@/lib/idleCopy.js";
 import StartupProgress from "@/components/StartupProgress.vue";
 import { formatClock, formatDuration } from "@/lib/format.js";
 import StatusChip from "./StatusChip.vue";
@@ -15,8 +15,11 @@ const busy = ref(false);
  * The header carries its state as a colour as well as a word, as the narrow layout does.
  * Mixed into the surface rather than used neat: it sits behind body text for hours.
  */
-/** Mining proper, as opposed to starting up or having nothing to do. */
-const active = computed(() => Boolean(store.mining && drop.value));
+/**
+ * Mining proper, as opposed to starting up or having nothing to do. Never while paused:
+ * the last channel can outlive the pause by a moment, and the band should say Paused.
+ */
+const active = computed(() => Boolean(store.mining && drop.value && !paused.value));
 
 /**
  * The drop on screen has been claimed and the miner has not yet moved on.
@@ -111,7 +114,14 @@ const claimedCount = computed(
  * could disagree with the decision the miner had actually made. The daemon now says, and
  * the wording lives in one module the narrow layout and the tray share.
  */
-const idle = computed(() => idleCopy(store.idle));
+const idle = computed(() =>
+    idleHeadline({
+        paused: paused.value,
+        atDailyLimit: store.atDailyLimit,
+        outsideSchedule: outsideSchedule.value,
+        idle: store.idle,
+    }),
+);
 </script>
 
 <template>
@@ -337,19 +347,8 @@ const idle = computed(() => idleCopy(store.idle));
             <!-- Idle: never a blank band; always say why, and where to look next. -->
             <div v-else class="flex items-center justify-between gap-3">
                 <div class="min-w-0">
-                    <h1 class="text-[20px] font-semibold leading-tight">
-                        {{ paused ? "Paused" : store.atDailyLimit ? "Daily limit reached" : outsideSchedule ? "Outside your hours" : idle.title || "Nothing to mine right now" }}
-                    </h1>
-                    <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">
-                        <template v-if="paused">Nothing is being watched or claimed until you resume.</template>
-                        <template v-else-if="store.atDailyLimit">
-                            Today's allowance is used up. Mining resumes tomorrow.
-                        </template>
-                        <template v-else-if="outsideSchedule">
-                            Mining is set to certain hours, and now is not one of them.
-                        </template>
-                        <template v-else>{{ idle.body || "Nothing available to mine right now." }}</template>
-                    </p>
+                    <h1 class="text-[20px] font-semibold leading-tight">{{ idle.title }}</h1>
+                    <p class="text-[12px] mt-1" :style="{ color: 'var(--text-2)' }">{{ idle.body }}</p>
                 </div>
                 <RouterLink
                     v-if="store.upcomingCampaigns.length"

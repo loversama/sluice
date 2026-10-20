@@ -72,6 +72,16 @@ export class AuthState {
     refreshToken: string | undefined;
     userId = "";
     login = "";
+    /**
+     * Called after a refresh succeeds, so the new tokens can be saved.
+     *
+     * Twitch rotates the refresh token on every use and the old one stops working. Held
+     * only in memory, the next restart loaded the spent pair from disk and could do
+     * nothing with it but send the user back through a device-code login.
+     */
+    onRefreshed: (() => Promise<void> | void) | null = null;
+    /** The refresh in progress, shared so concurrent 401s do not spend the token twice. */
+    private refreshing: Promise<boolean> | null = null;
 
     constructor(client: ClientInfo = DEFAULT_CLIENT) {
         this.client = withDeviceString(client);
@@ -236,11 +246,31 @@ export class AuthState {
      *
      * Returns false when there is no usable refresh token, in which case the caller has to
      * fall back to a fresh device-code login.
+     *
+     * Single-flight: every caller during a refresh shares its outcome. Several requests
+     * failing with 401 at once each asked for their own, and since each use rotates the
+     * refresh token, all but the first presented one that had just been spent.
      */
-    async refresh(): Promise<boolean> {
+    refresh(): Promise<boolean> {
+        this.refreshing ??= this.refreshOnce().finally(() => {
+            this.refreshing = null;
+        });
+        return this.refreshing;
+    }
+
+    private async refreshOnce(): Promise<boolean> {
         if (!this.refreshToken) {
             return false;
         }
+        try {
+            return await this.exchangeRefreshToken(this.refreshToken);
+        } catch (error) {
+            logger.debug(`Token refresh failed: ${(error as Error).message}`);
+            return false;
+        }
+    }
+
+    private async exchangeRefreshToken(refreshToken: string): Promise<boolean> {
         const response = await request(OAUTH_TOKEN_URL, {
             method: "POST",
             headers: {
@@ -251,7 +281,7 @@ export class AuthState {
             body: new URLSearchParams({
                 client_id: this.client.clientId,
                 grant_type: "refresh_token",
-                refresh_token: this.refreshToken,
+                refresh_token: refreshToken,
             }).toString(),
         });
 
@@ -270,6 +300,11 @@ export class AuthState {
         const valid = await this.validate();
         if (valid) {
             logger.info("Refreshed the Twitch access token.");
+            try {
+                await this.onRefreshed?.();
+            } catch (error) {
+                logger.warn(`Could not save the refreshed token: ${(error as Error).message}`);
+            }
         }
         return valid;
     }

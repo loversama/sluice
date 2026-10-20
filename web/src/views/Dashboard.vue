@@ -105,10 +105,10 @@ const deliverableShare = computed(() => {
                 <p v-if="queue.length" class="text-[10px] -mt-2 mb-2" :style="{ color: 'var(--muted)' }">
                     <template v-if="saving">Saving&hellip;</template>
                     <template v-else-if="skipped">
-                        Drag to rank. {{ skipped }} dimmed &mdash; not in your Steam library or
-                        your <RouterLink to="/priorities" class="underline">priority list</RouterLink>.
+                        Drag to rank. {{ skipped }} dimmed &mdash; excluded, or not in your Steam
+                        library or your <RouterLink to="/priorities" class="underline">priority list</RouterLink>.
                     </template>
-                    <template v-else>Drag to rank. Whatever is mining now stays first.</template>
+                    <template v-else>Drag to rank, or Ctrl+&uarr;/&darr; on a row. Whatever is mining now stays first.</template>
                 </p>
                 <p v-if="!queue.length" class="text-[12px] py-4 text-center" :style="{ color: 'var(--muted)' }">
                     <template v-if="store.loading">
@@ -144,6 +144,7 @@ const deliverableShare = computed(() => {
                         "
                         :style="{ background: 'var(--surface-2)' }"
                         tabindex="0"
+                        aria-keyshortcuts="Control+ArrowUp Control+ArrowDown"
                         @keydown.ctrl.up.prevent="move(index, -1)"
                         @keydown.ctrl.down.prevent="move(index, 1)"
                     >
@@ -192,7 +193,7 @@ const deliverableShare = computed(() => {
                                 {{ formatDuration(totalRemainingMinutes(campaign)) }} left
                             </p>
                             <p class="text-[11px] tabular" :style="{ color: 'var(--muted)' }">
-                                ends {{ formatUntil(campaign.endAt) }}
+                                ends {{ formatUntil(campaign.endAt, store.now) }}
                             </p>
                         </div>
 
@@ -201,7 +202,8 @@ const deliverableShare = computed(() => {
                         <span
                             class="drag-handle cursor-grab select-none shrink-0 text-[12px]"
                             :style="{ color: 'var(--muted)' }"
-                            title="Drag to rank"
+                            title="Drag to rank, or focus the row and press Ctrl+↑/↓"
+                            aria-hidden="true"
                         >&#10287;</span>
                     </div>
                     </template>
@@ -303,7 +305,7 @@ const deliverableShare = computed(() => {
                             </p>
                         </div>
                         <span class="text-[11px] shrink-0" :style="{ color: 'var(--muted)' }">
-                            {{ formatRelative(claim.at) }}
+                            {{ formatRelative(claim.at, store.now) }}
                         </span>
                     </li>
                 </ul>

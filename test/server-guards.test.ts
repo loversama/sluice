@@ -269,3 +269,29 @@ describe("the Steam routes", () => {
         }
     });
 });
+
+describe("the event stream", () => {
+    it("relays the miner's status changes, so the page knows to re-read its state", async () => {
+        const ctx = context();
+        const server = new ApiServer(ctx as never, "/nonexistent");
+        const port = await server.listen("127.0.0.1", 0);
+        const controller = new AbortController();
+        try {
+            const response = await fetch(`http://127.0.0.1:${port}/api/stream`, {
+                signal: controller.signal,
+            });
+            const reader = response.body!.getReader();
+            await reader.read(); // the retry preamble
+
+            ctx.bus.emit("status");
+            const { value } = await reader.read();
+            const frame = new TextDecoder().decode(value);
+
+            expect(frame).toContain("event: status\n");
+            expect(frame).toContain("data: {}\n");
+        } finally {
+            controller.abort();
+            server.close();
+        }
+    });
+});

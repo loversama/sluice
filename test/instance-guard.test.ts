@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,6 +97,29 @@ describe("InstanceLock", () => {
         const second = new InstanceLock(instanceLockPath(dir));
         expect(await second.acquire(owner)).toBeNull();
         await second.release();
+    });
+
+    it("keeps one heartbeat when the same lock is acquired again", async () => {
+        // The app holds one lock for its lifetime and acquires it at every sign-in.
+        const dir = await tempDir();
+        const lock = new InstanceLock(instanceLockPath(dir));
+        const set = vi.spyOn(globalThis, "setInterval");
+        const clear = vi.spyOn(globalThis, "clearInterval");
+        try {
+            await lock.acquire(owner);
+            await lock.acquire(owner);
+            await lock.acquire(owner);
+            const started = set.mock.results.map((result) => result.value);
+            expect(started).toHaveLength(3);
+            // Every heartbeat but the newest has been stopped.
+            for (const timer of started.slice(0, -1)) {
+                expect(clear).toHaveBeenCalledWith(timer);
+            }
+        } finally {
+            await lock.release();
+            set.mockRestore();
+            clear.mockRestore();
+        }
     });
 
     it("frees the lock on release", async () => {

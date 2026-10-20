@@ -1,8 +1,27 @@
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { onUnmounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
-import { orderDraggedGame } from "@/lib/ranking.js";
+import { useGameLists } from "@/composables/useGameLists.js";
+import {
+    dragRefusal,
+    orderDraggedGame,
+    priorityGameBelow,
+    reorderPriorityGames,
+} from "@/lib/ranking.js";
+
+/** What to say when a drag cannot hold - see dragRefusal. */
+const REFUSALS = {
+    dimmed: (item) =>
+        `${item.game.name} won't be mined - ${
+            item.isExcluded ? "it's on your excluded list" : "it's outside your library policy"
+        } - so it stays at the bottom.`,
+    deferred: (item) =>
+        `${item.game.name} was skipped with Next, so it waits at the back. ` +
+        "Put it back from the Priorities page.",
+    below: () =>
+        "Everything below that point is skipped or won't be mined, so nothing can be ranked under it.",
+};
 
 /**
  * Dragging the queue into a different order, from either layout.
@@ -14,6 +33,7 @@ import { orderDraggedGame } from "@/lib/ranking.js";
  */
 export function useQueueOrder() {
     const store = useMinerStore();
+    const lists = useGameLists();
 
     /** A local copy of the queue, so a drag has something to write to. */
     const order = ref([]);
@@ -33,18 +53,15 @@ export function useQueueOrder() {
         { immediate: true },
     );
 
-    onMounted(() => {
-        // The reorder rule reads the existing priority list, so it has to be loaded.
-        if (!store.config) store.loadConfig().catch(() => {});
-    });
-
     onUnmounted(() => clearTimeout(settleTimer));
 
     /**
-     * Persist a drag - see orderDraggedGame for the rule.
+     * Persist a drag - see orderDraggedGame and reorderPriorityGames for the rules.
      *
-     * Writes queueOrder and nothing else. The priority list is the user's own and is never
-     * touched from here.
+     * A game already on the priority list moves within that list, because the list outranks
+     * everything a drag can write elsewhere. Any other game goes to queueOrder, unless it
+     * was dropped above a priority game: that can never hold, so it is put back with a note
+     * saying how to rank it there instead. The priority list never gains an entry here.
      *
      * Refuses to write if settings were never loaded, since treating a failed fetch as an
      * empty list would delete an order the user had built up.
@@ -63,16 +80,34 @@ export function useQueueOrder() {
             return;
         }
 
+        const refusal = dragRefusal(order.value, movedIndex);
+        if (refusal) {
+            ElMessage.info(REFUSALS[refusal](order.value[movedIndex]));
+            order.value = [...store.upNext];
+            return;
+        }
+
+        const priorityGames = store.config?.priorityGames ?? [];
+        const reordered = reorderPriorityGames(order.value, priorityGames, movedIndex);
+        if (!reordered && priorityGameBelow(order.value, priorityGames, movedIndex)) {
+            const game = order.value[movedIndex]?.game?.name ?? "That game";
+            ElMessage.info(
+                `${game} isn't on your priority list, so it can't go above games that are. ` +
+                    "Add it on the Priorities page to rank it among them.",
+            );
+            order.value = [...store.upNext];
+            return;
+        }
+
         pending.value = true;
         saving.value = true;
 
-        const next = orderDraggedGame(order.value, existing, movedIndex);
+        const patch = reordered
+            ? { priorityGames: reordered }
+            : { queueOrder: orderDraggedGame(order.value, existing, movedIndex) };
 
         try {
-            await store.saveConfig({ queueOrder: next });
-        } catch (error) {
-            ElMessage.error(error.message);
-            order.value = [...store.upNext];
+            if (!(await lists.save(patch))) order.value = [...store.upNext];
         } finally {
             saving.value = false;
             // Let the daemon re-rank and push before trusting its order again.

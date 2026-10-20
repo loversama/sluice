@@ -49,6 +49,27 @@ export class StaleQueryHashError extends GqlError {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The longest a Retry-After is honoured for. Twitch's own figure wins below this, but a
+ * request is not worth holding a refresh sweep up for longer: past it the request fails
+ * and the next sweep tries again.
+ */
+const MAX_RATE_LIMIT_WAIT_MS = 60_000;
+
+/** Retry-After as milliseconds, in either of its forms; 0 when absent or unreadable. */
+export function retryAfterMs(header: string | string[] | undefined, now = Date.now()): number {
+    const value = Array.isArray(header) ? header[0] : header;
+    if (!value) {
+        return 0;
+    }
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) {
+        return Math.max(0, seconds * 1000);
+    }
+    const at = Date.parse(value);
+    return Number.isNaN(at) ? 0 : Math.max(0, at - now);
+}
+
 interface GqlResponse<T> {
     data?: T;
     errors?: { message: string; [key: string]: unknown }[];
@@ -67,6 +88,9 @@ function buildPayload(query: PersistedQuery, variables?: Record<string, unknown>
 }
 
 export class TwitchGql {
+    /** Whether a missing currentUser on the campaign list has been reported yet. */
+    private warnedNoCampaignUser = false;
+
     constructor(private readonly auth: AuthState) {}
 
     /**
@@ -85,15 +109,19 @@ export class TwitchGql {
         const retries = options.retries ?? 3;
 
         let lastError: unknown;
+        /** How long Twitch asked us to wait, when the last attempt was rate limited. */
+        let rateLimitWait = 0;
         for (let attempt = 0; attempt <= retries; attempt++) {
             if (attempt > 0) {
                 // Exponential backoff, capped - Twitch rate-limits aggressive clients.
                 // The +/-10% variance stops repeated failures from re-syncing into a
                 // regular pattern of retries.
-                const backoff = Math.min(1000 * 2 ** attempt, 15_000);
+                const backoff = Math.max(Math.min(1000 * 2 ** attempt, 15_000), rateLimitWait);
+                rateLimitWait = 0;
                 await sleep(backoff * (0.9 + Math.random() * 0.2));
             }
             try {
+                const sentWith = this.auth.accessToken;
                 const response = await request(GQL_URL, {
                     method: "POST",
                     headers: {
@@ -106,11 +134,30 @@ export class TwitchGql {
                 if (response.statusCode === 401) {
                     await response.body.dump();
                     // One refresh attempt per request; if it works the retry below succeeds,
-                    // and if it does not the error names the actual problem.
-                    if (attempt === 0 && (await this.auth.refresh())) {
+                    // and if it does not the error names the actual problem. A token that
+                    // changed while this request was out was refreshed by someone else, and
+                    // retrying with it is all that is needed.
+                    if (
+                        attempt === 0 &&
+                        (this.auth.accessToken !== sentWith || (await this.auth.refresh()))
+                    ) {
                         continue;
                     }
                     throw new AuthExpiredError();
+                }
+                // Rate limited. Worth waiting out rather than failing at once - a detail
+                // sweep that gives up here leaves its campaign with no drops - but only
+                // within the same bounded retries as anything else, so a client that is
+                // being throttled does not go on to hammer.
+                if (response.statusCode === 429) {
+                    await response.body.dump();
+                    rateLimitWait = Math.min(
+                        retryAfterMs(response.headers["retry-after"]),
+                        MAX_RATE_LIMIT_WAIT_MS,
+                    );
+                    lastError = new GqlError(`${query.operationName} was rate limited (429)`);
+                    logger.debug(`${query.operationName} rate limited; backing off.`);
+                    continue;
                 }
                 if (response.statusCode >= 500) {
                     await response.body.dump();
@@ -217,9 +264,19 @@ export class TwitchGql {
 
     /** Every campaign visible to this account, without per-drop detail. */
     async getCampaigns(): Promise<DropCampaign[]> {
-        const data = await this.query<{ currentUser: { dropCampaigns: DropCampaign[] | null } }>(
-            "campaigns",
-        );
+        const data = await this.query<{
+            currentUser: { dropCampaigns: DropCampaign[] | null } | null;
+        }>("campaigns");
+        // Not thrown: an empty list is what sends a TV-client login to the public catalogue,
+        // and nothing yet shows that login gets a currentUser back rather than null. But it
+        // is said, once, because the other reading is a token Twitch no longer recognises.
+        if (!data.currentUser && !this.warnedNoCampaignUser) {
+            this.warnedNoCampaignUser = true;
+            logger.warn(
+                "Twitch answered the campaign list without a current user; treating it as " +
+                    "no campaigns. If nothing is ever found, sign out and back in.",
+            );
+        }
         return data.currentUser?.dropCampaigns ?? [];
     }
 
@@ -236,7 +293,14 @@ export class TwitchGql {
     }
 
     async getInventory(): Promise<Inventory> {
-        const data = await this.query<{ currentUser: { inventory: Inventory } }>("inventory");
+        const data = await this.query<{ currentUser: { inventory: Inventory | null } | null }>(
+            "inventory",
+        );
+        // Named rather than left to a null dereference: the caller tells "could not read
+        // the inventory" apart from a bug by the error type.
+        if (!data.currentUser?.inventory) {
+            throw new GqlError("Inventory returned no current user");
+        }
         return data.currentUser.inventory;
     }
 

@@ -14,12 +14,17 @@ let nextStart: StartBehaviour = () => new Promise<void>(() => {});
 
 class FakeMiner extends EventEmitter {
     stopped = false;
+    loaded = { state: false, claims: false };
     constructor() {
         super();
         minersBuilt.push(this);
     }
-    async loadPersistedState(): Promise<void> {}
-    async loadClaimHistory(): Promise<void> {}
+    async loadPersistedState(): Promise<void> {
+        this.loaded.state = true;
+    }
+    async loadClaimHistory(): Promise<void> {
+        this.loaded.claims = true;
+    }
     setSteamLibrary(): void {}
     applyConfig(): void {}
     getCampaigns(): unknown[] {
@@ -41,12 +46,18 @@ class FakeMiner extends EventEmitter {
 }
 
 let authLoadFails = false;
+/** Whether the stored access token still validates, and whether a refresh can rescue it. */
+let tokenValid = true;
+let refreshWorks = false;
 
 class FakeAuth {
     userId = "42";
     login = "tester";
     accessToken = "token";
     revoked = 0;
+    refreshes = 0;
+    authorizations = 0;
+    onRefreshed: (() => Promise<void> | void) | null = null;
     constructor() {
         authsBuilt.push(this);
     }
@@ -60,9 +71,15 @@ class FakeAuth {
         return true;
     }
     async validate(): Promise<boolean> {
-        return true;
+        return tokenValid;
     }
-    async authorize(): Promise<void> {}
+    async refresh(): Promise<boolean> {
+        this.refreshes += 1;
+        return refreshWorks;
+    }
+    async authorize(): Promise<void> {
+        this.authorizations += 1;
+    }
     async save(): Promise<void> {}
     async revoke(): Promise<boolean> {
         this.revoked += 1;
@@ -125,6 +142,8 @@ describe("the session loop", () => {
         minersBuilt.length = 0;
         authsBuilt.length = 0;
         authLoadFails = false;
+        tokenValid = true;
+        refreshWorks = false;
         nextStart = () => new Promise<void>(() => {});
     });
 
@@ -134,6 +153,48 @@ describe("the session loop", () => {
         await until(() => minersBuilt.length === 1, "the first miner");
 
         expect(app.context.getAuthStatus()).toBe("ok");
+        await app.stop();
+    });
+
+    it("reports itself signed in only once the session's miner is ready", async () => {
+        // The dashboard re-reads its state on this event. Sent earlier, that read found the
+        // previous session's miner, or this one with its claim history not loaded yet.
+        const app = await makeApp();
+        const seen: { miner: unknown; loaded: FakeMiner["loaded"] | null }[] = [];
+        app.bus.on("auth", (payload: { status: string }) => {
+            if (payload.status !== "ok") return;
+            const miner = app.context.getMiner() as unknown as FakeMiner | null;
+            seen.push({ miner, loaded: miner ? { ...miner.loaded } : null });
+        });
+
+        app.start();
+        await until(() => seen.length === 1, "the signed-in event");
+
+        expect(seen[0]!.miner).toBe(minersBuilt[0]);
+        expect(seen[0]!.loaded).toEqual({ state: true, claims: true });
+        await app.stop();
+    });
+
+    it("refreshes an expired token at startup instead of asking for a new login", async () => {
+        tokenValid = false;
+        refreshWorks = true;
+        const app = await makeApp();
+        app.start();
+        await until(() => minersBuilt.length === 1, "the first miner");
+
+        expect(authsBuilt[0]!.refreshes).toBe(1);
+        expect(authsBuilt[0]!.authorizations).toBe(0);
+        await app.stop();
+    });
+
+    it("falls back to a device-code login when the refresh fails too", async () => {
+        tokenValid = false;
+        refreshWorks = false;
+        const app = await makeApp();
+        app.start();
+        await until(() => minersBuilt.length === 1, "the first miner");
+
+        expect(authsBuilt[0]!.authorizations).toBe(1);
         await app.stop();
     });
 
@@ -191,6 +252,20 @@ describe("the session loop", () => {
         expect(problems).toContainEqual(
             expect.objectContaining({ level: "fatal", code: "stale-hash" }),
         );
+        await app.stop();
+    });
+
+    it("stops the miner of a session that crashed", async () => {
+        // Unwiring alone left its PubSub sockets and timers running, one more set per crash.
+        nextStart = () => Promise.reject(new Error("boom"));
+        const app = await makeApp();
+        const problems: unknown[] = [];
+        app.bus.on("problem", (p) => problems.push(p));
+
+        app.start();
+        await until(() => problems.length > 0, "the crash to be reported");
+
+        expect(minersBuilt[0]!.stopped).toBe(true);
         await app.stop();
     });
 

@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { useGameLists } from "@/composables/useGameLists.js";
+import { useViewport } from "@/lib/viewport.js";
 import {
     formatDateTime,
     formatDuration,
@@ -16,6 +17,11 @@ import StatusChip from "@/components/StatusChip.vue";
 const store = useMinerStore();
 const route = useRoute();
 const router = useRouter();
+const lists = useGameLists();
+const { width, isCompact } = useViewport();
+
+/** A fixed 480px drawer is wider than the narrow window itself. */
+const drawerSize = computed(() => (isCompact.value || width.value < 560 ? "100%" : 480));
 
 const segment = ref("active");
 
@@ -128,39 +134,55 @@ function preconditionName(drop, campaign) {
     return blocker?.name ?? "an earlier drop";
 }
 
-async function exclude(campaign) {
-    const games = [...(store.config?.excludedGames ?? [])];
-    if (!games.some((g) => g.toLowerCase() === campaign.game.name.toLowerCase())) {
-        games.push(campaign.game.name);
-    }
-    const priorities = (store.config?.priorityGames ?? []).filter(
-        (g) => g.toLowerCase() !== campaign.game.name.toLowerCase(),
-    );
-    await store.saveConfig({ excludedGames: games, priorityGames: priorities });
-    ElMessage.success(`${campaign.game.name} excluded.`);
+/**
+ * A game's place on the priority list, zero-based, or -1.
+ *
+ * Read from settings once they are loaded, so a change made here shows at once rather than
+ * after the daemon re-ranks; the snapshot's own rank covers the moment before that.
+ */
+function rankOf(game, campaign) {
+    if (lists.loaded.value) return lists.rankOf(game);
+    return campaign?.inPriorities ? campaign.priorityRank : -1;
 }
 
-async function prioritise(campaign) {
-    const games = [...(store.config?.priorityGames ?? [])];
-    if (games.includes(campaign.game.name)) {
-        ElMessage.info(`${campaign.game.name} is already in your priorities.`);
-        return;
-    }
-    games.push(campaign.game.name);
-    const excluded = (store.config?.excludedGames ?? []).filter(
-        (game) => game.toLowerCase() !== campaign.game.name.toLowerCase(),
-    );
-    await store.saveConfig({ priorityGames: games, excludedGames: excluded });
-    ElMessage.success(`${campaign.game.name} added to priorities.`);
+function excludedNow(game, campaign) {
+    return lists.loaded.value ? lists.isExcluded(game) : Boolean(campaign?.isExcluded);
 }
 
-watch(
-    () => store.config,
-    (config) => {
-        if (!config) store.loadConfig();
-    },
-    { immediate: true },
-);
+const priorityMode = computed(() => store.config?.priorityMode ?? "ending_soonest");
+
+/**
+ * Whether an upcoming campaign the user has not ranked will be mined when it starts, and
+ * why. It used to say “only because everything else is on” even with “nothing else”
+ * chosen, or for a game the library policy will pass over.
+ */
+function upcomingNote(campaign) {
+    if (priorityMode.value === "priority_only") {
+        return "Won’t be mined — only priority games are, and this one isn’t on the list.";
+    }
+    if (!campaign.inLibraryScope) {
+        return "Won’t be mined — it isn’t in your Steam library or your priority list.";
+    }
+    return "Will be mined only because “everything else” is on.";
+}
+
+/** Menu commands on a game, from a group header or the drawer. */
+function onGameCommand(command, game) {
+    switch (command) {
+        case "prioritise":
+            return lists.prioritise(game);
+        case "top":
+            return lists.moveToTop(game);
+        case "unprioritise":
+            return lists.removePriority(game);
+        case "exclude":
+            return lists.exclude(game);
+        case "unexclude":
+            return lists.unexclude(game);
+        case "rank":
+            return router.push({ path: "/priorities", query: { game: game.name } });
+    }
+}
 </script>
 
 <template>
@@ -244,10 +266,12 @@ watch(
 
         <section v-for="group in groups" :key="group[0].game.id" class="space-y-1.5">
             <!-- The whole header is the control: a games list is long, and reaching for
-                 a small chevron on every row is worse than a large target. -->
+                 a small chevron on every row is worse than a large target. The game menu
+                 sits beside it rather than inside, since a button cannot hold another. -->
+            <div class="flex items-center rounded-lg" :style="{ background: 'var(--surface)' }">
             <button
-                class="flex items-center gap-2.5 px-2 py-1.5 w-full text-left rounded-lg transition-colors hover:brightness-125"
-                :style="{ background: 'var(--surface)' }"
+                class="flex items-center gap-2.5 px-2 py-1.5 flex-1 min-w-0 text-left rounded-lg transition-colors hover:brightness-125"
+                :aria-expanded="!collapsed.has(group[0].game.id)"
                 @click="toggleGroup(group[0].game.id)"
             >
                 <span
@@ -263,19 +287,51 @@ watch(
                     :alt="group[0].game.name"
                     class="w-8 h-10 rounded object-cover"
                 />
-                <h2 class="text-[13px] font-semibold">{{ group[0].game.name }}</h2>
+                <h2 class="text-[13px] font-semibold truncate">{{ group[0].game.name }}</h2>
                 <span
-                    v-if="group[0].inPriorities"
-                    class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                    v-if="rankOf(group[0].game, group[0]) !== -1"
+                    class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0"
                     :style="{ background: 'var(--accent)', color: 'white' }"
+                    :title="`Priority #${rankOf(group[0].game, group[0]) + 1}`"
                 >
-                    #{{ group[0].priorityRank + 1 }}
+                    #{{ rankOf(group[0].game, group[0]) + 1 }}
                 </span>
-                <StatusChip v-if="group[0].isExcluded" status="excluded" small />
-                <span class="text-[11px] ml-auto" :style="{ color: 'var(--muted)' }">
+                <StatusChip v-if="excludedNow(group[0].game, group[0])" status="excluded" small />
+                <span class="text-[11px] ml-auto shrink-0" :style="{ color: 'var(--muted)' }">
                     {{ group.length }} campaign{{ group.length === 1 ? "" : "s" }}
                 </span>
             </button>
+
+            <!-- What can be done with the game, worded for where it stands now. -->
+            <el-dropdown trigger="click" @command="(command) => onGameCommand(command, group[0].game)">
+                <button
+                    class="px-2.5 py-1.5 mr-1 rounded-lg text-[14px] leading-none hover:brightness-125"
+                    :style="{ color: 'var(--text-2)' }"
+                    :title="`${group[0].game.name} - priorities and exclusion`"
+                    :aria-label="`Actions for ${group[0].game.name}`"
+                >&#8943;</button>
+                <template #dropdown>
+                    <el-dropdown-menu>
+                        <template v-if="rankOf(group[0].game, group[0]) === -1">
+                            <el-dropdown-item command="prioritise">Add to priorities</el-dropdown-item>
+                        </template>
+                        <template v-else>
+                            <el-dropdown-item v-if="rankOf(group[0].game, group[0]) > 0" command="top">
+                                Move to top
+                            </el-dropdown-item>
+                            <el-dropdown-item command="unprioritise">Remove from priorities</el-dropdown-item>
+                        </template>
+                        <el-dropdown-item v-if="excludedNow(group[0].game, group[0])" command="unexclude">
+                            Un-exclude
+                        </el-dropdown-item>
+                        <el-dropdown-item v-else command="exclude">Exclude</el-dropdown-item>
+                        <el-dropdown-item v-if="rankOf(group[0].game, group[0]) !== -1" command="rank" divided>
+                            Rank on Priorities &rarr;
+                        </el-dropdown-item>
+                    </el-dropdown-menu>
+                </template>
+            </el-dropdown>
+            </div>
 
             <button
                 v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group)"
@@ -317,7 +373,7 @@ watch(
 
                 <div class="text-right shrink-0 w-[150px]">
                     <template v-if="campaign.status === 'upcoming'">
-                        <p class="text-[12px] tabular">starts {{ formatUntil(campaign.startAt) }}</p>
+                        <p class="text-[12px] tabular">starts {{ formatUntil(campaign.startAt, store.now) }}</p>
                         <p class="text-[11px]" :style="{ color: 'var(--muted)' }">
                             {{ formatDateTime(campaign.startAt) }}
                         </p>
@@ -330,7 +386,7 @@ watch(
                             {{ formatDuration(totalRemainingMinutes(campaign)) }} left
                         </p>
                         <p class="text-[11px] tabular" :style="{ color: 'var(--muted)' }">
-                            ends {{ formatUntil(campaign.endAt) }}
+                            ends {{ formatUntil(campaign.endAt, store.now) }}
                         </p>
                     </template>
                 </div>
@@ -338,19 +394,19 @@ watch(
 
             <!-- Upcoming campaigns are only useful if they say whether the bot will act. -->
             <p
-                v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group.filter((c) => c.status === 'upcoming' && !c.inPriorities && !c.isExcluded))"
+                v-for="campaign in (collapsed.has(group[0].game.id) ? [] : group.filter((c) => c.status === 'upcoming' && rankOf(c.game, c) === -1 && !excludedNow(c.game, c)))"
                 :key="`${campaign.id}-hint`"
                 class="text-[11px] px-3 pb-1 ml-3"
                 :style="{ color: 'var(--text-2)' }"
             >
-                Will be mined only because &ldquo;everything else&rdquo; is on.
-                <button class="underline" @click="prioritise(campaign)">
+                {{ upcomingNote(campaign) }}
+                <button class="underline" @click="lists.prioritise(campaign.game)">
                     Add {{ campaign.game.name }} to priorities
                 </button>
             </p>
         </section>
 
-        <el-drawer v-model="drawerOpen" :size="480" :with-header="false">
+        <el-drawer v-model="drawerOpen" :size="drawerSize" :with-header="false">
             <div v-if="selected" class="space-y-4 text-[13px]">
                 <header class="flex items-start gap-3">
                     <img
@@ -486,21 +542,51 @@ watch(
                     </div>
                 </section>
 
+                <!-- Worded for where the game stands, so a second click is never a silent
+                     no-op, and each state's button is the undo for the one before. -->
                 <footer class="pt-3" :style="{ borderTop: '1px solid var(--border)' }">
-                    <div class="flex items-center gap-2">
-                        <button
-                            class="px-3 py-1.5 rounded-lg text-[12px]"
-                            :style="{ background: 'var(--accent)', color: 'white' }"
-                            @click="prioritise(selected)"
-                        >
-                            Prioritise {{ selected.game.name }}
-                        </button>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <template v-if="rankOf(selected.game, selected) === -1">
+                            <button
+                                class="px-3 py-1.5 rounded-lg text-[12px]"
+                                :style="{ background: 'var(--accent)', color: 'white' }"
+                                @click="lists.prioritise(selected.game)"
+                            >
+                                Prioritise {{ selected.game.name }}
+                            </button>
+                        </template>
+                        <template v-else>
+                            <RouterLink
+                                :to="{ path: '/priorities', query: { game: selected.game.name } }"
+                                class="px-2 py-1.5 rounded-lg text-[12px] font-semibold"
+                                :style="{ background: 'color-mix(in srgb, var(--accent) 18%, transparent)', color: 'var(--accent)' }"
+                                title="Rank it on the Priorities page"
+                            >
+                                #{{ rankOf(selected.game, selected) + 1 }} in priorities
+                            </RouterLink>
+                            <button
+                                class="px-3 py-1.5 rounded-lg text-[12px]"
+                                :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                                @click="lists.removePriority(selected.game)"
+                            >
+                                Remove from priorities
+                            </button>
+                        </template>
                         <!-- The action people reach for when they see a campaign they will
                              never want; previously only the positive one existed. -->
                         <button
+                            v-if="excludedNow(selected.game, selected)"
+                            class="px-3 py-1.5 rounded-lg text-[12px]"
+                            :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                            @click="lists.unexclude(selected.game)"
+                        >
+                            Excluded &middot; mine it again
+                        </button>
+                        <button
+                            v-else
                             class="px-3 py-1.5 rounded-lg text-[12px]"
                             :style="{ background: 'var(--surface-2)', color: 'var(--danger)' }"
-                            @click="exclude(selected)"
+                            @click="lists.exclude(selected.game)"
                         >
                             Never mine this game
                         </button>

@@ -121,6 +121,12 @@ html::-webkit-scrollbar-corner {
     --el-fill-color-blank: var(--surface);
 }
 
+/* The menu's own hover is a pale tint of the accent, which glares on the dark theme. */
+.el-dropdown-menu {
+    --el-dropdown-menuItem-hover-fill: var(--surface-2);
+    --el-dropdown-menuItem-hover-color: var(--text);
+}
+
 @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }

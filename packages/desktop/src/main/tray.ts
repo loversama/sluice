@@ -1,4 +1,4 @@
-import { app, Menu, Tray, nativeImage, nativeTheme, type BrowserWindow } from "electron";
+import { app, Menu, Notification, Tray, nativeImage, nativeTheme, type BrowserWindow } from "electron";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { dirname } from "node:path";
@@ -58,14 +58,20 @@ function taskbarIsDark(): boolean {
     return true;
 }
 
+/**
+ * Windows wants an ICO, which carries every size the shell might draw. Linux trays and
+ * window icons take a PNG, and the ICO files are not shipped there at all.
+ */
+const ICON_EXT = process.platform === "win32" ? "ico" : "png";
+
 /** The tray mark in whichever colour the taskbar will actually show. */
 function trayImage(): Electron.NativeImage {
-    return nativeImage.createFromPath(resource(taskbarIsDark() ? "tray-light.ico" : "tray-dark.ico"));
+    return nativeImage.createFromPath(resource(`${taskbarIsDark() ? "tray-light" : "tray-dark"}.${ICON_EXT}`));
 }
 
 /** The application's own mark, in its own colour. */
 export function appIconPath(): string {
-    return resource("icon.ico");
+    return resource(`icon.${ICON_EXT}`);
 }
 
 export interface TrayDeps {
@@ -83,6 +89,11 @@ export function createTray(deps: TrayDeps): void {
     tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
     tray.setToolTip("Sluice");
     tray.on("double-click", () => deps.showWindow());
+    // Linux has no double-click on a tray icon: a single click is all most panels pass on,
+    // and some pass on nothing but the menu. Opening on click is what people expect there.
+    if (process.platform === "linux") {
+        tray.on("click", () => deps.showWindow());
+    }
 
     // Someone switching Windows to light mode should not be left with a white mark on a
     // white taskbar until the next restart.
@@ -133,7 +144,18 @@ export function setTrayStatus(text: string): void {
 }
 
 export function showBalloon(title: string, content: string): void {
-    // Windows only; a no-op elsewhere rather than a crash.
+    // Balloons are a Windows thing. Elsewhere the same message goes out as an ordinary
+    // notification - silent, since it is information rather than an alert.
+    if (process.platform !== "win32") {
+        try {
+            if (Notification.isSupported()) {
+                new Notification({ title, body: content, icon: appIconPath(), silent: true }).show();
+            }
+        } catch {
+            // No notification daemon. Nothing here is important enough to report.
+        }
+        return;
+    }
     try {
         // No picture. Left to itself a balloon borrows the tray's icon, which is white and
         // drawn for a dark taskbar, so it all but vanished against the notification. Giving

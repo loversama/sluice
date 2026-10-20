@@ -1,11 +1,11 @@
-# @tdb/desktop
+# @sluice/desktop
 
-The Windows build: the same mining core and the same dashboard as the Docker image, wrapped
-so that running it is a double-click rather than a compose file.
+The desktop build for Windows and Linux: the same mining core and the same dashboard as the
+Docker image, wrapped so that running it is a double-click rather than a compose file.
 
 Nothing here yet but the manifest. What lands in this directory is the *host* - a window, a
 tray icon, an installer - and nothing else. Anything that decides how mining works belongs
-in `@tdb/core`, or the two distributions will disagree the first time either is edited.
+in `@sluice/core`, or the two distributions will disagree the first time either is edited.
 
 Two decisions already made, recorded here because they are easy to undo by accident:
 

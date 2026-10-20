@@ -45,8 +45,14 @@ const activity = computed(() => {
  * activity, and this reports a state that is usually not changing.
  */
 const connection = computed(() => {
-    if (store.loadError || store.fatal) {
-        return { tone: "var(--danger)", label: "Daemon unreachable" };
+    // The real reason, not one blanket label: a refused host name or a second copy already
+    // mining are not the daemon being unreachable, and saying so sent people looking for
+    // the wrong fault.
+    if (store.fatal) {
+        return { tone: "var(--danger)", label: store.fatal.message ?? "Mining stopped" };
+    }
+    if (store.loadError) {
+        return { tone: "var(--danger)", label: store.loadError };
     }
     if (store.connection !== "open") {
         return { tone: "var(--warn)", label: "Reconnecting to the daemon" };
