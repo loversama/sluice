@@ -1,6 +1,6 @@
 {
   "name": "@sluice/desktop",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "private": true,
   "description": "Desktop build for Windows and Linux: the same daemon and dashboard, without Docker.",
   "homepage": "https://github.com/loversama/sluice-releases",
