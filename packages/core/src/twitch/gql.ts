@@ -227,7 +227,10 @@ export class TwitchGql {
     async getCampaignDetails(campaignId: string): Promise<DropCampaign | null> {
         const data = await this.query<{ user: { dropCampaign: DropCampaign | null } | null }>(
             "campaignDetails",
-            { dropID: campaignId, channelLogin: this.authUserId },
+            // Despite its name, channelLogin takes the numeric user ID. Twitch once accepted
+            // the login too; since October 2026 a login gets `dropCampaign: null` back with
+            // no error, which left every campaign looking drop-less and therefore "done".
+            { dropID: campaignId, channelLogin: this.auth.userId },
         );
         return data.user?.dropCampaign ?? null;
     }
@@ -340,7 +343,4 @@ export class TwitchGql {
         return data.user ?? null;
     }
 
-    private get authUserId(): string {
-        return this.auth.login;
-    }
 }

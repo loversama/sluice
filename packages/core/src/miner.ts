@@ -2462,6 +2462,11 @@ export class Miner extends EventEmitter {
                         catalogue?.get(campaign.id) ?? (await this.gql.getCampaignDetails(campaign.id));
                     if (details) {
                         next.set(campaign.id, campaign.merge(details));
+                    } else {
+                        // An empty answer is a failure, not a campaign with nothing in it:
+                        // without its drops the campaign counts as finished and is quietly
+                        // never mined. Counting it here is what lets the warning below fire.
+                        failures += 1;
                     }
                 } catch (error) {
                     failures += 1;
