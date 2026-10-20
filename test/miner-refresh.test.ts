@@ -176,3 +176,32 @@ describe("a campaign whose details could not be fetched", () => {
         expect(miner.getMineableCampaigns()).toEqual([]);
     });
 });
+
+describe("account linking from the inventory", () => {
+    it("marks a catalogue campaign unlinked when the inventory says so", async () => {
+        // Catalogue campaigns carry no `self`, which read as linked - so progress went on
+        // being earned toward rewards that could never arrive, without a word.
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "c", self: null })];
+        gql.inventory = async () => ({
+            dropCampaignsInProgress: [makeCampaign({ id: "c", self: { isAccountConnected: false } })],
+            gameEventDrops: [],
+        });
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+
+        const [campaign] = miner.getCampaigns();
+        expect(campaign!.isAccountLinked).toBe(false);
+    });
+
+    it("leaves a campaign alone when the inventory does not mention it", async () => {
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "c", self: null })];
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+
+        expect(miner.getCampaigns()[0]!.isAccountLinked).toBe(true);
+    });
+});

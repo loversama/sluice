@@ -2646,6 +2646,12 @@ export class Miner extends EventEmitter {
             if (!campaign) {
                 continue;
             }
+            // Including whether the account is linked. A campaign from the public catalogue
+            // knows nothing about this account and carries no `self`, which reads as linked;
+            // the inventory is the one place Twitch still says, for anything in progress.
+            if (inProgress.self) {
+                campaign.data.self = inProgress.self;
+            }
             for (const entry of inProgress.timeBasedDrops ?? []) {
                 const drop = campaign.drops.find((candidate) => candidate.id === entry.id);
                 if (drop && entry.self) {
