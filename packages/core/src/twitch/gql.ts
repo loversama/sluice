@@ -94,6 +94,7 @@ export class TwitchGql {
                 await sleep(backoff * (0.9 + Math.random() * 0.2));
             }
             try {
+                const sentWith = this.auth.accessToken;
                 const response = await request(GQL_URL, {
                     method: "POST",
                     headers: {
@@ -106,8 +107,13 @@ export class TwitchGql {
                 if (response.statusCode === 401) {
                     await response.body.dump();
                     // One refresh attempt per request; if it works the retry below succeeds,
-                    // and if it does not the error names the actual problem.
-                    if (attempt === 0 && (await this.auth.refresh())) {
+                    // and if it does not the error names the actual problem. A token that
+                    // changed while this request was out was refreshed by someone else, and
+                    // retrying with it is all that is needed.
+                    if (
+                        attempt === 0 &&
+                        (this.auth.accessToken !== sentWith || (await this.auth.refresh()))
+                    ) {
                         continue;
                     }
                     throw new AuthExpiredError();

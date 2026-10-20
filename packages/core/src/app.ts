@@ -93,6 +93,9 @@ export function createApp(options: AppOptions): AppHandle {
     // Sessions come and go; these do not. Rebuilding AuthState would regenerate the pinned
     // device ID and user agent, which Twitch reads as a different device on every sign-in.
     const auth = new AuthState();
+    // Twitch spends the refresh token on use, so a refreshed pair that is not written
+    // down is lost at the next restart.
+    auth.onRefreshed = () => auth.save(authPath);
     const gqlForSearch = new TwitchGql(auth);
     // Box art for games that have no campaign running. Kept at the data root rather than
     // per user: which poster Twitch uses for a game is not anybody's private business.
@@ -363,7 +366,10 @@ export function createApp(options: AppOptions): AppHandle {
         deviceCode = null;
 
         const restored = forceLogin ? false : await auth.load(authPath);
-        if (!restored || !(await auth.validate())) {
+        // An expired access token is not a lost session: the refresh token usually still
+        // works, and trying it first spares the user a device-code login.
+        const valid = restored && ((await auth.validate()) || (await auth.refresh()));
+        if (!valid) {
             if (restored) {
                 logger.warn("Stored credentials are no longer valid; logging in again.");
             }

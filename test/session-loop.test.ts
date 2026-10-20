@@ -46,12 +46,18 @@ class FakeMiner extends EventEmitter {
 }
 
 let authLoadFails = false;
+/** Whether the stored access token still validates, and whether a refresh can rescue it. */
+let tokenValid = true;
+let refreshWorks = false;
 
 class FakeAuth {
     userId = "42";
     login = "tester";
     accessToken = "token";
     revoked = 0;
+    refreshes = 0;
+    authorizations = 0;
+    onRefreshed: (() => Promise<void> | void) | null = null;
     constructor() {
         authsBuilt.push(this);
     }
@@ -65,9 +71,15 @@ class FakeAuth {
         return true;
     }
     async validate(): Promise<boolean> {
-        return true;
+        return tokenValid;
     }
-    async authorize(): Promise<void> {}
+    async refresh(): Promise<boolean> {
+        this.refreshes += 1;
+        return refreshWorks;
+    }
+    async authorize(): Promise<void> {
+        this.authorizations += 1;
+    }
     async save(): Promise<void> {}
     async revoke(): Promise<boolean> {
         this.revoked += 1;
@@ -130,6 +142,8 @@ describe("the session loop", () => {
         minersBuilt.length = 0;
         authsBuilt.length = 0;
         authLoadFails = false;
+        tokenValid = true;
+        refreshWorks = false;
         nextStart = () => new Promise<void>(() => {});
     });
 
@@ -158,6 +172,29 @@ describe("the session loop", () => {
 
         expect(seen[0]!.miner).toBe(minersBuilt[0]);
         expect(seen[0]!.loaded).toEqual({ state: true, claims: true });
+        await app.stop();
+    });
+
+    it("refreshes an expired token at startup instead of asking for a new login", async () => {
+        tokenValid = false;
+        refreshWorks = true;
+        const app = await makeApp();
+        app.start();
+        await until(() => minersBuilt.length === 1, "the first miner");
+
+        expect(authsBuilt[0]!.refreshes).toBe(1);
+        expect(authsBuilt[0]!.authorizations).toBe(0);
+        await app.stop();
+    });
+
+    it("falls back to a device-code login when the refresh fails too", async () => {
+        tokenValid = false;
+        refreshWorks = false;
+        const app = await makeApp();
+        app.start();
+        await until(() => minersBuilt.length === 1, "the first miner");
+
+        expect(authsBuilt[0]!.authorizations).toBe(1);
         await app.stop();
     });
 
