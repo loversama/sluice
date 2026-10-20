@@ -301,6 +301,8 @@ export class Miner extends EventEmitter {
     private stopping = false;
     /** Campaigns came from the public catalogue last refresh; logged once, not every sweep. */
     private usingCatalogue = false;
+    /** The campaign sweep in progress, which any other caller joins rather than repeats. */
+    private refreshing: Promise<void> | null = null;
     /** The last refresh could not read the inventory; reported once per run of failures. */
     private inventoryFailing = false;
     /** Why there is nothing to mine, or null while watching. */
@@ -2371,7 +2373,22 @@ export class Miner extends EventEmitter {
         return null;
     }
 
-    private async refreshCampaigns(): Promise<void> {
+    /**
+     * Refresh, or join the refresh already running.
+     *
+     * Four things start one - the timer, a campaign boundary, a reward notification and the
+     * dashboard - and they overlap. Two sweeps at once doubled the requests, let the one
+     * that finished last overwrite the other's newer answer, and both ran the claim pass
+     * over the same finished drops.
+     */
+    private refreshCampaigns(): Promise<void> {
+        this.refreshing ??= this.sweepCampaigns().finally(() => {
+            this.refreshing = null;
+        });
+        return this.refreshing;
+    }
+
+    private async sweepCampaigns(): Promise<void> {
         // Whatever this finds, the idle loop's decision was made against older data.
         // Waking is cheap and the recheck is against memory.
         this.wake();

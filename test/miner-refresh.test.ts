@@ -205,3 +205,54 @@ describe("account linking from the inventory", () => {
         expect(miner.getCampaigns()[0]!.isAccountLinked).toBe(true);
     });
 });
+
+describe("overlapping refreshes", () => {
+    it("joins the sweep already running instead of starting another", async () => {
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "c" })];
+        const list = vi.spyOn(gql, "getCampaigns");
+        const miner = makeMiner(gql);
+
+        await Promise.all([miner.refreshNow(), miner.refreshNow(), miner.refreshNow()]);
+
+        expect(list).toHaveBeenCalledTimes(1);
+    });
+
+    it("starts a new sweep once the last has finished", async () => {
+        const gql = new FakeGql();
+        gql.listed = [makeCampaign({ id: "c" })];
+        const list = vi.spyOn(gql, "getCampaigns");
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+        await miner.refreshNow();
+
+        expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it("claims a finished drop once, however many sweeps were asked for", async () => {
+        const gql = new FakeGql();
+        gql.listed = [
+            makeCampaign({
+                id: "c",
+                drops: [
+                    makeDrop({
+                        id: "d",
+                        self: { currentMinutesWatched: 60, dropInstanceID: "i", isClaimed: false },
+                    }),
+                ],
+            }),
+        ];
+        // Twitch slow to confirm, which is when overlapping sweeps both reached the claim.
+        gql.claimDrop = async (id: string) => {
+            gql.claims.push(id);
+            await new Promise((r) => setTimeout(r, 20));
+            return true;
+        };
+        const miner = makeMiner(gql);
+
+        await Promise.all([miner.refreshNow(), miner.refreshNow()]);
+
+        expect(gql.claims).toEqual(["i"]);
+    });
+});
