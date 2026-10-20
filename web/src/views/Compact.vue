@@ -8,6 +8,7 @@ import { useViewport } from "@/lib/viewport.js";
 import { formatRelative } from "@/lib/format.js";
 import { useQueueOrder } from "@/composables/useQueueOrder.js";
 import { supportsAnonymousEmbed } from "@/lib/embed.js";
+import { idleHeadline } from "@/lib/idleCopy.js";
 import Skeleton from "@/components/Skeleton.vue";
 import StatusChip from "@/components/StatusChip.vue";
 import StartupProgress from "@/components/StartupProgress.vue";
@@ -23,7 +24,8 @@ import StreamPreview from "@/components/StreamPreview.vue";
  */
 const store = useMinerStore();
 
-const channel = computed(() => store.mining?.channel ?? null);
+/** Not while paused, as on the wide dashboard: the last channel can outlive the pause. */
+const channel = computed(() => (paused.value ? null : (store.mining?.channel ?? null)));
 const drop = computed(() => store.currentDrop);
 /**
  * Rows the policy will pass over, so the count can say how many will actually be mined.
@@ -89,6 +91,16 @@ const heroStyle = computed(() => ({
 
 const paused = computed(() => Boolean(store.daemon?.paused));
 const busy = ref(false);
+
+/** The same headline as the wide dashboard, so the two layouts cannot tell different stories. */
+const idle = computed(() =>
+    idleHeadline({
+        paused: paused.value,
+        atDailyLimit: store.atDailyLimit,
+        outsideSchedule: store.outsideSchedule === true,
+        idle: store.idle,
+    }),
+);
 
 /**
  * The same transport controls as the wide dashboard. They live here rather than in a
@@ -196,6 +208,17 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                          only way to reach pause or next at all. -->
                     <div class="ml-auto flex items-center gap-1">
                         <button
+                            v-if="channel"
+                            class="w-6 h-6 rounded-full grid place-items-center text-[11px]"
+                            :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
+                            :disabled="busy"
+                            title="Skip channel - leave this channel and pick another"
+                            aria-label="Skip channel"
+                            @click="run('skip')"
+                        >
+                            {{ "\u21B7" }}
+                        </button>
+                        <button
                             class="w-6 h-6 rounded-full grid place-items-center text-[11px]"
                             :style="{ background: 'var(--surface-2)', color: 'var(--text)' }"
                             :disabled="busy"
@@ -274,9 +297,10 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                     <StartupProgress />
                 </template>
 
-                <p v-else class="text-[12px] py-1" :style="{ color: 'var(--text-2)' }">
-                    Nothing being mined right now.
-                </p>
+                <div v-else class="py-0.5">
+                    <p class="text-[15px] font-semibold leading-tight">{{ idle.title }}</p>
+                    <p class="text-[11px] mt-0.5" :style="{ color: 'var(--text-2)' }">{{ idle.body }}</p>
+                </div>
             </div>
 
             <!-- Edge to edge and deliberately heavy: this is the one number the window
@@ -404,7 +428,7 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                 v-if="order.length"
                 class="text-[10px] ml-auto"
                 :style="{ color: 'var(--muted)' }"
-                title="Dragging pins the game in your priority list. Whatever is mining now stays first."
+                title="Whatever is mining now stays first."
             >
                 {{ saving ? "Saving…" : "Drag to rank" }}
             </span>
@@ -426,9 +450,11 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         class="flex items-center gap-2 py-1.5 px-1.5 rounded-lg"
                         :class="item.inLibraryScope && !item.isExcluded ? '' : 'opacity-45'"
                         :title="
-                            item.inLibraryScope && !item.isExcluded
-                                ? undefined
-                                : 'Will not be mined - outside your library policy'
+                            item.isExcluded
+                                ? 'On your excluded list, so it will not be mined'
+                                : item.inLibraryScope
+                                  ? undefined
+                                  : 'Not in your Steam library or priority list, so it will not be mined'
                         "
                         :style="{ background: 'var(--surface)' }"
                         tabindex="0"
@@ -454,7 +480,7 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                                         ? { background: 'var(--accent)', color: 'white' }
                                         : { background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)' }
                                 "
-                                :title="item.inPriorities ? 'In your priority list' : 'Not pinned - drag to pin it'"
+                                :title="item.inPriorities ? `Priority #${item.priorityRank + 1}` : 'Not in your priority list'"
                             >
                                 {{ index + 1 }}
                             </span>
@@ -515,7 +541,7 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
             <template v-else-if="stats">
                 <span>{{ stats.dropsAllTime }} drops</span>
                 <span>{{ stats.campaignsCompleted }} campaigns</span>
-                <span>{{ Math.round(stats.minutesEarned / 60) }}h mined</span>
+                <span>{{ Math.floor(stats.minutesEarned / 60) }}h watched</span>
             </template>
         </div>
     </div>

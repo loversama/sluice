@@ -90,6 +90,35 @@ export function idleCopy(idle) {
     }
 }
 
+/**
+ * What the top of the dashboard says while nothing is being mined, in either layout.
+ *
+ * Pausing, the daily limit and the schedule come first: each is a setting doing its job, and
+ * the daemon's idle reason underneath is beside the point until it lifts. The narrow layout
+ * used to skip all of this and say "Nothing being mined right now" whatever the reason.
+ *
+ * @returns {{title: string, body: string}}
+ */
+export function idleHeadline({ paused = false, atDailyLimit = false, outsideSchedule = false, idle = null } = {}) {
+    if (paused) {
+        return { title: "Paused", body: "Nothing is being watched or claimed until you resume." };
+    }
+    if (atDailyLimit) {
+        return { title: "Daily limit reached", body: "Today's allowance is used up. Mining resumes tomorrow." };
+    }
+    if (outsideSchedule) {
+        return {
+            title: "Outside your hours",
+            body: "Mining is set to certain hours, and now is not one of them.",
+        };
+    }
+    const copy = idleCopy(idle);
+    return {
+        title: copy.title || "Nothing to mine right now",
+        body: copy.body || "Nothing available to mine right now.",
+    };
+}
+
 /** The same thing in one line, for the tray tooltip, which Windows truncates without mercy. */
 export function idleTooltip(idle) {
     if (!idle) return "Sluice";
