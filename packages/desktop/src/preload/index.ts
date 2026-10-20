@@ -17,6 +17,8 @@ export interface DesktopSettings {
 }
 
 const bridge = {
+    /** Which OS this is, so copy like "Start with Windows" can say the right thing. */
+    platform: process.platform,
     version: (): Promise<string> => ipcRenderer.invoke("desktop:version"),
     getSettings: (): Promise<DesktopSettings> => ipcRenderer.invoke("desktop:get-settings"),
     setSettings: (next: Partial<DesktopSettings>): Promise<DesktopSettings> =>
