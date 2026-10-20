@@ -1345,7 +1345,7 @@ const inputStyle = {
                     <p class="text-[11px]" :style="{ color: 'var(--text-2)' }">
                         {{ steam.gameCount }} games
                         &middot; {{ steam.linked === "openid" ? "signed in through Steam" : "linked by profile" }}
-                        <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt) }}</template>
+                        <template v-if="steam.fetchedAt"> &middot; synced {{ formatRelative(steam.fetchedAt, store.now) }}</template>
                     </p>
                 </div>
                 <button class="px-3 py-1.5 rounded-lg text-[12px]" :style="{ background: 'var(--surface)', color: 'var(--text)' }"
@@ -1646,7 +1646,7 @@ const inputStyle = {
                 <dt :style="{ color: 'var(--text-2)' }">Version</dt>
                 <dd class="tabular">{{ store.daemon?.version ?? "-" }}</dd>
                 <dt :style="{ color: 'var(--text-2)' }">Running since</dt>
-                <dd class="tabular">{{ store.daemon ? formatRelative(store.daemon.startedAt) : "-" }}</dd>
+                <dd class="tabular">{{ store.daemon ? formatRelative(store.daemon.startedAt, store.now) : "-" }}</dd>
             </dl>
         </section>
         </div>

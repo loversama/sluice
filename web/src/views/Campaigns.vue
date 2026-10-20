@@ -317,7 +317,7 @@ watch(
 
                 <div class="text-right shrink-0 w-[150px]">
                     <template v-if="campaign.status === 'upcoming'">
-                        <p class="text-[12px] tabular">starts {{ formatUntil(campaign.startAt) }}</p>
+                        <p class="text-[12px] tabular">starts {{ formatUntil(campaign.startAt, store.now) }}</p>
                         <p class="text-[11px]" :style="{ color: 'var(--muted)' }">
                             {{ formatDateTime(campaign.startAt) }}
                         </p>
@@ -330,7 +330,7 @@ watch(
                             {{ formatDuration(totalRemainingMinutes(campaign)) }} left
                         </p>
                         <p class="text-[11px] tabular" :style="{ color: 'var(--muted)' }">
-                            ends {{ formatUntil(campaign.endAt) }}
+                            ends {{ formatUntil(campaign.endAt, store.now) }}
                         </p>
                     </template>
                 </div>

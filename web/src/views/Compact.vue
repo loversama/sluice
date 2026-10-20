@@ -376,7 +376,7 @@ const { order, saving, dragging, onReorder, move } = useQueueOrder();
                         </p>
                     </div>
                     <span class="text-[10px] shrink-0 tabular" :style="{ color: 'var(--muted)' }">
-                        {{ formatRelative(claim.at) }}
+                        {{ formatRelative(claim.at, store.now) }}
                     </span>
                 </li>
             </ul>

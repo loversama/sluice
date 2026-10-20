@@ -192,7 +192,7 @@ const deliverableShare = computed(() => {
                                 {{ formatDuration(totalRemainingMinutes(campaign)) }} left
                             </p>
                             <p class="text-[11px] tabular" :style="{ color: 'var(--muted)' }">
-                                ends {{ formatUntil(campaign.endAt) }}
+                                ends {{ formatUntil(campaign.endAt, store.now) }}
                             </p>
                         </div>
 
@@ -303,7 +303,7 @@ const deliverableShare = computed(() => {
                             </p>
                         </div>
                         <span class="text-[11px] shrink-0" :style="{ color: 'var(--muted)' }">
-                            {{ formatRelative(claim.at) }}
+                            {{ formatRelative(claim.at, store.now) }}
                         </span>
                     </li>
                 </ul>

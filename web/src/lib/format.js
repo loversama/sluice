@@ -28,17 +28,21 @@ export function formatDateTime(date) {
     });
 }
 
-export function formatRelative(timestamp) {
-    const seconds = Math.round((Date.now() - new Date(timestamp)) / 1000);
+/**
+ * "5m ago". Pass the store's ticking `now` from a template: reading the clock in here gives
+ * Vue nothing to track, so the label froze at whatever it said when the row first rendered.
+ */
+export function formatRelative(timestamp, now = Date.now()) {
+    const seconds = Math.round((now - new Date(timestamp)) / 1000);
     if (seconds < 60) return "just now";
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-/** "in 3d" / "in 4h" - used for campaign start and end countdowns. */
-export function formatUntil(date) {
-    const ms = new Date(date) - Date.now();
+/** "in 3d" / "in 4h" - used for campaign start and end countdowns. `now` as above. */
+export function formatUntil(date, now = Date.now()) {
+    const ms = new Date(date) - now;
     if (ms <= 0) return "now";
     const minutes = ms / 60_000;
     if (minutes < 60) return `in ${Math.round(minutes)}m`;
