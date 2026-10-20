@@ -194,6 +194,20 @@ describe("the session loop", () => {
         await app.stop();
     });
 
+    it("stops the miner of a session that crashed", async () => {
+        // Unwiring alone left its PubSub sockets and timers running, one more set per crash.
+        nextStart = () => Promise.reject(new Error("boom"));
+        const app = await makeApp();
+        const problems: unknown[] = [];
+        app.bus.on("problem", (p) => problems.push(p));
+
+        app.start();
+        await until(() => problems.length > 0, "the crash to be reported");
+
+        expect(minersBuilt[0]!.stopped).toBe(true);
+        await app.stop();
+    });
+
     it("does not keep restarting after stop()", async () => {
         nextStart = () => Promise.resolve();
         const app = await makeApp();

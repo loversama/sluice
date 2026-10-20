@@ -521,6 +521,10 @@ export function createApp(options: AppOptions): AppHandle {
             problem("warn", "generic", (error as Error).message);
             return "crashed";
         } finally {
+            // A session that crashed or was signed out of is over, but its miner may still
+            // hold a PubSub connection and timers. Unwiring only silenced it; left running,
+            // each crash leaked another live socket for the life of the process.
+            active.stop();
             unwire?.();
             unwire = null;
             logoutRequested = null;
