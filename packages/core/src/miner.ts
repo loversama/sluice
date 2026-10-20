@@ -917,6 +917,11 @@ export class Miner extends EventEmitter {
      */
     private async waitWhileIdle(totalMs: number): Promise<void> {
         const deadline = Date.now() + totalMs;
+        // What selection offered as the wait began. Only something new is worth ending the
+        // wait for: a campaign that has started, or one whose bench has run out. Ending it
+        // merely because candidates exist would re-search the same channel-less campaigns
+        // every minute, at several requests apiece.
+        const offered = new Set(this.selectCampaigns().map((campaign) => campaign.id));
         while (!this.stopping && Date.now() < deadline) {
             const slice = Math.min(IDLE_RECHECK_MS, deadline - Date.now());
             const woken = await new Promise<boolean>((resolve) => {
@@ -931,6 +936,9 @@ export class Miner extends EventEmitter {
                 };
             });
             if (woken) {
+                return;
+            }
+            if (this.selectCampaigns().some((campaign) => !offered.has(campaign.id))) {
                 return;
             }
         }

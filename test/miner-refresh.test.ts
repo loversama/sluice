@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
 import type { DropCampaign, Inventory } from "../packages/core/src/twitch/types.js";
-import { makeCampaign, makeDrop } from "./fixtures.js";
+import { Campaign } from "../packages/core/src/models/campaign.js";
+import { iso, makeCampaign, makeDrop } from "./fixtures.js";
 
 // The catalogue is a network fallback for an empty campaign list; nothing here wants it.
 vi.mock("../packages/core/src/twitch/catalogue.js", () => ({ fetchCatalogue: async () => [] }));
@@ -316,5 +317,78 @@ describe("re-arming the refresh timer", () => {
         expect(vi.getTimerCount()).toBe(0);
         await vi.advanceTimersByTimeAsync(60 * 60_000);
         expect(calls).toBe(1);
+    });
+});
+
+describe("the idle wait", () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    type Internals = {
+        campaigns: Map<string, Campaign>;
+        channelCooldowns: Map<string, number>;
+        waitWhileIdle(ms: number): Promise<void>;
+    };
+
+    /** Start the wait and report, as fake time passes, whether it has ended. */
+    function waiting(miner: InstanceType<typeof Miner>) {
+        let done = false;
+        void (miner as unknown as Internals).waitWhileIdle(20 * 60_000).then(() => (done = true));
+        return () => done;
+    }
+
+    it("ends when a campaign starts", async () => {
+        vi.useFakeTimers();
+        const miner = makeMiner(new FakeGql());
+        const startsAt = iso(1.5);
+        (miner as unknown as Internals).campaigns = new Map([
+            [
+                "c",
+                new Campaign(
+                    makeCampaign({
+                        id: "c",
+                        startAt: startsAt,
+                        drops: [makeDrop({ id: "d", startAt: startsAt })],
+                    }),
+                ),
+            ],
+        ]);
+        const ended = waiting(miner);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(ended()).toBe(false);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(ended()).toBe(true);
+    });
+
+    it("ends when a benched campaign's time is up", async () => {
+        vi.useFakeTimers();
+        const miner = makeMiner(new FakeGql());
+        const internals = miner as unknown as Internals;
+        internals.campaigns = new Map([["c", new Campaign(makeCampaign({ id: "c" }))]]);
+        internals.channelCooldowns.set("campaign:c", Date.now() + 3 * 60_000);
+        const ended = waiting(miner);
+
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        expect(ended()).toBe(false);
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        expect(ended()).toBe(true);
+    });
+
+    it("sits out the wait when nothing new has become possible", async () => {
+        // Candidates that were already on offer and found no channel are not a reason to
+        // search again every minute.
+        vi.useFakeTimers();
+        const miner = makeMiner(new FakeGql());
+        (miner as unknown as Internals).campaigns = new Map([
+            ["c", new Campaign(makeCampaign({ id: "c" }))],
+        ]);
+        const ended = waiting(miner);
+
+        await vi.advanceTimersByTimeAsync(19 * 60_000);
+        expect(ended()).toBe(false);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(ended()).toBe(true);
     });
 });
