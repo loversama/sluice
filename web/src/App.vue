@@ -76,7 +76,10 @@ const NAV = [
 /** Only surface the strip when something is wrong; a green "all good" banner is noise. */
 const problem = computed(() => {
     if (store.loadError) {
-        return { level: "danger", message: `Daemon unreachable - ${store.loadError}` };
+        return {
+            level: "danger",
+            message: store.loadHint ? `${store.loadError} ${store.loadHint}` : store.loadError,
+        };
     }
     if (store.connection === "lost") {
         return { level: "warn", message: "Reconnecting to daemon..." };
