@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { writeFile, rename, unlink, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -13,6 +14,10 @@ import { dirname } from "node:path";
  * file on POSIX and, on Windows, maps to MoveFileEx with MOVEFILE_REPLACE_EXISTING, so the
  * behaviour holds on both. The temporary file sits in the same directory deliberately: a
  * rename across filesystems is a copy, and would lose the atomicity that is the whole point.
+ *
+ * Each write gets a temporary name of its own. State is saved fire-and-forget at every
+ * change, so two writes to one file overlap routinely; sharing a single `.tmp` let one
+ * rename away the other's half-written file, or fail on a file that had already gone.
  */
 export async function writeFileAtomic(
     path: string,
@@ -20,7 +25,7 @@ export async function writeFileAtomic(
     options: { mode?: number } = {},
 ): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
-    const temporary = `${path}.tmp`;
+    const temporary = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     try {
         await writeFile(temporary, contents, options.mode ? { mode: options.mode } : undefined);
         await rename(temporary, path);

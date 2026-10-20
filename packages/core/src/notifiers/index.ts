@@ -265,10 +265,11 @@ export class NotifierGroup implements Notifier {
 
     async send(notification: Notification): Promise<void> {
         // Delivery failures are logged rather than thrown - a broken webhook must never
-        // interrupt mining.
+        // interrupt mining. At warn, though: a notifier that has stopped working is
+        // something the user configured and expects, and at debug nobody ever saw it.
         for (const result of await this.deliver(notification)) {
             if (!result.ok) {
-                logger.debug(`Notification via ${result.label} failed:`, result.error);
+                logger.warn(`Notification via ${result.label} failed:`, result.error);
             }
         }
     }

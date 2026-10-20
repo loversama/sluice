@@ -80,6 +80,8 @@ export class SegmentWatcher {
     private loop: Promise<void> | null = null;
     private lastSuccessAt: number | null = null;
     private playlistFailures = 0;
+    /** Settles once the first poll since start() has finished, however it went. */
+    private firstPoll: Promise<void> = Promise.resolve();
 
     constructor(
         private readonly source: SegmentSource,
@@ -104,7 +106,27 @@ export class SegmentWatcher {
         this.controller = controller;
         this.lastSuccessAt = null;
         this.playlistFailures = 0;
-        this.loop = this.run(controller.signal);
+        let polled!: () => void;
+        this.firstPoll = new Promise<void>((resolve) => (polled = resolve));
+        this.loop = this.run(controller.signal, polled);
+    }
+
+    /**
+     * Wait until the first poll since start() has finished, or `timeoutMs` has passed.
+     *
+     * A watcher just started has had no chance to fetch anything, so it is not yet healthy
+     * - which says nothing about the channel. Judging it before its first playlist read
+     * would count a perfectly good channel's first beat as a failure.
+     */
+    async waitForFirstPoll(timeoutMs: number): Promise<void> {
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+            this.firstPoll,
+            new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, timeoutMs);
+            }),
+        ]);
+        clearTimeout(timer);
     }
 
     /** Stop and wait for any request in flight to be abandoned. */
@@ -164,7 +186,16 @@ export class SegmentWatcher {
         }
     }
 
-    private async run(signal: AbortSignal): Promise<void> {
+    private async run(signal: AbortSignal, polled: () => void): Promise<void> {
+        // Settled on the way out as well, so nobody waits on a watcher that was stopped.
+        try {
+            await this.poll(signal, polled);
+        } finally {
+            polled();
+        }
+    }
+
+    private async poll(signal: AbortSignal, polled: () => void): Promise<void> {
         while (!signal.aborted) {
             const started = Date.now();
             try {
@@ -176,6 +207,7 @@ export class SegmentWatcher {
                 logger.debug(`Segment poll failed for ${this.label}:`, error);
                 this.noteFailure();
             }
+            polled();
             const wait = Math.max(0, this.pollMs - (Date.now() - started));
             await new Promise<void>((resolve) => {
                 const timer = setTimeout(resolve, wait);

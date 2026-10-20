@@ -61,6 +61,9 @@ const RELAYED_EVENTS = [
     // Sign-in finishes in an external browser on the desktop build, so without this the
     // window has no way of learning that Steam was linked short of a reload.
     "steam",
+    // Paused, resumed, outside the schedule, at the daily limit, or off a channel. Carries
+    // nothing; the page re-reads /api/state on it.
+    "status",
 ] as const;
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
@@ -801,7 +804,16 @@ export class ApiServer {
                 ? new Date(miner.getNextRefreshAt()!).toISOString()
                 : null,
             campaigns:
-                miner?.getCampaigns().map((campaign) => serializeCampaign(campaign, config, miner?.ownsPredicate ?? null)) ?? [],
+                miner
+                    ?.getCampaigns()
+                    .map((campaign) =>
+                        serializeCampaign(
+                            campaign,
+                            config,
+                            miner?.ownsPredicate ?? null,
+                            miner?.isDeferred(campaign.id),
+                        ),
+                    ) ?? [],
             claims: miner?.getRecentClaims() ?? [],
             stats: miner?.getClaimStats() ?? null,
             feed: miner?.getFeed() ?? [],

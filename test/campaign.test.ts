@@ -144,6 +144,36 @@ describe("Campaign.nextDrop", () => {
     });
 });
 
+describe("Campaign.isCompleted without drops", () => {
+    it("is not finished when its drops were never fetched", () => {
+        // The campaign list carries no drops. Reading the empty list as "all claimed" hid
+        // a campaign as done every time its details request failed.
+        const listed = new Campaign(makeCampaign({ id: "c", drops: [] }), false);
+        expect(listed.isCompleted).toBe(false);
+    });
+
+    it("is still not mineable then, having nothing to work toward", () => {
+        const listed = new Campaign(makeCampaign({ id: "c", drops: [] }), false);
+        expect(listed.nextDrop({ attemptImpossible: true })).toBeNull();
+    });
+
+    it("is finished when its details really have no drops", () => {
+        // A campaign with no time-based drops at all has nothing to watch for.
+        const listed = new Campaign(makeCampaign({ id: "c", drops: [] }), false);
+        const detailed = listed.merge(makeCampaign({ id: "c", drops: [] }));
+        expect(detailed.detailed).toBe(true);
+        expect(detailed.isCompleted).toBe(true);
+        expect(detailed.nextDrop()).toBeNull();
+    });
+
+    it("takes its drops from the details once they arrive", () => {
+        const listed = new Campaign(makeCampaign({ id: "c", drops: [] }), false);
+        const detailed = listed.merge(makeCampaign({ id: "c" }));
+        expect(detailed.isCompleted).toBe(false);
+        expect(detailed.nextDrop()?.id).toBe("c-d1");
+    });
+});
+
 describe("deliverability", () => {
     it("treats an unlinked campaign as undeliverable", () => {
         const campaign = new Campaign(

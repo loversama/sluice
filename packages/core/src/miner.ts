@@ -12,7 +12,7 @@ import {
 } from "./models/campaign.js";
 import { Channel } from "./models/channel.js";
 import type { AuthState } from "./twitch/auth.js";
-import { StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
+import { AuthExpiredError, StaleQueryHashError, type TwitchGql } from "./twitch/gql.js";
 import { fetchCatalogue } from "./twitch/catalogue.js";
 import type { DropCampaign } from "./twitch/types.js";
 import { PubSubPool, type DropProgressMessage } from "./twitch/websocket.js";
@@ -46,7 +46,7 @@ const MAX_UNCONFIRMED_BEATS = 15;
  */
 const BEATS_BEFORE_SESSION_CHECK = 3;
 /**
- * Consecutive rejected beats tolerated before benching the channel. A single CDN or Spade
+ * Consecutive rejected beats tolerated before benching the channel. A single CDN or playlist
  * hiccup is common and should not cost a thirty-minute exclusion.
  */
 const MAX_BEAT_FAILURES = 3;
@@ -151,6 +151,14 @@ export interface MinerEvents {
     loading: [{ phase: LoadingPhase; done?: number; total?: number; background?: boolean }];
     /** Human-readable activity line for the dashboard feed. */
     feed: [FeedEntry];
+    /**
+     * Whether the miner is running has changed: paused or resumed, outside the schedule
+     * or back in it, at the daily limit or past it, or off the channel it was watching.
+     *
+     * Carries nothing. It is sent after the change has been made, so anything read in
+     * response - the dashboard's state snapshot - already reflects it.
+     */
+    status: [];
     error: [Error];
 }
 
@@ -281,7 +289,8 @@ export class Miner extends EventEmitter {
      */
     private minedToday = 0;
     private minedTodayOn = new Date().toDateString();
-    private limitReported = false;
+    /** Whether the daily limit was stopping mining last time it was looked at. */
+    private atDailyLimit = false;
     private lastProgressAt = 0;
 
     /** Drop minutes as of the last sweep, for spotting another session earning as us. */
@@ -301,6 +310,10 @@ export class Miner extends EventEmitter {
     private stopping = false;
     /** Campaigns came from the public catalogue last refresh; logged once, not every sweep. */
     private usingCatalogue = false;
+    /** The campaign sweep in progress, which any other caller joins rather than repeats. */
+    private refreshing: Promise<void> | null = null;
+    /** The last refresh could not read the inventory; reported once per run of failures. */
+    private inventoryFailing = false;
     /** Why there is nothing to mine, or null while watching. */
     private idleState: IdleState | null = null;
     /** Resolves the interruptible idle wait early. Set only while that wait is in progress. */
@@ -342,6 +355,8 @@ export class Miner extends EventEmitter {
     private boundaryTimer: NodeJS.Timeout | null = null;
     /** Held so a config change can re-arm it, and so stop() can actually cancel it. */
     private refreshTimer: NodeJS.Timeout | null = null;
+    /** Bumped each time the refresh timer is armed; a tick from an older chain stops. */
+    private refreshGeneration = 0;
     /** Watch beats accepted since Twitch last confirmed progress. */
     private unconfirmedBeats = 0;
     /**
@@ -439,6 +454,11 @@ export class Miner extends EventEmitter {
         if (!campaign.isCompleted || this.claimHistory.completedCampaignIds.includes(campaign.id)) {
             return;
         }
+        // Done with, but not complete: a drop that could not be claimed is a reward the
+        // user does not have, and "Campaign complete" would tell them they do.
+        if (campaign.drops.some((drop) => drop.givenUp)) {
+            return;
+        }
         this.claimHistory.completedCampaignIds.push(campaign.id);
         this.persistClaims();
         logger.info(`Completed campaign: ${campaign.gameName} - ${campaign.name}`);
@@ -522,7 +542,6 @@ export class Miner extends EventEmitter {
         if (today !== this.minedTodayOn) {
             this.minedTodayOn = today;
             this.minedToday = 0;
-            this.limitReported = false;
         }
         this.minedToday += 1;
     }
@@ -540,12 +559,21 @@ export class Miner extends EventEmitter {
         const remaining = drop ? Math.max(0, drop.requiredMinutes - drop.currentMinutes) : null;
         const verdict = dailyLimitVerdict(this.config.dailyLimit, this.minedTodayMinutes, remaining);
 
-        if (verdict === "stop" && !this.limitReported) {
-            this.limitReported = true;
-            logger.info("Daily mining limit reached; stopping until tomorrow.");
-            this.pushFeed("info", "Daily limit reached - mining again tomorrow");
+        const stop = verdict === "stop";
+        // On change, in both directions. Only arriving was ever noticed, and the flag that
+        // noticed it was reset by the next minute mined - which, at the limit, never came -
+        // so the second day's limit passed without a word.
+        if (stop !== this.atDailyLimit) {
+            this.atDailyLimit = stop;
+            if (stop) {
+                logger.info("Daily mining limit reached; stopping until tomorrow.");
+                this.pushFeed("info", "Daily limit reached - mining again tomorrow");
+            } else {
+                logger.info("A new day's mining allowance; mining again.");
+            }
+            this.emit("status");
         }
-        return verdict !== "stop";
+        return !stop;
     }
 
     withinSchedule(): boolean {
@@ -554,6 +582,7 @@ export class Miner extends EventEmitter {
             this.scheduleAllowed = allowed;
             logger.info(allowed ? "Schedule window opened; mining." : "Outside the mining schedule; waiting.");
             this.pushFeed("info", allowed ? "Schedule window opened" : "Outside the mining schedule");
+            this.emit("status");
         }
         return allowed;
     }
@@ -571,6 +600,7 @@ export class Miner extends EventEmitter {
         this.switchRequested = true;
         logger.info("Paused by request.");
         this.pushFeed("info", "Paused");
+        this.emit("status");
     }
 
     resume(): void {
@@ -582,6 +612,7 @@ export class Miner extends EventEmitter {
         this.paused = false;
         logger.info("Resumed by request.");
         this.pushFeed("info", "Resumed");
+        this.emit("status");
     }
 
     /**
@@ -618,6 +649,11 @@ export class Miner extends EventEmitter {
         logger.info(`Deferring ${campaign.gameName} - ${campaign.name} by request.`);
         this.pushFeed("info", `Moved ${campaign.gameName} to the back of the queue`);
         return true;
+    }
+
+    /** Whether a campaign was sent to the back of the queue with Next. */
+    isDeferred(campaignId: string): boolean {
+        return this.deferredCampaigns.has(campaignId);
     }
 
     /** Put everything skipped by hand back in its usual place. */
@@ -911,6 +947,11 @@ export class Miner extends EventEmitter {
      */
     private async waitWhileIdle(totalMs: number): Promise<void> {
         const deadline = Date.now() + totalMs;
+        // What selection offered as the wait began. Only something new is worth ending the
+        // wait for: a campaign that has started, or one whose bench has run out. Ending it
+        // merely because candidates exist would re-search the same channel-less campaigns
+        // every minute, at several requests apiece.
+        const offered = new Set(this.selectCampaigns().map((campaign) => campaign.id));
         while (!this.stopping && Date.now() < deadline) {
             const slice = Math.min(IDLE_RECHECK_MS, deadline - Date.now());
             const woken = await new Promise<boolean>((resolve) => {
@@ -925,6 +966,9 @@ export class Miner extends EventEmitter {
                 };
             });
             if (woken) {
+                return;
+            }
+            if (this.selectCampaigns().some((campaign) => !offered.has(campaign.id))) {
                 return;
             }
         }
@@ -957,7 +1001,13 @@ export class Miner extends EventEmitter {
         // cleared even while mining is paused and selectCampaigns is not running.
         this.pruneCooldowns(Date.now());
         return this.getCampaigns()
-            .filter((campaign) => campaign.isActive && !campaign.isCompleted)
+            .filter(
+                // A campaign whose drops could not be fetched is not finished, but it is
+                // not work the miner can do yet either, and ranking it here would have
+                // the priority checks switching toward it.
+                (campaign) =>
+                    campaign.isActive && !campaign.isCompleted && campaign.drops.length > 0,
+            )
             .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
     }
 
@@ -1473,7 +1523,6 @@ export class Miner extends EventEmitter {
         }
         this.lastWatchedLogin = channel.login;
         this.lastProgressAt = Date.now();
-        this.countMinuteMined();
         this.lastBeatAt = null;
         this.unconfirmedBeats = 0;
         this.switchRequested = false;
@@ -1556,6 +1605,11 @@ export class Miner extends EventEmitter {
                 }
                 beatFailures = 0;
                 this.lastBeatAt = Date.now();
+                // Here, per accepted beat. Counted on entering the channel instead, the
+                // daily limit measured how often the miner switched rather than how long
+                // it watched - every claim and switch re-enters - and an hour on one
+                // streamer counted as a single minute.
+                this.countMinuteMined();
                 this.unconfirmedBeats++;
                 this.emit("beat", { at: this.lastBeatAt });
 
@@ -1603,6 +1657,10 @@ export class Miner extends EventEmitter {
                     // claim() records completion itself, for every path that claims.
                     const owner = this.currentCampaign ?? campaign;
                     await this.claim(live, owner);
+                    // Out of attempts; giveUpClaim has already said so.
+                    if (live.givenUp) {
+                        return "claim_stuck";
+                    }
                     // Either the campaign is done or the next drop needs re-selecting - unless
                     // the claim did nothing. A finished drop that stays unclaimed is picked
                     // again at once, and that is how this once turned over every six seconds
@@ -1643,6 +1701,9 @@ export class Miner extends EventEmitter {
             this.currentDrop = null;
             this.currentCampaign = null;
             this.miningSince = null;
+            // After the clearing, so a dashboard re-reading its state on this no longer
+            // finds the channel it just left.
+            this.emit("status");
         }
     }
 
@@ -1716,18 +1777,7 @@ export class Miner extends EventEmitter {
         }
         const attempts = this.claimAttempts.get(drop.id) ?? 0;
         if (attempts >= MAX_CLAIM_ATTEMPTS) {
-            // Said once, loudly, and then never again: something is wrong that this code
-            // cannot resolve, and the useful thing is a record of it rather than a retry.
-            if (!this.failedClaimIds.has(drop.id)) {
-                logger.warn(
-                    `${drop.name} (${campaign.gameName}) has been claimed ${attempts} times and ` +
-                        `Twitch still reports it as unclaimed. Giving up on it; the reward is ` +
-                        `almost certainly already on the account.`,
-                );
-                this.pushFeed("warn", `Stopped reclaiming ${drop.rewardNames || drop.name}`);
-                this.failedClaimIds.add(drop.id);
-                this.persistState();
-            }
+            this.giveUpClaim(drop, campaign, attempts);
             return;
         }
         if (this.claimedDropIds.has(drop.id) || this.failedClaimIds.has(drop.id)) {
@@ -1801,15 +1851,48 @@ export class Miner extends EventEmitter {
                 this.emit("drop-claimed", { drop, campaign });
                 this.recordCompletionIfFinished(campaign);
             } else {
-                // Almost always a drop Twitch considers ineligible rather than a transient
-                // failure, so stop asking rather than repeating it every refresh.
-                this.failedClaimIds.add(drop.id);
-                this.persistState();
-                logger.debug(`Twitch did not confirm the claim for ${drop.name}`);
+                // Not the end of it on the first refusal. One reply used to settle a drop
+                // for good - persisted, so not even a restart retried it - and a refusal
+                // that was only Twitch being slow cost the reward outright. The watch loop
+                // sets the campaign aside for a while and the next sweep asks again, up to
+                // the cap.
+                const made = attempts + 1;
+                logger.warn(
+                    `Twitch did not accept the claim for ${drop.name} (${campaign.gameName}); ` +
+                        `attempt ${made} of ${MAX_CLAIM_ATTEMPTS}.`,
+                );
+                if (made >= MAX_CLAIM_ATTEMPTS) {
+                    this.giveUpClaim(drop, campaign, made);
+                }
             }
         } catch (error) {
             logger.error(`Failed to claim ${drop.name}:`, error);
         }
+    }
+
+    /**
+     * Stop trying to claim a drop, and remember that across restarts.
+     *
+     * Said once, loudly, and then never again: something is wrong that retrying will not
+     * resolve, and the useful thing is a record of it. The drop is set aside rather than
+     * marked claimed, so nothing reports a reward the user may not have.
+     */
+    private giveUpClaim(drop: Drop, campaign: Campaign, attempts: number): void {
+        drop.givenUp = true;
+        if (this.failedClaimIds.has(drop.id)) {
+            return;
+        }
+        logger.warn(
+            `${drop.name} (${campaign.gameName}) could not be claimed after ${attempts} ` +
+                "attempts. Giving up on it; if it is still listed in your Twitch inventory, " +
+                "it can be claimed there.",
+        );
+        this.pushFeed(
+            "warn",
+            `Could not claim ${drop.rewardNames || drop.name} - claim it from your Twitch inventory`,
+        );
+        this.failedClaimIds.add(drop.id);
+        this.persistState();
     }
 
     private attachPubSubHandlers(pubsub: PubSubPool): void {
@@ -1944,9 +2027,14 @@ export class Miner extends EventEmitter {
         // interval could never change without restarting the process: editing it in
         // Settings updated the file and the countdown and left the actual cadence alone.
         const interval = () => this.config.campaignRefreshMinutes * 60_000;
+        // Which chain of ticks this is. Re-arming while a tick was mid-refresh cleared a
+        // timer that had already fired, started a second chain, and then the running tick
+        // scheduled its successor anyway - two sweeps per interval from then on.
+        const generation = ++this.refreshGeneration;
+        const current = () => !this.stopping && generation === this.refreshGeneration;
         this.nextRefreshAt = Date.now() + interval();
         const tick = async () => {
-            if (this.stopping) {
+            if (!current()) {
                 return;
             }
             try {
@@ -1960,9 +2048,12 @@ export class Miner extends EventEmitter {
             } catch (error) {
                 logger.error("Campaign refresh failed:", error);
             } finally {
-                this.nextRefreshAt = Date.now() + interval();
-                this.refreshTimer = setTimeout(tick, interval());
-                this.refreshTimer.unref();
+                // Superseded or stopped while refreshing: the chain ends here.
+                if (current()) {
+                    this.nextRefreshAt = Date.now() + interval();
+                    this.refreshTimer = setTimeout(tick, interval());
+                    this.refreshTimer.unref();
+                }
             }
         };
         this.refreshTimer = setTimeout(tick, interval());
@@ -1988,7 +2079,7 @@ export class Miner extends EventEmitter {
         const campaign = next.get(campaignId);
         const drop = campaign?.drops.find((candidate) => candidate.id === dropId);
 
-        if (!campaign || !drop || drop.isClaimed || !campaign.isActive) {
+        if (!campaign || !drop || drop.isClaimed || drop.givenUp || !campaign.isActive) {
             // Nothing left to earn here; let the loop yield at its next beat.
             this.switchRequested = true;
             return;
@@ -2339,7 +2430,46 @@ export class Miner extends EventEmitter {
         console.log(`\n${line}\nDry run complete. Nothing was watched or claimed.\n${line}\n`);
     }
 
-    private async refreshCampaigns(): Promise<void> {
+    /**
+     * Carry on without the inventory, but say so.
+     *
+     * Without it every drop reads as unstarted and nothing already earned is claimed, so a
+     * silent failure looked like progress being lost. A rotated hash or a dead token is not
+     * this kind of failure: nothing else will work either, and those go to the caller.
+     */
+    private inventoryFailed(error: unknown): null {
+        if (error instanceof StaleQueryHashError || error instanceof AuthExpiredError) {
+            throw error;
+        }
+        if (!this.inventoryFailing) {
+            this.inventoryFailing = true;
+            logger.warn(
+                `Could not read the drop inventory: ${(error as Error).message}. ` +
+                    "Progress and claims will catch up on a later refresh.",
+            );
+            this.pushFeed("warn", "Could not read your drop inventory - progress may look behind");
+        } else {
+            logger.debug("Inventory still unavailable:", error);
+        }
+        return null;
+    }
+
+    /**
+     * Refresh, or join the refresh already running.
+     *
+     * Four things start one - the timer, a campaign boundary, a reward notification and the
+     * dashboard - and they overlap. Two sweeps at once doubled the requests, let the one
+     * that finished last overwrite the other's newer answer, and both ran the claim pass
+     * over the same finished drops.
+     */
+    private refreshCampaigns(): Promise<void> {
+        this.refreshing ??= this.sweepCampaigns().finally(() => {
+            this.refreshing = null;
+        });
+        return this.refreshing;
+    }
+
+    private async sweepCampaigns(): Promise<void> {
         // Whatever this finds, the idle loop's decision was made against older data.
         // Waking is cheap and the recheck is against memory.
         this.wake();
@@ -2352,8 +2482,11 @@ export class Miner extends EventEmitter {
         logger.debug("Refreshing campaigns...");
         let [listed, inventory] = await Promise.all([
             this.gql.getCampaigns(),
-            this.gql.getInventory().catch(() => null),
+            this.gql.getInventory().catch((error: unknown) => this.inventoryFailed(error)),
         ]);
+        if (inventory) {
+            this.inventoryFailing = false;
+        }
 
         // A login made with the TV client is shown an empty dashboard - the only kind of
         // login Twitch still issues. The public catalogue supplies the campaigns and their
@@ -2389,7 +2522,8 @@ export class Miner extends EventEmitter {
                     continue;
                 }
             }
-            next.set(data.id, new Campaign(data));
+            // Not detailed: the list carries no drops, and they are fetched below.
+            next.set(data.id, new Campaign(data, false));
             this.randomKeys.set(data.id, Math.random());
         }
 
@@ -2432,6 +2566,22 @@ export class Miner extends EventEmitter {
         let abandoned = false;
 
         /**
+         * Hold on to what the last sweep knew when this one could not fetch a campaign.
+         *
+         * A failed request left the campaign with no drops, so one bad response took a
+         * campaign out of the queue - and, if it was the one being watched, pulled the
+         * miner off a channel that was earning. Its drops from twenty minutes ago are far
+         * closer to the truth than none; the inventory below brings their progress up to
+         * date regardless.
+         */
+        const keepPrevious = (id: string): void => {
+            const previous = this.campaigns.get(id);
+            if (previous?.detailed && previous.drops.length > 0) {
+                next.set(id, previous);
+            }
+        };
+
+        /**
          * One worker takes the next campaign until there are none left.
          *
          * A few at a time rather than one: the list is fetched in rank order, so the
@@ -2467,9 +2617,11 @@ export class Miner extends EventEmitter {
                         // without its drops the campaign counts as finished and is quietly
                         // never mined. Counting it here is what lets the warning below fire.
                         failures += 1;
+                        keepPrevious(campaign.id);
                     }
                 } catch (error) {
                     failures += 1;
+                    keepPrevious(campaign.id);
                     logger.debug(`Could not fetch details for ${campaign.name}:`, error);
                 }
 
@@ -2592,6 +2744,12 @@ export class Miner extends EventEmitter {
             if (!campaign) {
                 continue;
             }
+            // Including whether the account is linked. A campaign from the public catalogue
+            // knows nothing about this account and carries no `self`, which reads as linked;
+            // the inventory is the one place Twitch still says, for anything in progress.
+            if (inProgress.self) {
+                campaign.data.self = inProgress.self;
+            }
             for (const entry of inProgress.timeBasedDrops ?? []) {
                 const drop = campaign.drops.find((candidate) => candidate.id === entry.id);
                 if (drop && entry.self) {
@@ -2622,7 +2780,9 @@ export class Miner extends EventEmitter {
         // After the inventory read, so nothing it says can put a known claim back.
         const settled = applyKnownClaims(next.values(), this.confirmedClaimIds, this.failedClaimIds);
         if (settled > 0) {
-            logger.debug(`Treating ${settled} drop${settled === 1 ? "" : "s"} as claimed, as recorded.`);
+            logger.debug(
+                `Treating ${settled} drop${settled === 1 ? "" : "s"} as claimed or given up, as recorded.`,
+            );
         }
 
         this.checkForForeignSession(next);
@@ -2637,7 +2797,7 @@ export class Miner extends EventEmitter {
         this.warnAboutExpiringUnlinked();
         await this.syncWatchlist();
         const mineable = [...next.values()].filter(
-            (campaign) => campaign.isActive && !campaign.isCompleted,
+            (campaign) => campaign.isActive && !campaign.isCompleted && campaign.drops.length > 0,
         );
         // A filter that silently discards work is hard to trust, so say how much it took.
         const outOfScope = mineable.filter((campaign) => !this.isInLibraryScope(campaign)).length;

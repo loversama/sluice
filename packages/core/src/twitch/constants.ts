@@ -135,7 +135,9 @@ export const QUERIES = {
     /** All drop campaigns visible to the account, active and upcoming. */
     campaigns: {
         operationName: "ViewerDropsDashboard",
-        sha256: "d9cae7761dafab85908c85e6683cb4201b449e66ac3bb5e894f15ff12aeafaa7",
+        // Upstream's current hash. Twitch still accepts the previous one
+        // (d9cae776...), but it is the one that will be retired first.
+        sha256: "c16bb890cc8ce7647a96ee69cd313d423a378a3dedadf630a1017cde18975feb",
         variables: { fetchRewardCampaigns: false },
     },
     /** Full detail for one campaign, including its drops and channel allow-list. */

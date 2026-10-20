@@ -93,6 +93,9 @@ export function createApp(options: AppOptions): AppHandle {
     // Sessions come and go; these do not. Rebuilding AuthState would regenerate the pinned
     // device ID and user agent, which Twitch reads as a different device on every sign-in.
     const auth = new AuthState();
+    // Twitch spends the refresh token on use, so a refreshed pair that is not written
+    // down is lost at the next restart.
+    auth.onRefreshed = () => auth.save(authPath);
     const gqlForSearch = new TwitchGql(auth);
     // Box art for games that have no campaign running. Kept at the data root rather than
     // per user: which poster Twitch uses for a game is not anybody's private business.
@@ -255,7 +258,11 @@ export function createApp(options: AppOptions): AppHandle {
             void gameArt.ensure(next.priorityGames);
             if (miner) {
                 bus.emit("campaigns", {
-                    campaigns: miner.getCampaigns().map((c) => serializeCampaign(c, next, miner?.ownsPredicate ?? null)),
+                    campaigns: miner
+                        .getCampaigns()
+                        .map((c) =>
+                            serializeCampaign(c, next, miner?.ownsPredicate ?? null, miner?.isDeferred(c.id)),
+                        ),
                     queue: miner.getMineableCampaigns().map((c) => c.id),
                 });
             }
@@ -363,7 +370,10 @@ export function createApp(options: AppOptions): AppHandle {
         deviceCode = null;
 
         const restored = forceLogin ? false : await auth.load(authPath);
-        if (!restored || !(await auth.validate())) {
+        // An expired access token is not a lost session: the refresh token usually still
+        // works, and trying it first spares the user a device-code login.
+        const valid = restored && ((await auth.validate()) || (await auth.refresh()));
+        if (!valid) {
             if (restored) {
                 logger.warn("Stored credentials are no longer valid; logging in again.");
             }
@@ -445,16 +455,19 @@ export function createApp(options: AppOptions): AppHandle {
             return false;
         }
 
-        authStatus = "ok";
-        deviceCode = null;
-        bus.emit("auth", { status: "ok", user: { id: auth.userId, displayName: auth.login } });
-
         const gql = new TwitchGql(auth);
         // A fresh Miner every session: its `stopping` latch is one-way by design.
         miner = new Miner(auth, gql, config);
         await miner.loadPersistedState(paths.state);
         await miner.loadClaimHistory(paths.claims);
         miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
+
+        // Only now, with the session's miner built and its history loaded. The dashboard
+        // re-reads its state on this event, and announced any earlier it got the previous
+        // session's miner, or this one with no claims in it yet.
+        authStatus = "ok";
+        deviceCode = null;
+        bus.emit("auth", { status: "ok", user: { id: auth.userId, displayName: auth.login } });
 
         if (config.steam.steamId) {
             const ageHours = (Date.now() - steamLibrary.fetchedAt) / 3_600_000;
@@ -473,7 +486,7 @@ export function createApp(options: AppOptions): AppHandle {
         unwire = wireMinerToBus({
             miner,
             bus,
-            notifier,
+            getNotifier: () => notifier,
             getConfig: () => config,
         });
         return true;
@@ -521,6 +534,10 @@ export function createApp(options: AppOptions): AppHandle {
             problem("warn", "generic", (error as Error).message);
             return "crashed";
         } finally {
+            // A session that crashed or was signed out of is over, but its miner may still
+            // hold a PubSub connection and timers. Unwiring only silenced it; left running,
+            // each crash leaked another live socket for the life of the process.
+            active.stop();
             unwire?.();
             unwire = null;
             logoutRequested = null;
