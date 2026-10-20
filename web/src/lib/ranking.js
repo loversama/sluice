@@ -114,3 +114,27 @@ export function reorderPriorityGames(queue, priorityGames, movedIndex) {
 export function priorityGameBelow(queue, priorityGames, movedIndex) {
     return (queue ?? []).slice(movedIndex + 1).some((item) => isListed(priorityGames, item));
 }
+
+/** A row the policy will pass over - outside the library policy, or excluded by hand. */
+export function isDimmed(item) {
+    return item?.inLibraryScope === false || Boolean(item?.isExcluded);
+}
+
+/**
+ * Why a drag to `movedIndex` cannot hold, or null if it can.
+ *
+ * The daemon sorts two kinds of row behind everything else whatever order is stored:
+ * campaigns sent back with Next, and campaigns it will not mine at all. Moving one of those,
+ * or dropping anything beneath them, is re-ranked straight back a couple of seconds later -
+ * the same snap-back the priority drag had - so it is refused up front instead.
+ *
+ * @returns {"dimmed"|"deferred"|"below"|null}
+ */
+export function dragRefusal(queue, movedIndex) {
+    const moved = queue?.[movedIndex];
+    if (!moved) return null;
+    if (isDimmed(moved)) return "dimmed";
+    if (moved.isDeferred) return "deferred";
+    if (queue.slice(0, movedIndex).some((item) => isDimmed(item) || item?.isDeferred)) return "below";
+    return null;
+}

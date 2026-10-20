@@ -3,7 +3,25 @@ import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
 import { useGameLists } from "@/composables/useGameLists.js";
-import { orderDraggedGame, priorityGameBelow, reorderPriorityGames } from "@/lib/ranking.js";
+import {
+    dragRefusal,
+    orderDraggedGame,
+    priorityGameBelow,
+    reorderPriorityGames,
+} from "@/lib/ranking.js";
+
+/** What to say when a drag cannot hold - see dragRefusal. */
+const REFUSALS = {
+    dimmed: (item) =>
+        `${item.game.name} won't be mined - ${
+            item.isExcluded ? "it's on your excluded list" : "it's outside your library policy"
+        } - so it stays at the bottom.`,
+    deferred: (item) =>
+        `${item.game.name} was skipped with Next, so it waits at the back. ` +
+        "Put it back from the Priorities page.",
+    below: () =>
+        "Everything below that point is skipped or won't be mined, so nothing can be ranked under it.",
+};
 
 /**
  * Dragging the queue into a different order, from either layout.
@@ -58,6 +76,13 @@ export function useQueueOrder() {
 
         const movedIndex = event?.newIndex ?? event?.newDraggableIndex;
         if (movedIndex === undefined || movedIndex === null) {
+            order.value = [...store.upNext];
+            return;
+        }
+
+        const refusal = dragRefusal(order.value, movedIndex);
+        if (refusal) {
+            ElMessage.info(REFUSALS[refusal](order.value[movedIndex]));
             order.value = [...store.upNext];
             return;
         }

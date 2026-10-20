@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error - plain JS module shared with the dashboard build.
-import { priorityGameBelow, reorderPriorityGames } from "../web/src/lib/ranking.js";
+import { dragRefusal, priorityGameBelow, reorderPriorityGames } from "../web/src/lib/ranking.js";
 import { Campaign, compareCampaigns } from "../packages/core/src/models/campaign.js";
 
 const row = (game: string, id = game) => ({ id: `${id}-c`, game: { name: game, id } });
@@ -85,5 +85,41 @@ describe("priorityGameBelow", () => {
     it("spots a non-priority game dropped above a priority one", () => {
         expect(priorityGameBelow([row("Rust"), row("Warframe")], ["Warframe"], 0)).toBe(true);
         expect(priorityGameBelow([row("Warframe"), row("Rust")], ["Warframe"], 1)).toBe(false);
+    });
+});
+
+/**
+ * Campaigns sent back with Next, and ones the policy will not mine, sort behind everything
+ * whatever order is stored. Dragging one - or dropping anything beneath them - was saved and
+ * then re-ranked straight back, so those drags are refused with a reason instead.
+ */
+describe("dragRefusal", () => {
+    const mined = (game: string) => ({ ...row(game), inLibraryScope: true, isExcluded: false });
+    const deferred = (game: string) => ({ ...mined(game), isDeferred: true });
+    const dimmed = (game: string) => ({ ...mined(game), inLibraryScope: false });
+    const excluded = (game: string) => ({ ...mined(game), isExcluded: true });
+
+    it("lets an ordinary row move among ordinary rows", () => {
+        const queue = [mined("Apex"), mined("Rust"), deferred("Dota 2")];
+        expect(dragRefusal(queue, 0)).toBeNull();
+        expect(dragRefusal(queue, 1)).toBeNull();
+    });
+
+    it("refuses moving a row that will not be mined", () => {
+        expect(dragRefusal([dimmed("Apex"), mined("Rust")], 0)).toBe("dimmed");
+        expect(dragRefusal([excluded("Apex"), mined("Rust")], 0)).toBe("dimmed");
+    });
+
+    it("refuses moving a campaign skipped with Next", () => {
+        expect(dragRefusal([deferred("Dota 2"), mined("Rust")], 0)).toBe("deferred");
+    });
+
+    it("refuses dropping a row beneath skipped or unmined ones", () => {
+        expect(dragRefusal([mined("Rust"), deferred("Dota 2"), mined("Apex")], 2)).toBe("below");
+        expect(dragRefusal([mined("Rust"), dimmed("Dota 2"), mined("Apex")], 2)).toBe("below");
+    });
+
+    it("treats rows from before the daemon reported these flags as ordinary", () => {
+        expect(dragRefusal([row("Rust"), row("Apex")], 1)).toBeNull();
     });
 });
