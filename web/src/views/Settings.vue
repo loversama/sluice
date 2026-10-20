@@ -498,6 +498,13 @@ async function disconnectSteam() {
  * environment check, nothing to keep in sync.
  */
 const desktop = window.desktopBridge ?? null;
+
+/**
+ * The desktop app also runs on Linux, where there is no "Windows" to start with and a tray
+ * is up to the desktop environment. A bridge too old to say which platform it is on is a
+ * Windows build, since that was the only one.
+ */
+const onWindows = (desktop?.platform ?? "win32") === "win32";
 const desktopSettings = ref({ runAtLogin: false, closeToTray: true });
 const desktopVersion = ref("");
 const importing = ref(false);
@@ -1516,10 +1523,10 @@ const inputStyle = {
 
             <label class="flex items-center justify-between gap-4">
                 <span>
-                    <span class="text-[13px]">Start with Windows</span>
+                    <span class="text-[13px]">{{ onWindows ? "Start with Windows" : "Start at login" }}</span>
                     <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
-                        Starts hidden in the tray, so mining resumes without a window
-                        appearing.
+                        Starts hidden{{ onWindows ? " in the tray" : "" }}, so mining resumes
+                        without a window appearing.
                     </span>
                 </span>
                 <el-switch
@@ -1530,7 +1537,7 @@ const inputStyle = {
 
             <label class="flex items-center justify-between gap-4">
                 <span>
-                    <span class="text-[13px]">Close to tray</span>
+                    <span class="text-[13px]">{{ onWindows ? "Close to tray" : "Keep running when closed" }}</span>
                     <span class="block text-[11px]" :style="{ color: 'var(--text-2)' }">
                         Closing the window keeps mining. Turn this off and the close button
                         quits instead.
