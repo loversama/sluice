@@ -114,7 +114,15 @@ export class Drop {
 export class Campaign {
     readonly drops: Drop[];
 
-    constructor(readonly data: DropCampaign) {
+    /**
+     * @param detailed Whether `data` came with the campaign's drops. The campaign list
+     * carries none, so a campaign built from it alone has an empty drop list that says
+     * nothing about whether it has drops - see {@link isCompleted}.
+     */
+    constructor(
+        readonly data: DropCampaign,
+        readonly detailed = true,
+    ) {
         this.drops = (data.timeBasedDrops ?? []).map((drop) => new Drop(drop, this));
     }
 
@@ -251,6 +259,13 @@ export class Campaign {
     }
 
     get isCompleted(): boolean {
+        // No drops because none were ever fetched is not the same as no drops. Read as
+        // "every drop claimed", a failed details request hid a campaign as finished and
+        // pulled the miner off it mid-watch. Not mineable either way: with nothing to
+        // work toward, nextDrop() has nothing to offer.
+        if (this.drops.length === 0 && !this.detailed) {
+            return false;
+        }
         // Drops that need no watch time are not ours to finish, so they must not hold a
         // campaign open indefinitely either.
         return this.drops.every(

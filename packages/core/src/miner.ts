@@ -959,7 +959,13 @@ export class Miner extends EventEmitter {
         // cleared even while mining is paused and selectCampaigns is not running.
         this.pruneCooldowns(Date.now());
         return this.getCampaigns()
-            .filter((campaign) => campaign.isActive && !campaign.isCompleted)
+            .filter(
+                // A campaign whose drops could not be fetched is not finished, but it is
+                // not work the miner can do yet either, and ranking it here would have
+                // the priority checks switching toward it.
+                (campaign) =>
+                    campaign.isActive && !campaign.isCompleted && campaign.drops.length > 0,
+            )
             .sort((a, b) => compareCampaigns(a, b, this.rankingOptions()));
     }
 
@@ -2418,7 +2424,8 @@ export class Miner extends EventEmitter {
                     continue;
                 }
             }
-            next.set(data.id, new Campaign(data));
+            // Not detailed: the list carries no drops, and they are fetched below.
+            next.set(data.id, new Campaign(data, false));
             this.randomKeys.set(data.id, Math.random());
         }
 
@@ -2461,6 +2468,22 @@ export class Miner extends EventEmitter {
         let abandoned = false;
 
         /**
+         * Hold on to what the last sweep knew when this one could not fetch a campaign.
+         *
+         * A failed request left the campaign with no drops, so one bad response took a
+         * campaign out of the queue - and, if it was the one being watched, pulled the
+         * miner off a channel that was earning. Its drops from twenty minutes ago are far
+         * closer to the truth than none; the inventory below brings their progress up to
+         * date regardless.
+         */
+        const keepPrevious = (id: string): void => {
+            const previous = this.campaigns.get(id);
+            if (previous?.detailed && previous.drops.length > 0) {
+                next.set(id, previous);
+            }
+        };
+
+        /**
          * One worker takes the next campaign until there are none left.
          *
          * A few at a time rather than one: the list is fetched in rank order, so the
@@ -2496,9 +2519,11 @@ export class Miner extends EventEmitter {
                         // without its drops the campaign counts as finished and is quietly
                         // never mined. Counting it here is what lets the warning below fire.
                         failures += 1;
+                        keepPrevious(campaign.id);
                     }
                 } catch (error) {
                     failures += 1;
+                    keepPrevious(campaign.id);
                     logger.debug(`Could not fetch details for ${campaign.name}:`, error);
                 }
 
@@ -2666,7 +2691,7 @@ export class Miner extends EventEmitter {
         this.warnAboutExpiringUnlinked();
         await this.syncWatchlist();
         const mineable = [...next.values()].filter(
-            (campaign) => campaign.isActive && !campaign.isCompleted,
+            (campaign) => campaign.isActive && !campaign.isCompleted && campaign.drops.length > 0,
         );
         // A filter that silently discards work is hard to trust, so say how much it took.
         const outOfScope = mineable.filter((campaign) => !this.isInLibraryScope(campaign)).length;

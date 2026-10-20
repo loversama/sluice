@@ -114,3 +114,65 @@ describe("reading the inventory", () => {
         }
     });
 });
+
+describe("a campaign whose details could not be fetched", () => {
+    /** The campaign list as Twitch sends it: no drops. */
+    const listing = (id: string) => makeCampaign({ id, timeBasedDrops: undefined });
+
+    it("keeps the drops the previous sweep found", async () => {
+        const gql = new FakeGql();
+        gql.listed = [listing("c")];
+        gql.details = async (id) => makeCampaign({ id });
+        const miner = makeMiner(gql);
+        await miner.refreshNow();
+
+        gql.details = async () => {
+            throw new GqlError("DropCampaignDetails failed after 4 attempts");
+        };
+        await miner.refreshNow();
+
+        const [campaign] = miner.getCampaigns();
+        expect(campaign!.drops.map((drop) => drop.id)).toEqual(["c-d1"]);
+        expect(campaign!.isCompleted).toBe(false);
+        expect(miner.getMineableCampaigns().map((c) => c.id)).toEqual(["c"]);
+    });
+
+    it("does the same when Twitch answers with no campaign", async () => {
+        const gql = new FakeGql();
+        gql.listed = [listing("c")];
+        gql.details = async (id) => makeCampaign({ id });
+        const miner = makeMiner(gql);
+        await miner.refreshNow();
+
+        gql.details = async () => null;
+        await miner.refreshNow();
+
+        expect(miner.getCampaigns()[0]!.drops).toHaveLength(1);
+    });
+
+    it("is not shown as finished when it was never fetched at all", async () => {
+        const gql = new FakeGql();
+        gql.listed = [listing("c")];
+        gql.details = async () => null;
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+
+        const [campaign] = miner.getCampaigns();
+        expect(campaign!.isCompleted).toBe(false);
+        // Nor offered as work: there is nothing in it to watch for yet.
+        expect(miner.getMineableCampaigns()).toEqual([]);
+    });
+
+    it("still counts as finished when its details really list no drops", async () => {
+        const gql = new FakeGql();
+        gql.listed = [listing("c")];
+        gql.details = async (id) => makeCampaign({ id, drops: [] });
+        const miner = makeMiner(gql);
+
+        await miner.refreshNow();
+
+        expect(miner.getCampaigns()[0]!.isCompleted).toBe(true);
+        expect(miner.getMineableCampaigns()).toEqual([]);
+    });
+});
