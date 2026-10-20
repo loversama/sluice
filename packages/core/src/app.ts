@@ -445,16 +445,19 @@ export function createApp(options: AppOptions): AppHandle {
             return false;
         }
 
-        authStatus = "ok";
-        deviceCode = null;
-        bus.emit("auth", { status: "ok", user: { id: auth.userId, displayName: auth.login } });
-
         const gql = new TwitchGql(auth);
         // A fresh Miner every session: its `stopping` latch is one-way by design.
         miner = new Miner(auth, gql, config);
         await miner.loadPersistedState(paths.state);
         await miner.loadClaimHistory(paths.claims);
         miner.setSteamLibrary(steamLibrary.isLoaded ? steamLibrary : null);
+
+        // Only now, with the session's miner built and its history loaded. The dashboard
+        // re-reads its state on this event, and announced any earlier it got the previous
+        // session's miner, or this one with no claims in it yet.
+        authStatus = "ok";
+        deviceCode = null;
+        bus.emit("auth", { status: "ok", user: { id: auth.userId, displayName: auth.login } });
 
         if (config.steam.steamId) {
             const ageHours = (Date.now() - steamLibrary.fetchedAt) / 3_600_000;

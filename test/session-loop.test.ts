@@ -14,12 +14,17 @@ let nextStart: StartBehaviour = () => new Promise<void>(() => {});
 
 class FakeMiner extends EventEmitter {
     stopped = false;
+    loaded = { state: false, claims: false };
     constructor() {
         super();
         minersBuilt.push(this);
     }
-    async loadPersistedState(): Promise<void> {}
-    async loadClaimHistory(): Promise<void> {}
+    async loadPersistedState(): Promise<void> {
+        this.loaded.state = true;
+    }
+    async loadClaimHistory(): Promise<void> {
+        this.loaded.claims = true;
+    }
     setSteamLibrary(): void {}
     applyConfig(): void {}
     getCampaigns(): unknown[] {
@@ -134,6 +139,25 @@ describe("the session loop", () => {
         await until(() => minersBuilt.length === 1, "the first miner");
 
         expect(app.context.getAuthStatus()).toBe("ok");
+        await app.stop();
+    });
+
+    it("reports itself signed in only once the session's miner is ready", async () => {
+        // The dashboard re-reads its state on this event. Sent earlier, that read found the
+        // previous session's miner, or this one with its claim history not loaded yet.
+        const app = await makeApp();
+        const seen: { miner: unknown; loaded: FakeMiner["loaded"] | null }[] = [];
+        app.bus.on("auth", (payload: { status: string }) => {
+            if (payload.status !== "ok") return;
+            const miner = app.context.getMiner() as unknown as FakeMiner | null;
+            seen.push({ miner, loaded: miner ? { ...miner.loaded } : null });
+        });
+
+        app.start();
+        await until(() => seen.length === 1, "the signed-in event");
+
+        expect(seen[0]!.miner).toBe(minersBuilt[0]);
+        expect(seen[0]!.loaded).toEqual({ state: true, claims: true });
         await app.stop();
     });
 
