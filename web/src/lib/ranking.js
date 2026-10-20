@@ -63,13 +63,18 @@ export function orderDraggedGame(queue, existing, movedIndex) {
     return [...without.slice(0, insertAt), game, ...without.slice(insertAt)];
 }
 
+/**
+ * Whether a list entry names `game` ({ name, id }), the way the daemon matches them: by name
+ * ignoring case, or by Twitch game ID. A bare string is taken as a name.
+ */
+export function matchesGame(entry, game) {
+    const { name, id } = typeof game === "string" ? { name: game, id: null } : (game ?? {});
+    return Boolean((name && sameName(entry, name)) || (id && String(entry) === String(id)));
+}
+
 /** Whether a queue row's game is on `list`, by name or by game ID - the list allows both. */
 export function isListed(list, item) {
-    const name = item?.game?.name;
-    const id = item?.game?.id;
-    return (list ?? []).some(
-        (entry) => (name && sameName(entry, name)) || (id && String(entry) === String(id)),
-    );
+    return (list ?? []).some((entry) => matchesGame(entry, item?.game));
 }
 
 /**

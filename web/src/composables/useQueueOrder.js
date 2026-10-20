@@ -1,7 +1,8 @@
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { onUnmounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { useMinerStore } from "@/stores/miner.js";
+import { useGameLists } from "@/composables/useGameLists.js";
 import { orderDraggedGame, priorityGameBelow, reorderPriorityGames } from "@/lib/ranking.js";
 
 /**
@@ -14,6 +15,7 @@ import { orderDraggedGame, priorityGameBelow, reorderPriorityGames } from "@/lib
  */
 export function useQueueOrder() {
     const store = useMinerStore();
+    const lists = useGameLists();
 
     /** A local copy of the queue, so a drag has something to write to. */
     const order = ref([]);
@@ -32,11 +34,6 @@ export function useQueueOrder() {
         },
         { immediate: true },
     );
-
-    onMounted(() => {
-        // The reorder rule reads the existing priority list, so it has to be loaded.
-        if (!store.config) store.loadConfig().catch(() => {});
-    });
 
     onUnmounted(() => clearTimeout(settleTimer));
 
@@ -85,10 +82,7 @@ export function useQueueOrder() {
             : { queueOrder: orderDraggedGame(order.value, existing, movedIndex) };
 
         try {
-            await store.saveConfig(patch);
-        } catch (error) {
-            ElMessage.error(error.message);
-            order.value = [...store.upNext];
+            if (!(await lists.save(patch))) order.value = [...store.upNext];
         } finally {
             saving.value = false;
             // Let the daemon re-rank and push before trusting its order again.
