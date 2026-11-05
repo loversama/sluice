@@ -16,7 +16,7 @@ import type { DropCampaign } from "./types.js";
  * Nothing about the account is sent: no token, no cookies, no user ID. It is the same
  * fallback DevilXD/TwitchDropsMiner PR #1180 uses.
  */
-export const CATALOGUE_URL = "https://twitch-drops-api.sunkwi.com/v2/drops";
+export const CATALOGUE_URL = "https://drops.sunkwi.com/api/twitch/drops";
 
 /** How stale the catalogue may be before it is ignored rather than trusted. */
 const MAX_AGE_MS = 6 * 60 * 60_000;
@@ -29,9 +29,8 @@ interface CatalogueGame {
 }
 
 interface CatalogueResponse {
-    lastUpdatedAt: string;
-    refreshIntervalSeconds: number;
-    data: CatalogueGame[];
+    refreshedAt: string | null;
+    games: CatalogueGame[];
 }
 
 /**
@@ -42,7 +41,7 @@ interface CatalogueResponse {
  */
 export function campaignsFromCatalogue(body: CatalogueResponse, now = Date.now()): DropCampaign[] {
     const campaigns: DropCampaign[] = [];
-    for (const game of body.data ?? []) {
+    for (const game of body.games ?? []) {
         for (const campaign of game.rewards ?? []) {
             if (!campaign?.id || !campaign.game?.id) {
                 continue;
@@ -80,7 +79,7 @@ export async function fetchCatalogue(): Promise<DropCampaign[]> {
             return [];
         }
         const body = (await response.body.json()) as CatalogueResponse;
-        const age = Date.now() - new Date(body.lastUpdatedAt).getTime();
+        const age = Date.now() - new Date(body.refreshedAt ?? 0).getTime();
         if (!(age < MAX_AGE_MS)) {
             logger.warn("The public drops catalogue has not updated in hours; ignoring it.");
             return [];
