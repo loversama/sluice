@@ -18,9 +18,8 @@ function reward(id: string, endAt: string, extra: Record<string, unknown> = {}) 
 }
 
 const body = (rewards: unknown[]) => ({
-    lastUpdatedAt: "2026-10-14T19:59:00Z",
-    refreshIntervalSeconds: 60,
-    data: [
+    refreshedAt: "2026-10-14T19:59:00Z",
+    games: [
         {
             gameId: "66170",
             gameDisplayName: "Warframe",
